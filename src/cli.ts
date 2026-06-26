@@ -1,22 +1,22 @@
 #!/usr/bin/env bun
-import { loadConfig } from './config'
-import { fetchIssue } from './linear'
+import { dispatch } from './dispatch'
+import { fetchByStates, fetchIssue } from './linear'
 import { have } from './proc'
-import { initState, listRuns } from './state'
-import { getWorker } from './worker'
+import { resolveRuntime } from './runtime'
 import { start } from './orchestrator'
+import { getWorker } from './worker'
 
-const HELP = `bunion — a Bun/TS port of OpenAI's Symphony. Point it at a repo + Linear project and it ships simple tickets.
+const HELP = `bunion — a Bun/TS port of OpenAI's Symphony. Point it at a repo + a Linear board and it ships simple tickets.
 
 usage:
-  bunion start                    run the daemon: poll Linear → ship eligible tickets
-  bunion run <BEV-123> [opts]     run one ticket now
+  bunion start                    run the daemon: poll the ready states → ship → review/escalate
+  bunion run <BEV-123> [opts]     claim + run one ticket now
        --dry                      prepare the worktree, skip the agent (smoke test wiring)
        --exedev                   use the exe.dev per-VM worker instead of local
-  bunion status                   recent runs from the local state db
+  bunion status                   live board: how many tickets in each bunion state
   bunion doctor                   check required tools + env
 
-config lives in .env — see .env.example`
+the gate is a Linear column: drop a ticket into a ready state and bunion takes it. config lives in .env.`
 
 async function main(): Promise<void> {
   const [cmd, ...rest] = process.argv.slice(2)
@@ -30,20 +30,22 @@ async function main(): Promise<void> {
       if (!id) throw new Error('usage: bunion run <BEV-123> [--dry] [--exedev]')
       if (rest.includes('--dry')) process.env.DRY_RUN = '1'
       if (rest.includes('--exedev')) process.env.PROVIDER = 'exedev'
-      const cfg = loadConfig()
-      initState(cfg.stateDb)
-      const r = await getWorker(cfg).run(await fetchIssue(cfg, id))
-      console.log(JSON.stringify(r, null, 2))
-      process.exit(r.ok ? 0 : 1)
+      const rt = await resolveRuntime()
+      await dispatch(rt, getWorker(rt), await fetchIssue(rt.cfg, id))
+      return
     }
 
     case 'status': {
-      const cfg = loadConfig()
-      initState(cfg.stateDb)
-      const runs = listRuns()
-      if (runs.length === 0) console.log('(no runs yet)')
-      for (const r of runs) {
-        console.log(`${r.identifier.padEnd(12)} ${r.status.padEnd(10)} ${r.prUrl ?? r.detail ?? ''}`)
+      const rt = await resolveRuntime()
+      const roles: [string, string[]][] = [
+        ['ready', rt.states.ready],
+        ['working', [rt.states.working]],
+        ['in review', [rt.states.review]],
+        ['needs human', [rt.states.escalate]],
+      ]
+      for (const [label, ids] of roles) {
+        const issues = await fetchByStates(rt.cfg, ids)
+        console.log(`${label.padEnd(12)} ${String(issues.length).padStart(2)}  ${issues.map((i) => i.identifier).join(' ')}`)
       }
       return
     }

@@ -4,6 +4,8 @@ import { exec } from './proc'
 import type { Config } from './config'
 import type { Issue } from './types'
 
+const LABEL = 'bunion' // every bunion PR gets this label so you can filter them on GitHub
+
 export interface Workspace {
   dir: string
   branch: string
@@ -45,7 +47,7 @@ export function publish(cfg: Config, ws: Workspace, issue: Issue): string {
   ensureLabel(cfg)
   const pr = exec(
     'gh',
-    ['pr', 'create', '--repo', cfg.slug, '--head', ws.branch, '--base', cfg.baseBranch, '--title', title, '--body', body(issue), '--label', cfg.label],
+    ['pr', 'create', '--repo', cfg.slug, '--head', ws.branch, '--base', cfg.baseBranch, '--title', title, '--body', body(issue), '--label', LABEL],
     { cwd: ws.dir },
   )
   if (!pr.ok) throw new Error(`pr create failed: ${tail(pr.combined)}`)
@@ -59,7 +61,7 @@ export function cleanup(ws: Workspace): void {
 // gh hard-errors on `pr create --label` if the label doesn't exist on the repo — and that would fail only AFTER a
 // full agent run + push. Create it idempotently first; gh exits non-zero if it already exists, which we ignore.
 function ensureLabel(cfg: Config): void {
-  exec('gh', ['label', 'create', cfg.label, '--repo', cfg.slug, '--color', 'BFD4F2', '--description', 'autonomous PR (bunion)'])
+  exec('gh', ['label', 'create', LABEL, '--repo', cfg.slug, '--color', 'BFD4F2', '--description', 'autonomous PR (bunion)'])
 }
 
 function body(issue: Issue): string {

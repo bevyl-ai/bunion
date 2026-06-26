@@ -8,17 +8,15 @@ export interface Config {
   // linear
   linearApiKey: string
   linearTeam: string // team key, e.g. BEV
-  label: string
-  // policy
+  // states — the board IS the config. Names as they appear in Linear; resolved to ids at startup.
+  readyStates: string[] // any of these triggers a pickup (e.g. "Bunion ready", "Rework")
+  workingState: string // moved here while the agent runs — the claim
+  reviewState: string // moved here when the PR is open
+  escalateState: string // moved here when the agent declines or errors
+  // run
   pollMs: number
   maxConcurrent: number
-  maxEstimate: number
-  allowlist: string[]
-  carveOuts: string[]
-  autoMerge: string[] // components allowed to auto-merge; [] = always human
-  backpressure: string[] // commands run in the worktree before opening a PR
-  maxAttempts: number // failed runs retry up to this many times before a terminal failure
-  retryBackoffMs: number // base delay between retries (grows exponentially per attempt)
+  backpressure: string[] // commands run in the worktree before opening a PR; ';'-separated
   // agent
   codexEffort: string
   codexModel: string | null
@@ -26,7 +24,6 @@ export interface Config {
   codexTimeoutMs: number
   // paths
   workdir: string
-  stateDb: string
   workflowPath: string
 }
 
@@ -61,22 +58,18 @@ export function loadConfig(): Config {
     baseBranch: process.env.BASE_BRANCH ?? 'main',
     linearApiKey: req('LINEAR_API_KEY'),
     linearTeam: req('LINEAR_TEAM'),
-    label: process.env.FACTORY_LABEL ?? 'factory',
+    readyStates: list('READY_STATES', ['Bunion ready']),
+    workingState: process.env.WORKING_STATE ?? 'Bunion working',
+    reviewState: process.env.REVIEW_STATE ?? 'In review',
+    escalateState: process.env.ESCALATE_STATE ?? 'Needs human',
     pollMs: num('POLL_MS', 15_000),
     maxConcurrent: num('MAX_CONCURRENT', 3),
-    maxEstimate: num('MAX_ESTIMATE', 2),
-    allowlist: list('ALLOWLIST', ['copy', 'marketing', 'glossary', 'docs']),
-    carveOuts: list('CARVE_OUTS', ['auth', 'billing', 'migrations', 'rls', 'secrets', 'infra']),
-    autoMerge: list('AUTO_MERGE', []),
     backpressure: list('BACKPRESSURE', ['bun run typecheck'], ';'),
-    maxAttempts: num('MAX_ATTEMPTS', 3),
-    retryBackoffMs: num('RETRY_BACKOFF_MS', 30_000),
     codexEffort: process.env.CODEX_EFFORT ?? 'high',
     codexModel: process.env.CODEX_MODEL || null,
     codexProvider: process.env.CODEX_PROVIDER || null,
     codexTimeoutMs: num('CODEX_TIMEOUT_MS', 1_800_000),
     workdir: process.env.WORKDIR || join(home, 'work'),
-    stateDb: process.env.STATE_DB || join(home, 'bunion.db'),
     workflowPath: process.env.WORKFLOW_PATH || join(process.cwd(), 'workflow.md'),
   }
 }

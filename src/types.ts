@@ -1,29 +1,33 @@
-export type IssueState = 'triage' | 'backlog' | 'todo' | 'started' | 'done' | 'canceled'
+import type { Config } from './config'
 
 export interface Issue {
   id: string // Linear internal id (used for mutations + state re-reads)
   identifier: string // e.g. BEV-1234
   title: string
   description: string
-  estimate: number | null
-  priority: number // Linear: 0=none, 1=urgent … 4=low
-  createdAt: string // ISO; used for deterministic dispatch ordering
-  labels: string[]
-  component: string | null // derived from the `area:<x>` label
-  blocked: boolean // has a non-terminal "blocks" dependency
   url: string
+  comments: string[] // recent human/review comments — the feedback channel for re-runs
 }
 
-export type Verdict = { ok: true } | { ok: false; reason: string }
+export interface ResolvedStates {
+  ready: string[] // state ids that trigger a pickup
+  working: string
+  review: string
+  escalate: string
+}
+
+// Everything the daemon and the runner need, resolved once at startup.
+export interface Runtime {
+  cfg: Config
+  states: ResolvedStates
+}
 
 export interface RunnerResult {
   ok: boolean
   prUrl?: string
   error?: string
-  escalated?: boolean // the agent declined or the ticket vanished mid-run — terminal, do NOT retry
+  escalated?: boolean // agent declined or the ticket left the working state — affects the comment wording only
 }
-
-export type RunStatus = 'running' | 'retry' | 'pr_open' | 'escalated' | 'failed'
 
 export interface ProcResult {
   ok: boolean

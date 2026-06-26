@@ -1,15 +1,15 @@
 import { backpressure } from './backpressure'
 import { runAgent } from './codex'
 import { cleanup, hasChanges, prepareWorkspace, publish } from './git'
-import { currentState, fetchIssue } from './linear'
+import { currentStateId } from './linear'
 import { log } from './log'
 import { renderWorkflow } from './workflow'
-import type { Config } from './config'
-import type { Issue, RunnerResult } from './types'
+import type { Issue, Runtime, RunnerResult } from './types'
 
 // The per-ticket pipeline, run in one worktree: checkout → agent → backpressure → reconcile → PR. It STOPS at the PR
-// — the merge is the trust boundary. An empty diff is an escalation (the agent declined), not a success.
-export async function runIssue(cfg: Config, issue: Issue): Promise<RunnerResult> {
+// — the merge is the trust boundary. The dispatcher owns the Linear state writes; this just produces the result.
+export async function runIssue(rt: Runtime, issue: Issue): Promise<RunnerResult> {
+  const { cfg, states } = rt
   const ws = prepareWorkspace(cfg, issue)
   try {
     if (process.env.DRY_RUN) {
@@ -24,11 +24,10 @@ export async function runIssue(cfg: Config, issue: Issue): Promise<RunnerResult>
     const bp = backpressure(cfg, ws)
     if (!bp.ok) return { ok: false, error: bp.log }
 
-    // Reconcile before publishing: if a human cancelled or resolved the ticket while the agent worked, do not open a
-    // PR on it. Terminal, not retried.
-    const live = await currentState(cfg, issue.id)
-    if (live === 'done' || live === 'canceled') {
-      return { ok: false, escalated: true, error: `ticket moved to '${live}' during the run — no PR opened` }
+    // Reconcile before publishing: if the ticket left the working state while the agent ran (a human cancelled,
+    // grabbed, or resolved it), do not open a PR on it.
+    if ((await currentStateId(cfg, issue.id)) !== states.working) {
+      return { ok: false, escalated: true, error: 'ticket left the working state during the run — no PR opened' }
     }
 
     return { ok: true, prUrl: publish(cfg, ws, issue) }
@@ -37,9 +36,4 @@ export async function runIssue(cfg: Config, issue: Issue): Promise<RunnerResult>
   } finally {
     cleanup(ws)
   }
-}
-
-// Fetch-then-run, for the per-VM runner entrypoint (and any direct caller).
-export async function runById(cfg: Config, identifier: string): Promise<RunnerResult> {
-  return runIssue(cfg, await fetchIssue(cfg, identifier))
 }

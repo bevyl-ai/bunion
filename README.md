@@ -1,133 +1,102 @@
 # bunion
 
-A small, repo-agnostic **dark factory**. Drop a Linear ticket into a column; bunion has Codex implement it in an isolated worktree, runs your checks, and opens a PR. It stops at the PR — the merge is yours.
+A Bun/TS port of [OpenAI's Symphony](https://github.com/openai/symphony). A **thin harness** that drives Codex (via its app-server) to take a Linear ticket all the way to a merged PR. Point it at a repo + a Linear project; it polls, spawns a Codex agent per ticket, and the agent does the rest.
 
-A Bun/TS port of [OpenAI's Symphony](https://github.com/openai/symphony) spec, running Codex through the [exe.dev](https://exe.dev) gateway (your ChatGPT/Codex plan, no API keys).
+Runs Codex through the [exe.dev](https://exe.dev) gateway (your ChatGPT/Codex plan, no API keys).
 
----
+## The shape: thin harness, fat agent
+
+Symphony's insight — and the thing bunion gets right now — is that **the orchestrator is thin and the agent is fat.** bunion (the host) only:
+
+- polls Linear for issues in the configured `active_states`,
+- spawns one `codex app-server` session per issue in an isolated workspace, re-invoking while the ticket stays active (bounded concurrency, retry/backoff, reconcile),
+- answers the agent's `linear_graphql` tool-calls and auto-approves its actions so an unattended run never stalls.
+
+**The agent does everything else**, driven by `WORKFLOW.md` + the shipped skills: it moves the Linear state (`Todo → In Progress → Human Review → Merging → Done`), keeps one `## Codex Workpad` comment, opens the PR, runs the CI/review feedback sweep, and — on your approval (`Merging`) — runs the `land` skill to **squash-merge**. The state machine lives in the *prompt*, not in host code.
+
+```
+poll active_states ─▶ spawn codex app-server (per ticket) ─▶ agent drives Linear + git + gh ─▶ merge
+   (host)                (host: 1 thread/issue,                  (Todo→In Progress→Human Review
+                          turns until done/max_turns)             →Merging→Done; workpad; PR; land)
+```
+
+## Config is `WORKFLOW.md`
+
+Everything is in the front matter of `WORKFLOW.md` (the rest of the file is the agent's prompt) — the same format as Symphony:
+
+```yaml
+tracker:
+  kind: linear
+  project_slug: $LINEAR_PROJECT_SLUG   # the project's slugId
+  api_key: $LINEAR_API_KEY
+  active_states: [Todo, In Progress, Merging, Rework]
+  terminal_states: [Done, Canceled, Closed, Duplicate]
+hooks:
+  after_create: gh repo clone "$REPO" .   # clones the target repo into each workspace
+agent: { max_concurrent_agents: 4, max_turns: 20 }
+codex:
+  command: codex --config shell_environment_policy.inherit=all app-server
+  approval_policy: never
+```
+
+`$VAR` values resolve from the environment. The host reads Linear (to poll) and spawns codex; the agent does all writes.
 
 ## Setup
 
-### Prerequisites
+### 1. Prerequisites
 
-On the machine that will run bunion (or in your runner image):
+On the host (or in your runner image): `bun` ≥ 1.3, `git`, `gh` (authenticated), `python3` (for the `land` watcher), and `codex` configured for the exe.dev gateway. `bunion doctor` checks them.
 
-- `bun` ≥ 1.3, `git`, `gh` (logged in: `gh auth login`), and `codex` configured for the exe.dev gateway.
-- `bunion doctor` checks all four are present.
+### 2. Linear
 
-### 1. Wire up Linear
+- **Workflow states** — `Settings → Teams → <team> → Issue statuses`. Add the states named in `active_states` (`Todo`, `In Progress`, `Merging`, `Rework`) plus `Human Review`; the agent moves tickets through them. Your board can have any others.
+- **API key** — `Settings → Account → Security & Access → New API key` (`lin_api_…`). Set `LINEAR_API_KEY`.
+- **Project slug** — the `slugId` from the project's URL. Set `LINEAR_PROJECT_SLUG`.
 
-This is the only non-obvious part. You need **four workflow statuses**, an **API key**, and your **team key**.
-
-**a. Create the statuses.** In Linear: **Settings → Teams → `<your team>` → Issue statuses**. Hit **+** to add each one. bunion filters by the status itself (not its category), so the category is just cosmetic — pick `Unstarted`/`Started` so they show up as columns on the board:
-
-| Status (rename freely) | role | what it means |
-| --- | --- | --- |
-| `Bunion ready` | trigger | you drop a ticket here = "go" |
-| `Rework` *(optional)* | trigger | a second trigger column for re-runs |
-| `Bunion working` | working | bunion is on it (it moves the ticket here) |
-| `In review` | review | PR is open — your turn |
-| `Needs human` | escalate | bunion declined or errored |
-
-`Done` isn't bunion's — Linear moves the ticket there when you merge the linked PR. You can reuse existing columns (e.g. your real `In review`) instead of making new ones; just put the exact names in `.env`.
-
-**b. Get an API key.** **Settings → Account → Security & Access → New API key** (a personal key, starts with `lin_api_`). This is the identity bunion comments and moves tickets as — a personal key is fine.
-
-**c. Find your team key.** It's the prefix on your issue IDs — the `BEV` in `BEV-1234` (also under **Settings → Teams → `<team>` → General**).
-
-### 2. Configure
+### 3. Env + run
 
 ```bash
-cp .env.example .env
-```
+export LINEAR_API_KEY=lin_api_xxx
+export LINEAR_PROJECT_SLUG=your-project-slugid
+export REPO=owner/name            # used by the after_create clone hook
 
-```ini
-# target repo
-REPO=bevyl-ai/your-repo
-BASE_BRANCH=main
-
-# linear
-LINEAR_API_KEY=lin_api_xxxxxxxx
-LINEAR_TEAM=BEV
-
-# the four roles — names EXACTLY as they appear in Linear
-READY_STATES=Bunion ready,Rework    # a comma-separated list; any of these triggers a pickup
-WORKING_STATE=Bunion working
-REVIEW_STATE=In review
-ESCALATE_STATE=Needs human
-
-# checks run in the worktree before a PR is opened (';'-separated; any failure → Needs human)
-BACKPRESSURE=bun run typecheck
-MAX_CONCURRENT=3
-```
-
-State **names** are resolved to ids at startup — a typo fails loudly listing your real statuses, so you'll know immediately. That map *is* the config; there's no allowlist or estimate gate to tune.
-
-### 3. Install & check
-
-```bash
 bun install
-bunion doctor        # tools + env present?
+bunion doctor                     # tools + env + WORKFLOW.md load
+bunion run BEV-1234               # one worker session, for testing
+bunion start                      # the daemon
+bunion status                     # issues per active state
 ```
 
----
+Run **one** daemon per board.
 
-## Run it
+## How the agent merges
 
-```bash
-bunion run BEV-1234 --dry     # checkout only, no agent — proves the wiring end to end
-bunion run BEV-1234           # claim + run one ticket for real
-bunion start                  # the daemon: poll the ready states, ship, review/escalate
-bunion status                 # live board: how many tickets in each bunion state
-```
+When you approve a ticket and move it to `Merging`, the agent opens `.codex/skills/land/SKILL.md` and runs the `land` loop: `land_watch.py` watches CI + Codex/human reviews and exits with a status code (0 = clear → squash-merge; 2 = review feedback; 3 = CI failed; 4 = head moved; 5 = conflicts), and the agent remediates and re-runs until it can `gh pr merge --squash`. The merge gate is downstream of *your* approval — nothing auto-merges without you moving the ticket to `Merging`.
 
-Validate one ticket with `bunion run` before you ever `bunion start`. Run **one** daemon, and don't `bunion run` against the same board while it's up — bunion owns the working state, and startup escalates anything it finds sitting there.
+## Security
 
----
+Faithful Symphony: the agent has network + `gh` + `linear_graphql` and drives everything (this is the model you chose — your tickets are team-authored on your own repo). Codex runs `approval_policy: never` and bunion auto-approves its command/file/tool requests. If you want a hard wall around sensitive paths, use GitHub branch protection / CODEOWNERS — `Merging` is gated on your review, not on a code predicate.
 
-## How it works
-
-Linear is the state machine. There's no gate predicate and no local database — **the board is the run state, the claim, and the dashboard.**
+## Layout
 
 ```
-Ready ──▶ Working ──▶ In review ──▶ Done
-(you drop) (bunion    (PR open,     (Linear moves it
-           claims)    your turn)    when you merge)
-             │
-             └──▶ Needs human   (agent declined or errored)
+WORKFLOW.md           front matter (config) + the agent prompt
+skills/               shipped into each workspace's .codex/skills/
+  linear commit push pull land   (land has land_watch.py)
+src/
+  cli.ts              start | run | status | doctor
+  config.ts           parse WORKFLOW.md front matter → typed config (+ $VAR)
+  workflow.ts         split front matter/body; render the prompt (strict Liquid)
+  linear.ts           tracker reads + the raw graphql() the tool uses
+  codex/app-server.ts the JSON-RPC app-server client (spawn, turns, tools, approvals)
+  codex/dynamic-tool.ts  the linear_graphql host tool
+  agent-runner.ts     one worker session: turns until done/max_turns
+  workspace.ts        per-issue workspace, hooks, skill install
+  orchestrator.ts     poll → dispatch → reconcile, state machine, retry/backoff
 ```
 
-- **The gate is a column.** Dropping a ticket into a ready state *is* the eligibility decision — you made it.
-- **The claim is a transition.** Ready→Working is an atomic write to Linear (the source of truth), so the ticket falls out of the next poll on its own.
-- **Failure is a column, not a retry loop.** Errors or declines land in `Needs human`. Fix the ticket, drag it back to a ready state — that re-runs it.
+### Faithful to Symphony, with these omissions (documented, not hidden)
 
-## The feedback loop
-
-- **Per-ticket:** the PR + your review are the signal. Merge = good, close = reject, **drag back to a ready state with a comment = retry with feedback** — bunion folds your newest comments into the prompt on the next run.
-- **Aggregate:** the column flow + PR outcomes give you merge-rate / revert-rate / time-in-review. That's the number that earns auto-merge for a class of work, when you decide it has.
-
-## Security model (from stupify)
-
-Codex runs `--sandbox workspace-write` with **no network**; the runner — never the agent — does all `git`/`gh` I/O. A prompt-injected ticket body can at worst leave a bad diff in the worktree (caught by your checks, your review, and the human merge), and can never exfiltrate, reach a token, or run a network command.
-
-## Carve-outs
-
-There's no carve-out list in bunion. If you want a hard wall around `auth`/`billing`/`migrations`, put it in GitHub branch protection / CODEOWNERS on those paths — a real wall an autonomous PR can't merge past. An eligibility check is just a sticky note.
-
-## Workers
-
-- `PROVIDER=local` (default) — runs the pipeline in a per-ticket worktree on this host. Isolation = the worktree + the Codex sandbox. Needs no extra infra.
-- `PROVIDER=exedev` — a fresh exe.dev VM per ticket. The seam is stubbed in `src/worker.ts` (three marked spots: create / exec / destroy).
-
-## Symphony → bunion
-
-| Symphony component | here |
-| --- | --- |
-| Config layer | `src/config.ts` |
-| Workflow loader | `src/workflow.ts` + `workflow.md` |
-| Issue tracker client | `src/linear.ts` |
-| Orchestrator (poll → claim → settle) | `src/orchestrator.ts` + `src/dispatch.ts` |
-| Workspace manager | `src/git.ts` |
-| Agent runner | `src/codex.ts` + `src/runner.ts` |
+The SSH worker pool, the `Blocked`/operator-input-hold state (bunion auto-approves instead), the observability dashboard, and per-state concurrency (`max_concurrent_agents_by_state` — only the global cap is honored) are not ported. Single-daemon assumed (no distributed claim). The app-server protocol is pinned to the Codex build it spawns.
 
 MIT.

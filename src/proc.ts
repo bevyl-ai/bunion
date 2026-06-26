@@ -1,5 +1,10 @@
 import { spawnSync } from 'node:child_process'
-import type { ProcResult } from './types'
+
+export interface ProcResult {
+  ok: boolean
+  stdout: string
+  combined: string // stdout + stderr + any spawn/timeout cause, for logging
+}
 
 // One synchronous subprocess. The large agent prompt is passed on stdin (`input`) rather than argv to dodge
 // ARG_MAX (E2BIG). spawnSync surfaces a timeout via `signal` and a spawn failure via `error`, both with empty

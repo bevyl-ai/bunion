@@ -1,41 +1,58 @@
-import type { Config } from './config'
-
+// A normalized tracker issue. `state` is the workflow-state NAME; `blockers` come from "blocks" relations.
 export interface Issue {
-  id: string // Linear internal id (used for mutations + state re-reads)
-  identifier: string // e.g. BEV-1234
+  id: string
+  identifier: string
   title: string
   description: string
   url: string
-  comments: string[] // recent human/review comments — the feedback channel for re-runs
+  state: string
+  priority: number // 0=none, 1=urgent … 4=low
+  createdAt: string // ISO
+  labels: string[]
+  blockers: { state: string | null }[]
 }
 
-export interface ResolvedStates {
-  ready: string[] // state ids that trigger a pickup
-  working: string
-  review: string
-  escalate: string
+export interface TrackerConfig {
+  kind: string
+  endpoint: string
+  apiKey: string | null
+  projectSlug: string | null
+  requiredLabels: string[] // normalized: trim + lowercase + dedupe
+  activeStates: string[]
+  terminalStates: string[]
 }
 
-// Everything the daemon and the runner need, resolved once at startup.
-export interface Runtime {
-  cfg: Config
-  states: ResolvedStates
+export interface HooksConfig {
+  afterCreate: string | null
+  beforeRun: string | null
+  afterRun: string | null
+  beforeRemove: string | null
+  timeoutMs: number
 }
 
-export interface RunnerResult {
-  ok: boolean
-  prUrl?: string
-  error?: string
-  escalated?: boolean // agent declined or the ticket left the working state — affects the comment wording only
+export interface CodexConfig {
+  command: string
+  approvalPolicy: string // "never" → auto-approve; passed through to the app-server
+  threadSandbox: string // thread/start.params.sandbox (a STRING)
+  turnSandboxPolicy: Record<string, unknown> | null // turn/start.params.sandboxPolicy (an OBJECT)
+  turnTimeoutMs: number
+  readTimeoutMs: number
+  stallTimeoutMs: number
 }
 
-export interface ProcResult {
-  ok: boolean
-  stdout: string
-  combined: string // stdout + stderr + any spawn/timeout cause, for logging
+export interface Config {
+  tracker: TrackerConfig
+  pollIntervalMs: number
+  workspaceRoot: string
+  hooks: HooksConfig
+  agent: { maxConcurrentAgents: number; maxTurns: number; maxRetryBackoffMs: number }
+  codex: CodexConfig
+  promptTemplate: string
+  workflowPath: string
 }
 
-export interface Worker {
-  readonly kind: string
-  run(issue: Issue): Promise<RunnerResult>
+// A host-side dynamic tool offered to the agent over the app-server (e.g. linear_graphql).
+export interface DynamicTool {
+  spec: { name: string; description: string; inputSchema: Record<string, unknown> }
+  run(args: unknown): Promise<{ success: boolean; output: string }>
 }

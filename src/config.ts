@@ -1,75 +1,105 @@
-import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { parseWorkflow } from './workflow'
+import type { Config, TrackerConfig } from './types'
 
-export interface Config {
-  // target
-  slug: string // owner/name on GitHub
-  baseBranch: string
-  // linear
-  linearApiKey: string
-  linearTeam: string // team key, e.g. BEV
-  // states — the board IS the config. Names as they appear in Linear; resolved to ids at startup.
-  readyStates: string[] // any of these triggers a pickup (e.g. "Bunion ready", "Rework")
-  workingState: string // moved here while the agent runs — the claim
-  reviewState: string // moved here when the PR is open
-  escalateState: string // moved here when the agent declines or errors
-  // run
-  pollMs: number
-  maxConcurrent: number
-  backpressure: string[] // commands run in the worktree before opening a PR; ';'-separated
-  // agent
-  codexEffort: string
-  codexModel: string | null
-  codexProvider: string | null // the exe.dev gateway provider id, when set
-  codexTimeoutMs: number
-  // paths
-  workdir: string
-  workflowPath: string
+function obj(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
+}
+function str(v: unknown): string | null {
+  return typeof v === 'string' ? v : null
+}
+function num(v: unknown, dflt: number): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : dflt
+}
+function arr(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 }
 
-function req(name: string): string {
-  const v = process.env[name]
-  if (!v) throw new Error(`missing required env: ${name} (copy .env.example → .env)`)
-  return v
-}
-
-function num(name: string, dflt: number): number {
-  const v = process.env[name]
-  if (!v) return dflt
-  const n = Number(v)
-  if (!Number.isFinite(n)) throw new Error(`env ${name} must be a number, got ${v}`)
-  return n
-}
-
-function list(name: string, dflt: string[], sep = ','): string[] {
-  const v = process.env[name]
-  if (v == null) return dflt
-  return v
-    .split(sep)
-    .map((s) => s.trim())
-    .filter(Boolean)
-}
-
-const home = join(homedir(), '.bunion')
-
-export function loadConfig(): Config {
-  return {
-    slug: req('REPO'),
-    baseBranch: process.env.BASE_BRANCH ?? 'main',
-    linearApiKey: req('LINEAR_API_KEY'),
-    linearTeam: req('LINEAR_TEAM'),
-    readyStates: list('READY_STATES', ['Bunion ready']),
-    workingState: process.env.WORKING_STATE ?? 'Bunion working',
-    reviewState: process.env.REVIEW_STATE ?? 'In review',
-    escalateState: process.env.ESCALATE_STATE ?? 'Needs human',
-    pollMs: num('POLL_MS', 15_000),
-    maxConcurrent: num('MAX_CONCURRENT', 3),
-    backpressure: list('BACKPRESSURE', ['bun run typecheck'], ';'),
-    codexEffort: process.env.CODEX_EFFORT ?? 'high',
-    codexModel: process.env.CODEX_MODEL || null,
-    codexProvider: process.env.CODEX_PROVIDER || null,
-    codexTimeoutMs: num('CODEX_TIMEOUT_MS', 1_800_000),
-    workdir: process.env.WORKDIR || join(home, 'work'),
-    workflowPath: process.env.WORKFLOW_PATH || join(process.cwd(), 'workflow.md'),
+// `$VAR` → env; literal otherwise. Missing/empty env → fall back to canonical env, then null.
+function secret(v: unknown, fallbackEnv: string): string | null {
+  const s = str(v)
+  if (s == null) return process.env[fallbackEnv] || null
+  const m = s.match(/^\$([A-Za-z_][A-Za-z0-9_]*)$/)
+  if (m) {
+    const e = process.env[m[1]!]
+    if (e === undefined) return process.env[fallbackEnv] || null
+    return e === '' ? null : e
   }
+  return s || null
+}
+
+function pathValue(v: unknown, dflt: string): string {
+  const s = str(v)
+  if (s == null || s === '') return dflt
+  const m = s.match(/^\$([A-Za-z_][A-Za-z0-9_]*)$/)
+  if (m) return process.env[m[1]!] || dflt
+  return s
+}
+
+function expandHome(p: string): string {
+  return p === '~' || p.startsWith('~/') ? join(homedir(), p.slice(1)) : p
+}
+
+export function loadConfig(path?: string): Config {
+  const workflowPath = path ?? join(process.cwd(), 'WORKFLOW.md')
+  const { frontmatter: fm, prompt } = parseWorkflow(workflowPath)
+
+  const tk = obj(fm.tracker)
+  const tracker: TrackerConfig = {
+    kind: str(tk.kind) ?? '',
+    endpoint: str(tk.endpoint) ?? 'https://api.linear.app/graphql',
+    apiKey: secret(tk.api_key, 'LINEAR_API_KEY'),
+    projectSlug: secret(tk.project_slug, 'LINEAR_PROJECT_SLUG'),
+    requiredLabels: [...new Set(arr(tk.required_labels).map((l) => l.trim().toLowerCase()).filter(Boolean))],
+    activeStates: arr(tk.active_states).length ? arr(tk.active_states) : ['Todo', 'In Progress'],
+    terminalStates: arr(tk.terminal_states).length ? arr(tk.terminal_states) : ['Closed', 'Cancelled', 'Canceled', 'Duplicate', 'Done'],
+  }
+
+  const poll = obj(fm.polling)
+  const ws = obj(fm.workspace)
+  const hk = obj(fm.hooks)
+  const ag = obj(fm.agent)
+  const cx = obj(fm.codex)
+
+  let workspaceRoot = expandHome(pathValue(ws.root, join(tmpdir(), 'bunion_workspaces')))
+  if (!isAbsolute(workspaceRoot)) workspaceRoot = resolve(dirname(workflowPath), workspaceRoot)
+
+  return {
+    tracker,
+    pollIntervalMs: num(poll.interval_ms, 30_000),
+    workspaceRoot,
+    hooks: {
+      afterCreate: str(hk.after_create),
+      beforeRun: str(hk.before_run),
+      afterRun: str(hk.after_run),
+      beforeRemove: str(hk.before_remove),
+      timeoutMs: num(hk.timeout_ms, 60_000),
+    },
+    agent: {
+      maxConcurrentAgents: num(ag.max_concurrent_agents, 10),
+      maxTurns: num(ag.max_turns, 20),
+      maxRetryBackoffMs: num(ag.max_retry_backoff_ms, 300_000),
+    },
+    codex: {
+      command: str(cx.command) ?? 'codex app-server',
+      approvalPolicy: str(cx.approval_policy) ?? 'never',
+      threadSandbox: str(cx.thread_sandbox) ?? 'workspace-write',
+      turnSandboxPolicy: cx.turn_sandbox_policy && typeof cx.turn_sandbox_policy === 'object' && !Array.isArray(cx.turn_sandbox_policy) ? (cx.turn_sandbox_policy as Record<string, unknown>) : null,
+      turnTimeoutMs: num(cx.turn_timeout_ms, 3_600_000),
+      readTimeoutMs: num(cx.read_timeout_ms, 5_000),
+      stallTimeoutMs: num(cx.stall_timeout_ms, 300_000),
+    },
+    promptTemplate: prompt,
+    workflowPath,
+  }
+}
+
+// Dispatch preflight — throws on the config errors that block any work.
+export function validateConfig(cfg: Config): void {
+  if (!cfg.tracker.kind) throw new Error('tracker.kind is required')
+  if (cfg.tracker.kind !== 'linear') throw new Error(`unsupported tracker.kind: ${cfg.tracker.kind}`)
+  if (!cfg.tracker.apiKey) throw new Error('tracker.api_key missing — set LINEAR_API_KEY')
+  if (!cfg.tracker.projectSlug) throw new Error('tracker.project_slug missing — set LINEAR_PROJECT_SLUG')
+  if (!cfg.codex.command) throw new Error('codex.command is required')
 }

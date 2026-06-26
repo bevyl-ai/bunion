@@ -1,58 +1,60 @@
 #!/usr/bin/env bun
-import { dispatch } from './dispatch'
-import { fetchByStates, fetchIssue } from './linear'
-import { have } from './proc'
-import { resolveRuntime } from './runtime'
+import { startAgent } from './agent-runner'
+import { loadConfig, validateConfig } from './config'
+import { fetchById, fetchCandidates } from './linear'
 import { start } from './orchestrator'
-import { getWorker } from './worker'
+import { have } from './proc'
 
-const HELP = `bunion — a Bun/TS port of OpenAI's Symphony. Point it at a repo + a Linear board and it ships simple tickets.
+const HELP = `bunion — a Bun/TS port of OpenAI's Symphony. A thin harness that drives Codex (app-server) to ship Linear tickets.
 
 usage:
-  bunion start                    run the daemon: poll the ready states → ship → review/escalate
-  bunion run <BEV-123> [opts]     claim + run one ticket now
-       --dry                      prepare the worktree, skip the agent (smoke test wiring)
-       --exedev                   use the exe.dev per-VM worker instead of local
-  bunion status                   live board: how many tickets in each bunion state
-  bunion doctor                   check required tools + env
+  bunion start [path/to/WORKFLOW.md]   run the daemon: poll active states, drive each ticket via Codex
+  bunion run <BEV-123>                 run one worker session for a ticket now (testing)
+  bunion status                        issues per active state (the board)
+  bunion doctor                        check tools + env + that WORKFLOW.md loads
 
-the gate is a Linear column: drop a ticket into a ready state and bunion takes it. config lives in .env.`
+config lives in WORKFLOW.md front matter — see the README.`
 
 async function main(): Promise<void> {
   const [cmd, ...rest] = process.argv.slice(2)
+  const arg = rest.find((a) => !a.startsWith('-'))
 
   switch (cmd) {
     case 'start':
-      return start()
+      return start(arg)
 
     case 'run': {
-      const id = rest.find((a) => !a.startsWith('-'))
-      if (!id) throw new Error('usage: bunion run <BEV-123> [--dry] [--exedev]')
-      if (rest.includes('--dry')) process.env.DRY_RUN = '1'
-      if (rest.includes('--exedev')) process.env.PROVIDER = 'exedev'
-      const rt = await resolveRuntime()
-      await dispatch(rt, getWorker(rt), await fetchIssue(rt.cfg, id))
-      return
+      if (!arg) throw new Error('usage: bunion run <BEV-123>')
+      const cfg = loadConfig()
+      validateConfig(cfg)
+      const issue = await fetchById(cfg, arg)
+      const outcome = await startAgent(cfg, issue, null, () => {}).done
+      console.log(JSON.stringify(outcome, null, 2))
+      process.exit(outcome.ok ? 0 : 1)
     }
 
     case 'status': {
-      const rt = await resolveRuntime()
-      const roles: [string, string[]][] = [
-        ['ready', rt.states.ready],
-        ['working', [rt.states.working]],
-        ['in review', [rt.states.review]],
-        ['needs human', [rt.states.escalate]],
-      ]
-      for (const [label, ids] of roles) {
-        const issues = await fetchByStates(rt.cfg, ids)
-        console.log(`${label.padEnd(12)} ${String(issues.length).padStart(2)}  ${issues.map((i) => i.identifier).join(' ')}`)
+      const cfg = loadConfig()
+      validateConfig(cfg)
+      const byState = new Map<string, string[]>()
+      for (const i of await fetchCandidates(cfg)) byState.set(i.state, [...(byState.get(i.state) ?? []), i.identifier])
+      for (const s of cfg.tracker.activeStates) {
+        const ids = byState.get(s) ?? []
+        console.log(`${s.padEnd(16)} ${String(ids.length).padStart(2)}  ${ids.join(' ')}`)
       }
       return
     }
 
     case 'doctor': {
-      for (const t of ['bun', 'git', 'gh', 'codex'] as const) console.log(`${have(t) ? 'ok      ' : 'MISSING '}${t}`)
-      for (const e of ['REPO', 'LINEAR_API_KEY', 'LINEAR_TEAM']) console.log(`${process.env[e] ? 'ok      ' : 'MISSING '}${e}`)
+      for (const t of ['bun', 'git', 'gh', 'codex', 'python3'] as const) console.log(`${have(t) ? 'ok      ' : 'MISSING '}${t}`)
+      for (const e of ['LINEAR_API_KEY', 'LINEAR_PROJECT_SLUG', 'REPO']) console.log(`${process.env[e] ? 'ok      ' : 'MISSING '}${e}`)
+      try {
+        const cfg = loadConfig()
+        validateConfig(cfg)
+        console.log(`ok       WORKFLOW.md (project=${cfg.tracker.projectSlug})`)
+      } catch (e) {
+        console.log(`MISSING  WORKFLOW.md — ${e instanceof Error ? e.message : e}`)
+      }
       return
     }
 

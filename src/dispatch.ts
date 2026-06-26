@@ -1,4 +1,4 @@
-import { comment, currentStateId, moveState } from './linear'
+import { currentStateId, moveState, postStatus } from './linear'
 import { log, warn } from './log'
 import type { Issue, Runtime, RunnerResult, Worker } from './types'
 
@@ -14,12 +14,12 @@ export async function dispatch(rt: Runtime, worker: Worker, issue: Issue): Promi
 
   if (r.ok && r.prUrl) {
     await moveIfWorking(rt, issue.id, rt.states.review)
-    await comment(rt.cfg, issue.id, `bunion opened a PR: ${r.prUrl}`)
+    await postStatus(rt.cfg, issue.id, `opened a PR: ${r.prUrl}`)
     log(`✓ ${issue.identifier} → ${r.prUrl}`)
   } else {
     const error = (r.error ?? 'unknown').slice(0, 600)
     await moveIfWorking(rt, issue.id, rt.states.escalate)
-    await comment(rt.cfg, issue.id, r.escalated ? `bunion stopped without a PR: ${error}` : `bunion errored: ${error}`)
+    await postStatus(rt.cfg, issue.id, r.escalated ? `stopped without a PR: ${error}` : `errored: ${error}`)
     warn(`✗ ${issue.identifier}: ${error.slice(0, 160)}`)
   }
 }

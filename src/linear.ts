@@ -22,10 +22,10 @@ interface RawIssue {
   title: string
   description: string | null
   url: string
-  comments: { nodes: { body: string; createdAt: string; user: { isMe: boolean } | null }[] }
+  comments: { nodes: { body: string; createdAt: string }[] }
 }
 
-const ISSUE_FIELDS = `id identifier title description url comments(first: 50) { nodes { body createdAt user { isMe } } }`
+const ISSUE_FIELDS = `id identifier title description url comments(first: 50) { nodes { body createdAt } }`
 
 const TEAM_STATES = `query States($key: String!) {
   teams(first: 1, filter: { key: { eq: $key } }) {
@@ -99,8 +99,18 @@ export async function moveState(cfg: Config, issueId: string, stateId: string): 
   await gql(cfg, MOVE, { id: issueId, state: stateId })
 }
 
-export async function comment(cfg: Config, issueId: string, body: string): Promise<void> {
+// Bunion's own comments carry this marker so toIssue can drop them from the feedback fed back into a re-run — by
+// body marker, NOT by author, so a personal API key (where bunion's Linear user IS you) doesn't filter out your own
+// feedback comments. A human won't open a comment with this exact string.
+const MARK = '🤖 bunion'
+
+async function comment(cfg: Config, issueId: string, body: string): Promise<void> {
   await gql(cfg, COMMENT, { id: issueId, body })
+}
+
+// Post a marked bunion status comment, so it never loops back into a re-run prompt.
+export async function postStatus(cfg: Config, issueId: string, body: string): Promise<void> {
+  await comment(cfg, issueId, `${MARK} ${body}`)
 }
 
 function toIssue(r: RawIssue): Issue {
@@ -110,11 +120,10 @@ function toIssue(r: RawIssue): Issue {
     title: r.title,
     description: r.description ?? '',
     url: r.url,
-    // Newest human comments, rendered chronologically. Drop bunion's own (authored by our Linear user, not matched
-    // on body text). The freshest review note is the retry-with-feedback signal, so sort by recency — the API's
-    // default is oldest-first, which would bury it.
+    // Newest human comments, rendered chronologically. Drop bunion's own (marked) status lines. The freshest review
+    // note is the retry-with-feedback signal, so sort by recency — the API's default is oldest-first, which buries it.
     comments: r.comments.nodes
-      .filter((n) => !n.user?.isMe)
+      .filter((n) => !n.body.startsWith(MARK))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, 10)
       .reverse()

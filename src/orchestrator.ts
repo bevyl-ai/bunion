@@ -1,5 +1,5 @@
 import { dispatch } from './dispatch'
-import { comment, fetchByStates, moveState } from './linear'
+import { fetchByStates, moveState, postStatus } from './linear'
 import { log, warn } from './log'
 import { resolveRuntime } from './runtime'
 import { getWorker } from './worker'
@@ -16,7 +16,7 @@ export async function start(): Promise<void> {
   // concurrent `bunion run` against this board — either would move tickets to Working behind the daemon's back.
   for (const orphan of await fetchByStates(cfg, [states.working])) {
     await moveState(cfg, orphan.id, states.escalate)
-    await comment(cfg, orphan.id, 'bunion was interrupted mid-run — re-check, then drop back to ready to retry')
+    await postStatus(cfg, orphan.id, 'was interrupted mid-run — re-check, then drop back to ready to retry')
     warn(`recovered orphan ${orphan.identifier} → escalate`)
   }
 

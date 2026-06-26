@@ -16,8 +16,9 @@ export interface TrackerConfig {
   kind: string
   endpoint: string
   apiKey: string | null
-  projectSlug: string | null
-  requiredLabels: string[] // normalized: trim + lowercase + dedupe
+  projectSlug: string | null // scope to one project, OR
+  team: string | null // scope to a whole team (key, e.g. BEV) — pair with required_labels for opt-in
+  requiredLabels: string[] // normalized: trim + lowercase + dedupe; matched host-side (AND)
   activeStates: string[]
   terminalStates: string[]
 }

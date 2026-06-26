@@ -29,8 +29,9 @@ Everything is in the front matter of `WORKFLOW.md`; the rest of the file is the 
 ```yaml
 tracker:
   kind: linear
-  project_slug: $LINEAR_PROJECT_SLUG    # the project's slugId
+  team: $LINEAR_TEAM                    # team key (e.g. BEV); or project_slug to scope to one project
   api_key: $LINEAR_API_KEY
+  required_labels: [bunion]             # opt-in: only labelled tickets enter the factory
   active_states: [Todo, In Progress, Merging, Rework]
   terminal_states: [Done, Canceled, Closed, Duplicate]
 hooks:
@@ -50,14 +51,14 @@ The host reads Linear (to poll) and spawns codex; the agent performs all writes.
 **Linear:**
 
 - Add the workflow states named in `active_states` (`Todo`, `In Progress`, `Merging`, `Rework`) plus `Human Review`, under `Settings → Teams → <team> → Issue statuses`. The agent moves tickets through them.
-- Create a personal API key (`Settings → Account → Security & Access → New API key`, `lin_api_…`) → `LINEAR_API_KEY`.
-- Find the project's `slugId` (from its URL) → `LINEAR_PROJECT_SLUG`.
+- Create a personal API key (`Settings → Account → Security & Access → New API key`, `lin_api_…`) → `LINEAR_API_KEY`. (The host daemon needs a real key; an interactive Linear MCP connection does not carry over to it.)
+- Scope the work: set `LINEAR_TEAM` to the team key (e.g. `BEV`) and add a `bunion` label to the tickets you want it to pick up. (Or set `LINEAR_PROJECT_SLUG` to scope to a single project instead.)
 
 **Run:**
 
 ```bash
 export LINEAR_API_KEY=lin_api_xxx
-export LINEAR_PROJECT_SLUG=your-project-slugid
+export LINEAR_TEAM=BEV            # team key; or LINEAR_PROJECT_SLUG to scope to one project
 export REPO=owner/name           # used by the after_create clone hook
 
 bun install

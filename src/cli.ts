@@ -47,11 +47,11 @@ async function main(): Promise<void> {
 
     case 'doctor': {
       for (const t of ['bun', 'git', 'gh', 'codex', 'python3'] as const) console.log(`${have(t) ? 'ok      ' : 'MISSING '}${t}`)
-      for (const e of ['LINEAR_API_KEY', 'LINEAR_PROJECT_SLUG', 'REPO']) console.log(`${process.env[e] ? 'ok      ' : 'MISSING '}${e}`)
+      for (const e of ['LINEAR_API_KEY', 'LINEAR_TEAM', 'REPO']) console.log(`${process.env[e] ? 'ok      ' : 'MISSING '}${e}`)
       try {
         const cfg = loadConfig()
         validateConfig(cfg)
-        console.log(`ok       WORKFLOW.md (project=${cfg.tracker.projectSlug})`)
+        console.log(`ok       WORKFLOW.md (scope=${cfg.tracker.team ?? cfg.tracker.projectSlug})`)
       } catch (e) {
         console.log(`MISSING  WORKFLOW.md — ${e instanceof Error ? e.message : e}`)
       }

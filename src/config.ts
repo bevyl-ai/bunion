@@ -51,6 +51,7 @@ export function loadConfig(path?: string): Config {
     endpoint: str(tk.endpoint) ?? 'https://api.linear.app/graphql',
     apiKey: secret(tk.api_key, 'LINEAR_API_KEY'),
     projectSlug: secret(tk.project_slug, 'LINEAR_PROJECT_SLUG'),
+    team: secret(tk.team, 'LINEAR_TEAM'),
     requiredLabels: [...new Set(arr(tk.required_labels).map((l) => l.trim().toLowerCase()).filter(Boolean))],
     activeStates: arr(tk.active_states).length ? arr(tk.active_states) : ['Todo', 'In Progress'],
     terminalStates: arr(tk.terminal_states).length ? arr(tk.terminal_states) : ['Closed', 'Cancelled', 'Canceled', 'Duplicate', 'Done'],
@@ -100,6 +101,6 @@ export function validateConfig(cfg: Config): void {
   if (!cfg.tracker.kind) throw new Error('tracker.kind is required')
   if (cfg.tracker.kind !== 'linear') throw new Error(`unsupported tracker.kind: ${cfg.tracker.kind}`)
   if (!cfg.tracker.apiKey) throw new Error('tracker.api_key missing — set LINEAR_API_KEY')
-  if (!cfg.tracker.projectSlug) throw new Error('tracker.project_slug missing — set LINEAR_PROJECT_SLUG')
+  if (!cfg.tracker.team && !cfg.tracker.projectSlug) throw new Error('scope missing — set tracker.team (LINEAR_TEAM) or tracker.project_slug (LINEAR_PROJECT_SLUG)')
   if (!cfg.codex.command) throw new Error('codex.command is required')
 }

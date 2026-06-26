@@ -50,10 +50,8 @@ const ISSUE_FIELDS = `id identifier title description url priority createdAt
   labels { nodes { name } }
   inverseRelations { nodes { type issue { state { name } } } }`
 
-const CANDIDATES = `query Candidates($slug: String!, $states: [String!]) {
-  issues(first: 100, filter: { project: { slugId: { eq: $slug } }, state: { name: { in: $states } } }) {
-    nodes { ${ISSUE_FIELDS} }
-  }
+const CANDIDATES = `query Candidates($filter: IssueFilter) {
+  issues(first: 100, filter: $filter) { nodes { ${ISSUE_FIELDS} } }
 }`
 
 const BY_IDS = `query ByIds($ids: [ID!]) {
@@ -63,10 +61,12 @@ const BY_IDS = `query ByIds($ids: [ID!]) {
 const BY_KEY = `query ByKey($id: String!) { issue(id: $id) { ${ISSUE_FIELDS} } }`
 
 export async function fetchCandidates(cfg: Config): Promise<Issue[]> {
-  const d = await query<{ issues: { nodes: RawIssue[] } }>(cfg, CANDIDATES, {
-    slug: cfg.tracker.projectSlug,
-    states: cfg.tracker.activeStates,
-  })
+  // Scope by team and/or project + the active states. required_labels stay OUT of the query (Linear label matching
+  // is case-sensitive) and are enforced host-side, case-insensitively, by the orchestrator's routability check.
+  const filter: Record<string, unknown> = { state: { name: { in: cfg.tracker.activeStates } } }
+  if (cfg.tracker.team) filter.team = { key: { eq: cfg.tracker.team } }
+  if (cfg.tracker.projectSlug) filter.project = { slugId: { eq: cfg.tracker.projectSlug } }
+  const d = await query<{ issues: { nodes: RawIssue[] } }>(cfg, CANDIDATES, { filter })
   return d.issues.nodes.map(toIssue)
 }
 

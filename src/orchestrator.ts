@@ -148,7 +148,7 @@ export async function start(workflowPath?: string): Promise<void> {
     for (const id of ids) if (!seen.has(id) && running.has(id)) terminate(id, false)
   }
 
-  log(`bunion up · project=${cfg.tracker.projectSlug} · cap=${cfg.agent.maxConcurrentAgents} · poll=${cfg.pollIntervalMs}ms`)
+  log(`bunion up · scope=${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''} · cap=${cfg.agent.maxConcurrentAgents} · poll=${cfg.pollIntervalMs}ms`)
   for (;;) {
     try {
       // Reload at the top so reconcile + dispatch both see the same fresh config; keep last-known-good on a bad edit

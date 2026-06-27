@@ -27,6 +27,7 @@ export interface Snapshot {
   pollMs: number
   now: number
   items: BoardItem[] // the WHOLE board (every active+labeled ticket), not just the running ones
+  totalTokens: number // all-time tokens across every tracked ticket (bunion runs on one account: chatgpt-4)
 }
 
 // A tiny status server: GET /state.json is the live orchestrator snapshot; GET / is a self-contained page that
@@ -226,7 +227,7 @@ function render(){
  const run=items.filter(r=>r.status==='running').length,q=items.filter(r=>r.status==='queued').length,rt=items.filter(r=>r.status==='retrying').length;
  scope.textContent=snap.scope||'';
  const chip=(col,n,lab)=>'<span class="chip"><i style="background:'+col+'"></i>'+n+' '+lab+'</span>';
- stats.innerHTML=chip('#3fb27f',run,'running')+(q?chip('#7c8493',q,'queued'):'')+(rt?chip('#d99a2b',rt,'retrying'):'')+'<span class="cap">'+(snap.cap||0)+' slots</span>';
+ stats.innerHTML=chip('#3fb27f',run,'running')+(q?chip('#7c8493',q,'queued'):'')+(rt?chip('#d99a2b',rt,'retrying'):'')+'<span class="cap">'+(snap.cap||0)+' slots</span>'+(snap.totalTokens?'<span class="cap" title="all-time tokens — bunion runs on chatgpt-4">&#931; '+fmtTok(snap.totalTokens)+' tok</span>':'');
  // Rebuild the board ONLY when structure changes (membership / state / status / pr); live fields tick in place.
  const sig=JSON.stringify(items.map(r=>[r.identifier,r.state,r.status,r.host,r.prUrl,r.retryAttempt,r.state==='QA blocked'?(r.note||''):'']));
  if(sig!==lastSig){

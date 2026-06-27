@@ -311,12 +311,14 @@ export async function start(workflowPath?: string): Promise<void> {
       it.host = e.host
     }
     const items = [...board.values()].sort((a, b) => rankStatus(a.status) - rankStatus(b.status) || rank(a.priority) - rank(b.priority) || a.identifier.localeCompare(b.identifier))
+    const totalTokens = Object.values(tokens).reduce((s, ph) => s + Object.values(ph).reduce((a, c) => a + (c?.total ?? 0), 0), 0)
     return {
       scope: `${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''}`,
       cap: displayCap(),
       pollMs: cfg.pollIntervalMs,
       now: Date.now(),
       items,
+      totalTokens,
     }
   }
   // Operator actions from the dashboard buttons. to-qa / to-build move the Linear state + wipe the workspace (fresh

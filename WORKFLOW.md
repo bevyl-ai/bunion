@@ -3,7 +3,7 @@ tracker:
   kind: linear
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project
   api_key: $LINEAR_API_KEY
-  required_labels: [bunion]          # opt-in: only tickets carrying this label enter the factory
+  required_labels: [dark-factory]    # opt-in: only tickets carrying this label enter the factory
   active_states: [Todo, In Progress, Merging, Rework]
   terminal_states: [Done, Canceled, Cancelled, Closed, Duplicate]
 polling:

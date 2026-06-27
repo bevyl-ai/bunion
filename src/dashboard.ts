@@ -1,10 +1,26 @@
+// One ticket on the board. `status`: running (an agent is on it now), retrying (waiting out a backoff/continuation),
+// or queued (an eligible candidate with no free slot/VM yet). The run-specific fields are 0/empty unless running.
+export interface BoardItem {
+  identifier: string
+  title: string
+  state: string
+  priority: number
+  host: string | null
+  status: 'running' | 'retrying' | 'queued'
+  turn: number
+  activity: string
+  startedAt: number
+  lastActivity: number
+  retryAttempt: number
+  retryDueAt: number | null
+}
+
 export interface Snapshot {
   scope: string
   cap: number
   pollMs: number
   now: number
-  running: { identifier: string; title: string; state: string; startedAt: number; lastActivity: number; retryAttempt: number; turn: number; activity: string; host: string | null }[]
-  retrying: { identifier: string; attempt: number; dueAt: number }[]
+  items: BoardItem[] // the WHOLE board (every active+labeled ticket), not just the running ones
   recent: { identifier: string; kind: string; at: number; detail: string | null }[]
 }
 
@@ -49,27 +65,33 @@ header{display:flex;align-items:center;gap:18px;padding:14px 22px;border-bottom:
  </div>
  <pre id="logbody" style="margin:0;padding:14px;max-height:360px;overflow:auto;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;color:var(--fg)"></pre>
 </div>
-<div class="sec"><h2>retry queue</h2><div id="retry" class="muted">&mdash;</div></div>
 <div class="sec"><h2>recent</h2><div id="recent" class="muted">&mdash;</div></div>
 <script>
 const SC=s=>({'Todo':'#5b6b7f','In Progress':'#4a86c5','QA Requested':'#c9952b','QA testing started':'#c9952b','QA blocked':'#cf5a4f','Ready to ship':'#36a86a','Done':'#36a86a'}[s]||'#5b6b7f');
 const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=Math.floor(s/60);if(m<60)return m+'m '+(s%60)+'s';return Math.floor(m/60)+'h '+(m%60)+'m'};
 const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
-let snap={running:[],retrying:[],recent:[],cap:0,scope:''};
+let snap={items:[],recent:[],cap:0,scope:''};
 async function pull(){try{snap=await (await fetch('/state.json')).json()}catch(e){}render()}
 function render(){
  const now=Date.now();
- scope.textContent=snap.scope||'';count.textContent=(snap.running?.length||0)+' / '+(snap.cap||0)+' running';
+ const items=snap.items||[];
+ const run=items.filter(r=>r.status==='running').length,q=items.filter(r=>r.status==='queued').length,rt=items.filter(r=>r.status==='retrying').length;
+ scope.textContent=snap.scope||'';
+ count.textContent=run+' running'+(rt?' · '+rt+' retrying':'')+' · '+q+' queued · '+(snap.cap||0)+' cap';
  clock.textContent=new Date().toLocaleTimeString();
- grid.innerHTML=(snap.running&&snap.running.length)?snap.running.map(r=>{
-  const act=now-r.lastActivity,dc=act<30000?'#36a86a':act<120000?'#c9952b':'#cf5a4f',c=SC(r.state);
-  return '<div class="card" data-id="'+r.identifier+'" style="cursor:pointer'+(r.identifier===expandedId?';outline:2px solid #4a86c5':'')+'"><div class="id">'+r.identifier+(r.retryAttempt>0?' <span class="badge" style="background:#3a2b2b;color:#d9a">retry '+r.retryAttempt+'</span>':'')+'</div>'+
+ grid.innerHTML=items.length?items.map(r=>{
+  const c=SC(r.state),run=r.status==='running';
+  const act=now-r.lastActivity,dc=act<30000?'#36a86a':act<120000?'#c9952b':'#cf5a4f';
+  let foot;
+  if(run) foot='<span class="muted"><span class="dot" style="background:'+dc+'"></span>active '+ago(act)+' ago</span>'+(r.host?'<span class="muted" style="max-width:48%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(r.host)+'">&#9709; '+esc(r.host)+'</span>':'');
+  else if(r.status==='retrying') foot='<span class="muted">&#8635; retry '+(r.retryDueAt?'in '+ago(r.retryDueAt-now):'soon')+(r.retryAttempt>0?' &middot; attempt '+r.retryAttempt:'')+'</span>';
+  else foot='<span class="muted">&#9203; queued &middot; waiting for a slot</span>';
+  return '<div class="card" data-id="'+r.identifier+'" style="cursor:pointer;opacity:'+(run?'1':'.62')+(r.identifier===expandedId?';outline:2px solid #4a86c5':'')+'"><div class="id">'+r.identifier+'</div>'+
    '<div class="title">'+esc(r.title)+'</div>'+
-   '<div class="row"><span class="badge" style="background:'+c+'2a;color:'+c+'">'+esc(r.state)+'</span><span class="t muted">&#9201; '+dur(now-r.startedAt)+'</span></div>'+
-   '<div class="row"><span class="muted" style="display:block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,64))+'</span></div>'+
-   '<div class="row"><span class="muted"><span class="dot" style="background:'+dc+'"></span>active '+ago(act)+' ago</span>'+(r.host?'<span class="muted" style="max-width:48%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(r.host)+'">&#9709; '+esc(r.host)+'</span>':'')+'</div></div>'}).join(''):'<div class="empty">idle &mdash; no runs in flight</div>';
- retry.innerHTML=(snap.retrying&&snap.retrying.length)?snap.retrying.map(x=>'<span class="pill">'+x.identifier+' &middot; attempt '+x.attempt+' &middot; in '+ago(x.dueAt-now)+'</span>').join(''):'&mdash;';
+   '<div class="row"><span class="badge" style="background:'+c+'2a;color:'+c+'">'+esc(r.state)+'</span>'+(run?'<span class="t muted">&#9201; '+dur(now-r.startedAt)+'</span>':'')+'</div>'+
+   (run?'<div class="row"><span class="muted" style="display:block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,64))+'</span></div>':'')+
+   '<div class="row">'+foot+'</div></div>'}).join(''):'<div class="empty">no '+esc(snap.scope||'dark-factory')+' tickets in scope</div>';
  recent.innerHTML=(snap.recent&&snap.recent.length)?snap.recent.map(x=>'<span class="pill">'+(x.kind==='failed'?'&#10007;':'&#10003;')+' '+x.identifier+' &middot; '+ago(now-x.at)+' ago</span>').join(''):'&mdash;';
 }
 let expandedId=null;

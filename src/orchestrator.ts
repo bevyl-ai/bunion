@@ -1,6 +1,6 @@
 import { startAgent, type AgentHandle } from './agent-runner'
 import { loadConfig, validateConfig } from './config'
-import { startDashboard, type Snapshot } from './dashboard'
+import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
 import { fetchCandidates, fetchStatesByIds } from './linear'
 import { log, warn } from './log'
 import { removeWorkspace } from './workspace'
@@ -38,6 +38,7 @@ export async function start(workflowPath?: string): Promise<void> {
   const claimed = new Set<string>()
   const retries = new Map<string, RetryTimer>()
   const history: Snapshot['recent'] = []
+  let lastCandidates: Issue[] = [] // every active+labeled ticket from the last poll — the board, not just the running ones
   let tokenSeq = 0
 
   const pushHistory = (identifier: string, kind: string, detail: string | null): void => {
@@ -216,15 +217,45 @@ export async function start(workflowPath?: string): Promise<void> {
   const workerDesc = hosts().length === 0 ? 'local' : `${hosts().length} VM${hosts().length > 1 ? 's' : ''}×${cfg.worker.maxPerHost}`
   log(`bunion up · scope=${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''} · cap=${displayCap()} · workers=${workerDesc} · poll=${cfg.pollIntervalMs}ms`)
 
-  const snapshot = (): Snapshot => ({
-    scope: `${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''}`,
-    cap: displayCap(),
-    pollMs: cfg.pollIntervalMs,
-    now: Date.now(),
-    running: [...running.values()].map((e) => ({ identifier: e.issue.identifier, title: e.issue.title, state: e.issue.state, startedAt: e.startedAt, lastActivity: e.lastActivity, retryAttempt: e.retryAttempt, turn: e.turn, activity: e.activity, host: e.host })),
-    retrying: [...retries.values()].map((r) => ({ identifier: r.identifier, attempt: r.attempt, dueAt: r.dueAt })),
-    recent: history.slice(0, 30),
-  })
+  const rankStatus = (s: BoardItem['status']): number => (s === 'running' ? 0 : s === 'retrying' ? 1 : 2)
+  const snapshot = (): Snapshot => {
+    const board = new Map<string, BoardItem>()
+    const base = (i: Issue): BoardItem => ({
+      identifier: i.identifier, title: i.title, state: i.state, priority: i.priority, host: placement.get(i.id) ?? null,
+      status: 'queued', turn: 0, activity: '', startedAt: 0, lastActivity: 0, retryAttempt: 0, retryDueAt: null,
+    })
+    for (const c of lastCandidates) board.set(c.id, base(c))
+    for (const [id, r] of retries) {
+      const it = board.get(id)
+      if (it) {
+        it.status = 'retrying'
+        it.retryAttempt = r.attempt
+        it.retryDueAt = r.dueAt
+      }
+    }
+    for (const [id, e] of running) {
+      const it = board.get(id) ?? base(e.issue)
+      board.set(id, it)
+      it.status = 'running'
+      it.state = e.issue.state
+      it.title = e.issue.title
+      it.turn = e.turn
+      it.activity = e.activity
+      it.startedAt = e.startedAt
+      it.lastActivity = e.lastActivity
+      it.retryAttempt = e.retryAttempt
+      it.host = e.host
+    }
+    const items = [...board.values()].sort((a, b) => rankStatus(a.status) - rankStatus(b.status) || rank(a.priority) - rank(b.priority) || a.identifier.localeCompare(b.identifier))
+    return {
+      scope: `${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''}`,
+      cap: displayCap(),
+      pollMs: cfg.pollIntervalMs,
+      now: Date.now(),
+      items,
+      recent: history.slice(0, 30),
+    }
+  }
   if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log)
 
   for (;;) {
@@ -239,15 +270,16 @@ export async function start(workflowPath?: string): Promise<void> {
         warn(`config: ${e instanceof Error ? e.message : e} (keeping last good)`)
       }
       await reconcile()
+      let candidates: Issue[]
+      try {
+        candidates = await fetchCandidates(cfg) // every poll (not just when slots are free) so the board shows the queue
+      } catch (e) {
+        warn(`poll: ${e instanceof Error ? e.message : e}`)
+        await sleep(cfg.pollIntervalMs)
+        continue
+      }
+      lastCandidates = candidates
       if (slots() > 0) {
-        let candidates: Issue[]
-        try {
-          candidates = await fetchCandidates(cfg)
-        } catch (e) {
-          warn(`poll: ${e instanceof Error ? e.message : e}`)
-          await sleep(cfg.pollIntervalMs)
-          continue
-        }
         for (const issue of candidates.sort(byDispatch)) {
           if (slots() <= 0) break
           if (!eligible(issue)) continue

@@ -171,7 +171,7 @@ const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return S
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 const fmtTok=n=>{n=n||0;return n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e4?Math.round(n/1e3)+'k':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)};
 const PRI={1:'Urgent',2:'High',3:'Medium',4:'Low'};
-var A_REWORK={a:'to-build',l:'Send back to dev',c:'',t:'Move to In Progress so a fresh build agent re-codes the fix'};
+var A_REWORK={a:'to-build',l:'Send to coding',c:'',t:'Move to In Progress so a fresh agent (re)writes the code and updates the PR'};
 function actionList(it){if(!it||it.state==='Done')return [];
  if(it.state==='QA blocked')return [{a:'to-qa',l:'Re-run QA',c:'go',t:'Move to QA Requested and re-verify with a fresh QA agent'},A_REWORK];
  if(it.status==='running')return [{a:'restart',l:'Restart this agent',c:'danger',t:'Stop the current agent, wipe its workspace, and re-run this phase from scratch'},A_REWORK];

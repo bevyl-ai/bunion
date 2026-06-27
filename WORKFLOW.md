@@ -17,15 +17,15 @@ hooks:
     git clone --depth 1 "https://github.com/$REPO.git" . || gh repo clone "$REPO" . -- --depth 1
   timeout_ms: 120000
 agent:
-  max_concurrent_agents: 4
+  max_concurrent_agents: 8
   max_turns: 20
 worker:
   # Empty → agents run locally (workspace + clone + codex on this machine; max_concurrent_agents is the only cap).
   # List ssh hosts (e.g. exe.dev VMs) and each ticket's workspace, clone, and codex run THERE, driven over the ssh
   # pipe — the orchestrator stays here and answers linear_graphql centrally, so the VMs need no bunion + no secrets
   # (their exe.dev github integration clones; their exe-llm gateway runs codex). Or set BUNION_SSH_HOSTS=a,b,c.
-  ssh_hosts: []
-  max_concurrent_agents_per_host: 1      # one disposable VM per ticket; danger-full-access is contained per-box
+  ssh_hosts: []                          # this deploy passes them via BUNION_SSH_HOSTS at launch
+  max_concurrent_agents_per_host: 3      # agents per worker VM; danger-full-access is contained per-box
 codex:
   command: codex --config shell_environment_policy.inherit=all app-server
   approval_policy: never

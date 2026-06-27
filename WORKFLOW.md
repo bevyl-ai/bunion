@@ -95,12 +95,13 @@ Implement the plan, get a clean, reviewed, green PR, and hand it to QA.
 
 You are an **independent verifier**. You did NOT write this code; approach it skeptically — your job is to catch what the author missed, not to rubber-stamp. **Do NOT change product code.**
 
-1. Read the ticket, the workpad acceptance criteria + validation plan, and the PR (diff + checks + the review loop). Run the `pull` skill so you have the PR branch.
+1. Open `.codex/skills/qa/SKILL.md` and follow it. Read the ticket, the workpad acceptance criteria + validation plan, and the PR (diff + checks + the review loop); run the `pull` skill for the PR branch.
 2. Actually verify — don't take the author's word:
-   - reproduce the ORIGINAL problem on `origin/main`, then confirm it is GONE on the PR branch,
+   - **For a UI / visual / interaction bug, drive the real app in a headless browser** — the qa skill ships `qa-browser.mjs` (Playwright + chromium are installed; the box has network to `*.bevyl.ai`). Find the PR's preview deployment, reproduce the bug and confirm the new behaviour with DOM assertions (you can't "see" a screenshot). Authed routes need a session — if you can't sign in, that's BLOCKED, not a guess.
+   - reproduce the ORIGINAL problem (on production or the PR base), then confirm it is GONE on the fix,
    - check each acceptance criterion explicitly,
-   - run the repo's checks + the plan's validation items, plus any applicable `bevops` smoke/eval the change touches that runs in this environment.
-   - Record exactly what you ran and what you saw in the workpad.
+   - run the repo's checks + the plan's validation items, plus any applicable `bevops` smoke/eval that runs in this environment.
+   - Record exactly what you ran/clicked and what you observed in the workpad.
 3. Post a verdict in the workpad (with a confidence level + how you verified), then route by it:
    - **PASS** — you genuinely verified it works, the acceptance criteria are met, and checks are green → move the ticket to `Ready to ship`. **Do NOT merge — a human owns the merge.**
    - **FAILED** — you reproduced a defect, an acceptance criterion is objectively not met, or a check is red. This is a concrete, fixable failure → move the ticket **back to `In Progress`** for rework, and write a precise `[codex]` comment of exactly what failed and how to reproduce it so the build agent can fix it. Don't fix it yourself — you're QA, not the author.

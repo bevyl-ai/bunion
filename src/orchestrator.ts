@@ -42,6 +42,7 @@ export async function start(workflowPath?: string): Promise<void> {
 
   const logs = new Map<string, string[]>() // per-identifier run log (rolling), kept for the last ~16 runs
   const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
+  const summaries = new Map<string, string>() // last agent message per ticket — survives the log buffer, surfaces the human action
 
   // Worker placement. An issue is PINNED to one host for its whole life (continuation turns reuse the same VM so the
   // cloned workspace + workpad survive). hostCounts = pinned issues per host; the pin is held until the issue is
@@ -138,6 +139,7 @@ export async function start(workflowPath?: string): Promise<void> {
           arr.push(e.log)
           if (arr.length > 600) arr.splice(0, arr.length - 600)
         }
+        if (e.log.startsWith('● ')) summaries.set(issue.identifier, e.log.slice(2, 400)) // keep the latest agent message
       }
     })
     void entry.handle.done.then((outcome) => {
@@ -216,6 +218,7 @@ export async function start(workflowPath?: string): Promise<void> {
     const board = new Map<string, BoardItem>()
     const base = (i: Issue): BoardItem => ({
       identifier: i.identifier, title: i.title, state: i.state, priority: i.priority, host: placement.get(i.id) ?? null, prUrl: i.prUrl,
+      url: i.url, note: summaries.get(i.identifier) ?? null,
       status: isActive(i.state) ? 'queued' : 'handoff',
       enteredAt: i.startedAt ? Date.parse(i.startedAt) : null, endedAt: i.completedAt ? Date.parse(i.completedAt) : null,
       turn: 0, activity: '', startedAt: 0, lastActivity: 0, retryAttempt: 0, retryDueAt: null,

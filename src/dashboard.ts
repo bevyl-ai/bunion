@@ -7,6 +7,8 @@ export interface BoardItem {
   priority: number
   host: string | null
   prUrl: string | null
+  url: string // the Linear issue URL — the full workpad/notes are one click away
+  note: string | null // the agent's last message (e.g. a QA verdict) — surfaces the human action when there's no live log
   status: 'running' | 'retrying' | 'queued' | 'handoff' // handoff = left the active states (e.g. in QA), bunion is done with it for now
   enteredAt: number | null // ms — Linear startedAt; the clock for total elapsed in the factory
   endedAt: number | null // ms — Linear completedAt; freezes total elapsed once merged/Done
@@ -85,7 +87,11 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 .empty{color:var(--mut);padding:64px;text-align:center;width:100%}
 #modal{position:fixed;inset:0;background:rgba(4,5,8,.6);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:50;padding:28px}
 #mpanel{background:var(--surf);border:1px solid var(--line2);border-radius:14px;width:min(960px,100%);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.6)}
-#mhead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line)}
+#mhead{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+#mbanner{margin:11px 16px 0;padding:9px 12px;border-radius:9px;font-size:12.5px;line-height:1.5}
+#mbanner.nh{background:#e0564f18;border:1px solid #e0564f44;color:#eaa6a0}
+#mbanner.nh b{color:#e0564f}
+#mbanner.note{background:var(--surf2);border:1px solid var(--line);color:var(--mut)}
 #mtitle{display:flex;align-items:center;gap:10px;font-family:ui-monospace,Menlo,monospace;font-weight:600;font-size:14px}
 #mclose{margin-left:auto;cursor:pointer;color:var(--mut);font-size:12.5px}
 #mclose:hover{color:var(--fg)}
@@ -106,6 +112,7 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 <div class="board" id="board"></div>
 <div id="modal"><div id="mpanel">
  <div id="mhead"><span class="live"></span><span id="mtitle"></span><span id="mclose">close &#10005;</span></div>
+ <div id="mbanner" style="display:none"></div>
  <div id="logbody"></div>
 </div></div>
 <script>
@@ -180,7 +187,12 @@ function tickLive(){
  });
 }
 let expandedId=null;
-function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId);const c=it?SC(it.state):'#7c8493';document.getElementById('mtitle').innerHTML=esc(expandedId||'')+(it?' <span class="pill" style="color:'+c+';background:'+c+'22">'+esc(it.state)+'</span>':'')+(it&&it.enteredAt?' <span class="clk" style="color:var(--mut)" title="total time in the factory">&#9201; '+ago((it.endedAt||Date.now())-it.enteredAt)+'</span>':'')+(it&&it.host?' <span class="clk" style="color:var(--mut2)">&#9709; '+esc(it.host.replace(/\\.exe\\.xyz$/,''))+'</span>':'')+(it&&it.prUrl?' <a class="pr" href="'+it.prUrl+'" target="_blank" rel="noopener">PR #'+(it.prUrl.split("/pull/")[1]||"")+'</a>':'');}
+function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId);const c=it?SC(it.state):'#7c8493';
+ document.getElementById('mtitle').innerHTML=esc(expandedId||'')+(it?' <span class="pill" style="color:'+c+';background:'+c+'22">'+esc(it.state)+'</span>':'')+(it&&it.enteredAt?' <span class="clk" style="color:var(--mut)" title="total time in the factory">&#9201; '+ago((it.endedAt||Date.now())-it.enteredAt)+'</span>':'')+(it&&it.host?' <span class="clk" style="color:var(--mut2)">&#9709; '+esc(it.host.replace(/\\.exe\\.xyz$/,''))+'</span>':'')+(it&&it.prUrl?' <a class="pr" href="'+it.prUrl+'" target="_blank" rel="noopener">PR #'+(it.prUrl.split("/pull/")[1]||"")+'</a>':'')+(it&&it.url?' <a class="pr" style="background:#8b929e1a;color:var(--mut)" href="'+it.url+'" target="_blank" rel="noopener">Linear &#8599;</a>':'');
+ const ban=document.getElementById('mbanner');
+ if(it&&it.state==='QA blocked'){ban.style.display='block';ban.className='nh';ban.innerHTML='<b>&#9888; Needs human</b> &mdash; '+(it.note?esc(it.note):'open the QA notes in Linear');}
+ else if(it&&it.note&&it.status!=='running'){ban.style.display='block';ban.className='note';ban.innerHTML=esc(it.note);}
+ else{ban.style.display='none';}}
 function openModal(id){expandedId=id;document.getElementById('modal').style.display='flex';document.getElementById('logbody').innerHTML='<div class="lg" style="color:var(--mut)">loading&hellip;</div>';syncHead();pullLog();}
 function closeModal(){expandedId=null;document.getElementById('modal').style.display='none';}
 board.addEventListener('click',function(e){const c=e.target.closest('[data-id]');if(!c)return;openModal(c.getAttribute('data-id'));});

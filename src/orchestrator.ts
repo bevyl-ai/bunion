@@ -67,6 +67,8 @@ function saveTokens(t: TokenTally): void {
 // running issues against the tracker, and retry. It never touches Linear state or git — the AGENT does, via the
 // workflow prompt + skills. Faithful to Symphony's orchestrator (SSH pool, blocked-state, dashboard omitted).
 export async function start(workflowPath?: string): Promise<void> {
+  // Unattended daemon: a stray rejection (flaky VM, transient API error) must never take the whole factory down.
+  process.on('unhandledRejection', (e) => warn(`unhandled rejection: ${e instanceof Error ? e.message : String(e)}`))
   let cfg = loadConfig(workflowPath)
   validateConfig(cfg)
 

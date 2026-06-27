@@ -34,18 +34,26 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
   let stopped = false
 
   const done = (async (): Promise<AgentOutcome> => {
-    const { dir, created } = ensureWorkspace(cfg, issue.identifier, host)
-    if (created && cfg.hooks.afterCreate) {
-      const h = runHook(cfg, dir, 'after_create', cfg.hooks.afterCreate, host)
-      if (!h.ok) {
-        removeWorkspace(cfg, issue.identifier, host) // don't leave a half-made dir — the retry must re-create + re-clone
-        return { ok: false, error: h.error }
+    let dir = ''
+    try {
+      const ws = ensureWorkspace(cfg, issue.identifier, host)
+      dir = ws.dir
+      if (ws.created && cfg.hooks.afterCreate) {
+        const h = runHook(cfg, dir, 'after_create', cfg.hooks.afterCreate, host)
+        if (!h.ok) {
+          removeWorkspace(cfg, issue.identifier, host) // don't leave a half-made dir — the retry must re-create + re-clone
+          return { ok: false, error: h.error }
+        }
       }
-    }
-    if (created) installSkills(dir, host)
-    if (cfg.hooks.beforeRun) {
-      const h = runHook(cfg, dir, 'before_run', cfg.hooks.beforeRun, host)
-      if (!h.ok) return { ok: false, error: h.error }
+      if (ws.created) installSkills(dir, host)
+      if (cfg.hooks.beforeRun) {
+        const h = runHook(cfg, dir, 'before_run', cfg.hooks.beforeRun, host)
+        if (!h.ok) return { ok: false, error: h.error }
+      }
+    } catch (e) {
+      // A transient host failure during setup (unreachable VM, ssh hiccup) must fail this session cleanly so the
+      // orchestrator retries it — never escape as an unhandled rejection that takes the whole daemon down.
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
 
     session = new AppServerSession(cfg, [linearGraphqlTool(cfg)], onEvent)

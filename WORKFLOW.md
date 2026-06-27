@@ -92,8 +92,12 @@ Implement the plan, get a clean, reviewed, green PR, and hand it to QA.
 2. Implement against the plan + acceptance criteria. Keep it minimal and in-scope; update the workpad after each milestone.
 3. Validate: run the repo's checks (see the `push` skill) and the plan's validation items until green.
 4. `commit`, then `push` (open/update the PR, ensure the `bunion` label, attach the PR URL to the issue).
-5. **Code review loop (stupify):** stupify auto-reviews every PR — its review arrives as a PR or issue comment beginning `## Codex Review — <persona>` from a bot account. Treat every actionable reviewer comment (stupify, any other bot, or a human) as BLOCKING until it is fixed in code/tests OR answered with explicit, justified `[codex]` pushback (reply inline with `in_reply_to` = the numeric review-comment id). Re-validate, push, and repeat until no actionable comments remain and checks are green.
-6. When the PR is green, the review loop is clean, and the acceptance criteria are met, move the ticket to `QA Requested`. You are done — a fresh, independent QA agent verifies it.
+5. **Code-review gate (stupify) — the build phase is NOT done until stupify LGTMs the current head commit.** stupify reviews every push: it submits a PR review from `exe-dev-github-integration[bot]`, tagged `<!-- stupify:<commit-sha> -->` for the commit it reviewed. It **approves with a body that starts `LGTM`** (e.g. `LGTM ✅`, `nice, all fixed ✅`); otherwise the body lists what's wrong. Loop:
+   - After each push, read `head=$(gh pr view <N> --json headRefOid -q .headRefOid)` and `gh api repos/$REPO/pulls/<N>/reviews`.
+   - Find stupify's review whose `stupify:<sha>` marker equals `head`. **None yet → stupify hasn't reviewed your latest push; wait and re-check** (don't proceed).
+   - **LGTM for `head`** → gate passed. **Lists issues** → fix them in code (or push back on a specific point inline, `in_reply_to` the review-comment id, with justified `[codex]` reasoning), push, and loop again. A stale LGTM for an OLDER commit does not count — every new push must earn a fresh LGTM.
+   - If stupify genuinely never reviews after repeated pushes + waits, record that in the workpad and leave the ticket in `In Progress` with a `[blocked]` note — never hand off un-LGTM'd work.
+6. Hand off only once stupify has LGTM'd the head commit, CI checks are green, and the acceptance criteria are met → move to `QA Requested`. A fresh, independent QA agent verifies it.
 
 ## QA CHECK — status `QA Requested` (the review/QA pass)
 

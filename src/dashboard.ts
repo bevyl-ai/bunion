@@ -140,12 +140,14 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 #mtitle{display:flex;align-items:center;gap:10px;font-family:ui-monospace,Menlo,monospace;font-weight:600;font-size:14px}
 #mclose{margin-left:auto;cursor:pointer;color:var(--mut);font-size:12.5px}
 #mclose:hover{color:var(--fg)}
-#logbody{margin:0;padding:10px 16px 16px;overflow:auto;flex:1;font:12px/1.62 ui-monospace,SFMono-Regular,Menlo,monospace}
-.lg{padding:.5px 0;white-space:pre-wrap;word-break:break-word}
-.lg-turn{margin:13px 0 6px;color:#6aa3da;font-weight:700;border-top:1px solid var(--line);padding-top:10px;letter-spacing:.5px}
-.lg-msg{color:var(--fg)}.lg-msg b{color:#46c08a}
-.lg-cmd{color:#8b929e}.lg-cmd b{color:#46c08a}
-.lg-tool{color:#d99a2b}.lg-edit{color:#b88cd9}
+#logbody{margin:0;padding:4px 18px 20px;overflow:auto;flex:1;font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}
+.lg{padding:0}
+.lg-turn{margin:18px 0 2px;color:#5b8def;font:700 10.5px/1 ui-monospace,Menlo,monospace;border-top:1px solid var(--line);padding-top:13px;letter-spacing:1.5px;text-transform:uppercase}
+.lg-msg{color:var(--fg);font-size:13px;line-height:1.55;margin:9px 0;padding-left:13px;border-left:2px solid #2f6f4f}
+.lg-cmd{color:var(--mut2);font:11.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2.5px 0 2.5px 13px}
+.lg-cmd b{color:#5b8def;font-weight:700;margin-right:3px}
+.lg-tool{color:#d99a2b;font:11.5px/1.45 ui-monospace,Menlo,monospace;padding:2px 0 2px 13px;opacity:.9}
+.lg-edit{color:#b88cd9;font:11.5px/1.45 ui-monospace,Menlo,monospace;padding:2px 0 2px 13px}
 .live{width:7px;height:7px;border-radius:50%;background:#3fb27f;flex:none;animation:pulse 1.5s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 </style></head><body>
@@ -298,13 +300,13 @@ board.addEventListener('click',function(e){const c=e.target.closest('[data-id]')
 document.getElementById('mclose').addEventListener('click',closeModal);
 document.getElementById('modal').addEventListener('click',function(e){if(e.target.id==='modal')closeModal();});
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal();});
-function logHtml(line){var t=(line||'').replace(/^\\n+/,''),e=esc(t);
- if(t.indexOf('\\u2500\\u2500')===0)return '<div class="lg lg-turn">'+e+'</div>';
- if(t.indexOf('\\u25cf ')===0)return '<div class="lg lg-msg"><b>\\u25cf</b> '+esc(t.slice(2))+'</div>';
- if(t.indexOf('$ ')===0)return '<div class="lg lg-cmd"><b>$</b> '+esc(t.slice(2))+'</div>';
- if(t.indexOf('\\u2699')===0)return '<div class="lg lg-tool">'+e+'</div>';
- if(t.indexOf('\\u270e')===0)return '<div class="lg lg-edit">'+e+'</div>';
- return '<div class="lg">'+e+'</div>';}
+function logHtml(line){var t=(line||'').replace(/^\\n+/,'');
+ if(t.indexOf('\\u2500\\u2500')===0)return '<div class="lg lg-turn">'+esc(t.replace(/\\u2500/g,'').trim())+'</div>';
+ if(t.indexOf('\\u25cf ')===0)return '<div class="lg lg-msg">'+esc(t.slice(2))+'</div>';
+ if(t.indexOf('$ ')===0){var c=esc(t.slice(2));return '<div class="lg lg-cmd" title="'+c.replace(/"/g,'&quot;')+'"><b>$</b>'+c+'</div>';}
+ if(t.indexOf('\\u2699')===0)return '<div class="lg lg-tool">'+esc(t)+'</div>';
+ if(t.indexOf('\\u270e')===0)return '<div class="lg lg-edit">'+esc(t)+'</div>';
+ return '<div class="lg lg-cmd">'+esc(t)+'</div>';}
 async function pullLog(){if(!expandedId)return;try{const j=await (await fetch('/log?id='+encodeURIComponent(expandedId))).json();const b=document.getElementById('logbody');const atEnd=b.scrollTop+b.clientHeight>=b.scrollHeight-60;b.innerHTML=(j.log&&j.log.length)?j.log.map(logHtml).join(''):'<div class="lg" style="color:var(--mut)">(no log yet)</div>';if(atEnd)b.scrollTop=b.scrollHeight;}catch(e){}}
 setInterval(pull,1000);setInterval(tickLive,1000);setInterval(function(){if(expandedId){pullLog();syncHead();}},1000);pull();
 </script></body></html>`

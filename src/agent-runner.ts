@@ -1,4 +1,5 @@
 import { AppServerSession } from './codex/app-server'
+import { phaseOf } from './config'
 import { linearGraphqlTool } from './codex/dynamic-tool'
 import { fetchById } from './linear'
 import { log } from './log'
@@ -52,6 +53,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
     try {
       await session.start(dir, host)
       const threadId = await session.startThread(dir)
+      const startPhase = phaseOf(cfg, current.state)
       for (let turn = 1; ; turn++) {
         if (stopped) return { ok: false, error: 'terminated' }
         onEvent({ turn, log: `\n── turn ${turn} ──` })
@@ -59,6 +61,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
         await session.runTurn(threadId, dir, prompt, `${current.identifier}: ${current.title}`)
         current = await fetchById(cfg, issue.id)
         if (!isActive(cfg, current.state)) break // handed off to a downstream state — this worker is done
+        if (phaseOf(cfg, current.state) !== startPhase) break // crossed into a new phase — a FRESH agent runs it
         if (turn >= cfg.agent.maxTurns) break // graceful cap; the orchestrator may dispatch a fresh worker
       }
       return { ok: true }

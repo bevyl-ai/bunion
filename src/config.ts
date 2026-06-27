@@ -86,6 +86,7 @@ export function loadConfig(path?: string): Config {
       maxTurns: num(ag.max_turns, 20),
       maxRetryBackoffMs: num(ag.max_retry_backoff_ms, 300_000),
     },
+    phases: Object.fromEntries(Object.entries(obj(fm.phases)).map(([k, v]) => [k, arr(v)])),
     worker: {
       sshHosts: arr(wk.ssh_hosts).length ? arr(wk.ssh_hosts) : envHosts,
       maxPerHost: num(wk.max_concurrent_agents_per_host, 1),
@@ -103,6 +104,16 @@ export function loadConfig(path?: string): Config {
     promptTemplate: prompt,
     workflowPath,
   }
+}
+
+// Which pipeline phase a state belongs to. Unmapped states are their own phase, so crossing into one (e.g. a
+// build worker setting `Ready to ship`) still reads as a handoff. Matching ignores case + surrounding whitespace.
+export function phaseOf(cfg: Config, state: string): string {
+  const n = state.trim().toLowerCase()
+  for (const [phase, states] of Object.entries(cfg.phases)) {
+    if (states.some((s) => s.trim().toLowerCase() === n)) return phase
+  }
+  return n
 }
 
 // Dispatch preflight — throws on the config errors that block any work.

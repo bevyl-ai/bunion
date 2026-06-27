@@ -1,6 +1,6 @@
 # bunion
 
-A Bun/TS port of [OpenAI's Symphony](https://github.com/openai/symphony): a thin harness that drives Codex (via its app-server) to take a Linear ticket all the way to a merged PR. Point it at a repo and a Linear project; it polls, spawns a Codex agent per ticket, and the agent does the work.
+A Bun/TS port of [OpenAI's Symphony](https://github.com/openai/symphony): a thin harness that drives Codex (via its app-server) to take a Linear ticket through a staged pipeline — plan, build, QA — to a reviewed PR ready for a human to merge. Point it at a repo and a Linear project; it polls, spawns a Codex agent per ticket, and the agent does the work.
 
 Codex runs through the [exe.dev](https://exe.dev) gateway, so it uses your ChatGPT/Codex plan rather than metered API tokens.
 
@@ -11,16 +11,19 @@ The orchestrator is thin and the agent is fat.
 The **host** does three things:
 
 - polls Linear for issues in the configured `active_states`,
-- spawns one `codex app-server` session per issue in an isolated workspace, running turns on a single thread until the ticket leaves the active states or hits `max_turns` (bounded concurrency, continuation/backoff retries, reconcile),
+- spawns one `codex app-server` session per issue in an isolated workspace, running turns on a single thread until the ticket leaves the active states, **crosses into a new phase**, or hits `max_turns` (bounded concurrency, continuation/backoff retries, reconcile),
 - answers the agent's `linear_graphql` tool-calls and auto-approves its actions so an unattended run never stalls.
 
-The **agent**, driven by `WORKFLOW.md` and the bundled skills, does everything else: it moves the ticket through the Linear workflow (`Todo → In Progress → Human Review → Merging → Done`), maintains one `## Codex Workpad` comment, opens the PR, runs the CI/review feedback sweep, and — once a human moves the ticket to `Merging` — runs the `land` skill to squash-merge. The state machine lives in the prompt, not in host code.
+The **agent**, driven by `WORKFLOW.md` and the bundled skills, does everything else. The pipeline is **staged**: the ticket's status decides which phase the agent runs, and when it crosses a phase boundary the worker hands off to a *fresh* agent — so each stage is independent (QA isn't graded by the author). The single state-aware prompt is the state machine; the host just re-dispatches at the boundaries.
 
 ```
-poll active_states ─▶ spawn codex app-server (per ticket) ─▶ agent drives Linear + git + gh ─▶ merge
-   (host)                (1 thread/issue, turns                (Todo→In Progress→Human Review
-                          until done or max_turns)              →Merging→Done; workpad; PR; land)
+PLAN (Todo)         ─▶ BUILD (In Progress / QA blocked)        ─▶ QA (QA Requested)            ─▶ 🧍 human merge
+scope + acceptance     implement + PR + stupify review loop        independent verification         (Ready to ship —
+criteria, no code      ↺ rework on QA blocked                      PASS→Ready to ship                 NO automerge)
+   → In Progress          → QA Requested                           FAIL→QA blocked / can't→hold
 ```
+
+Each phase keeps one `## Codex Workpad` comment as the running source of truth. There is **no automerge** — the agent takes a ticket to `Ready to ship`; a human performs the merge.
 
 ## Configuration
 
@@ -70,9 +73,15 @@ bunion status                    # issues per active state
 
 Run one daemon per board.
 
-## Merging
+## Phases and merging
 
-When a ticket reaches `Merging`, the agent runs the `land` loop: `land_watch.py` watches CI and Codex/human reviews and exits with a status code (`0` clear → squash-merge, `2` review feedback, `3` CI failed, `4` head moved, `5` conflicts); the agent remediates and re-runs until it can `gh pr merge --squash`. Nothing merges until a human moves the ticket to `Merging` — the merge gate is that state transition, not a code predicate. For a hard wall around sensitive paths, use GitHub branch protection / CODEOWNERS.
+Phases are config (`phases:` in `WORKFLOW.md`) mapping each phase to its Linear states; `active_states` decides which phases the factory works. The agent runs the phase its ticket is in and hands off at the boundary:
+
+- **plan** (`Todo`) — scope the ticket, find the real owner, write acceptance criteria + a validation plan into the workpad. No product code. → `In Progress`.
+- **build** (`In Progress`, `QA blocked`) — implement, open the PR, then the **code-review loop**: stupify auto-reviews every PR and the agent treats each actionable comment as blocking until fixed or pushed back on. → `QA Requested`.
+- **qa** (`QA Requested`) — a fresh, independent agent reproduces the original bug, confirms the fix on the PR branch, checks each acceptance criterion, and runs the validation plan. `PASS` → `Ready to ship`; `FAIL` → `QA blocked`; can't actually verify (visual/UX) → leave it for a human with its findings.
+
+There is **no automerge**. `Ready to ship` is deliberately not an active state — the agent stops there and a human performs the merge. The `land` skill is still shipped for repos that want agent-driven merging, but this pipeline does not invoke it. For a hard wall around sensitive paths, use GitHub branch protection / CODEOWNERS.
 
 The agent has network access plus `gh` and `linear_graphql`, and Codex runs with `approval_policy: never` (the host auto-approves its command/file/tool requests). Suitable for trusted repos with team-authored tickets.
 
@@ -95,7 +104,7 @@ On [exe.dev](https://exe.dev) this composes cleanly: a VM's **github integration
 ```
 WORKFLOW.md              front matter (config) + the agent prompt
 skills/                  copied into each workspace's .codex/skills/
-  linear commit push pull land   (land includes land_watch.py)
+  plan linear pull commit push qa land   (land includes land_watch.py)
 src/
   cli.ts                 start | run | status | doctor
   config.ts              parse WORKFLOW.md front matter → typed config (+ $VAR)

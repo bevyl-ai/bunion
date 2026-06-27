@@ -45,10 +45,10 @@ You don't get pixels back — use `snapshot`/`eval` to perceive and assert, and
 
 ## Verify the ticket
 
-1. Find the PR's preview URL (a Vercel deployment, a `*.preview.bevyl.ai` host):
-   `sha=$(gh pr view <N> --json headRefOid -q .headRefOid)`, then for a deployment id from
-   `gh api "repos/bevyl-ai/bevyl.ai/deployments?sha=$sha" -q '.[].id'` read
-   `gh api "repos/bevyl-ai/bevyl.ai/deployments/<id>/statuses" -q '.[0].environment_url'`.
+1. The preview URL is **deterministic from the PR number** — `https://pr-<N>.preview.bevyl.ai` (web app)
+   or `https://pr-<N>.admin-preview.bevyl.ai` (admin app). Just build it and confirm it 200s
+   (`curl -sI https://pr-<N>.preview.bevyl.ai/home`). Do NOT use the GitHub deployments API or the Vercel
+   dashboard/CLI — they 403 / need an interactive Vercel login from this VM. Don't guess any other hostname.
 2. **Sign in** (the editor / home / admin all require it): `browser.mjs open <preview>/home` then
    `browser.mjs login` — it uses the QA test account already in the VM env and lands you in the app
    (check `signedIn:true`). Public routes (marketing, glossary) need no login.

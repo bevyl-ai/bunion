@@ -66,8 +66,10 @@ export async function start(workflowPath?: string): Promise<void> {
     if (hosts().length === 0) return null
     const pinned = placement.get(id)
     if (pinned && hosts().includes(pinned)) return pinned
-    for (const h of hosts()) if ((hostCounts.get(h) ?? 0) < cfg.worker.maxPerHost) return h
-    return undefined
+    // Spread, don't pack: of the hosts with a free slot, take the least-loaded so VMs fill evenly.
+    const free = hosts().filter((h) => (hostCounts.get(h) ?? 0) < cfg.worker.maxPerHost)
+    if (free.length === 0) return undefined
+    return free.reduce((a, b) => ((hostCounts.get(a) ?? 0) <= (hostCounts.get(b) ?? 0) ? a : b))
   }
   const displayCap = (): number => (hosts().length === 0 ? cfg.agent.maxConcurrentAgents : Math.min(cfg.agent.maxConcurrentAgents, hosts().length * cfg.worker.maxPerHost))
 

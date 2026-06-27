@@ -4,7 +4,7 @@ const homes = new Map<string, string>()
 
 // Run a command on a worker host. The host string is anything ssh accepts (e.g. an exe.dev VM, user@host).
 export function sshExec(host: string, command: string, timeoutMs = 180_000): { ok: boolean; out: string } {
-  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=20', '-o', 'ServerAliveInterval=15', '-o', 'BatchMode=yes', host, command], {
+  const r = spawnSync('ssh', ['-o', 'ConnectTimeout=20', '-o', 'ServerAliveInterval=15', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', host, command], {
     encoding: 'utf8',
     timeout: timeoutMs,
     maxBuffer: 16 * 1024 * 1024,
@@ -14,7 +14,7 @@ export function sshExec(host: string, command: string, timeoutMs = 180_000): { o
 
 // Copy a local directory's CONTENTS into a remote directory (the remote dir must already exist).
 export function scpInto(localDir: string, host: string, remoteDir: string): { ok: boolean; out: string } {
-  const r = spawnSync('scp', ['-r', '-q', '-o', 'ConnectTimeout=20', '-o', 'BatchMode=yes', `${localDir}/.`, `${host}:${remoteDir}/`], {
+  const r = spawnSync('scp', ['-r', '-q', '-o', 'ConnectTimeout=20', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', `${localDir}/.`, `${host}:${remoteDir}/`], {
     encoding: 'utf8',
     timeout: 180_000,
     maxBuffer: 16 * 1024 * 1024,

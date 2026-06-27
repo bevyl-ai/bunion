@@ -35,7 +35,7 @@ export class AppServerSession {
     // VM and run the same app-server in the VM's workspace — the JSON-RPC stream rides the ssh stdio pipe unchanged,
     // and a login shell (`exec $SHELL -lc`) puts codex on PATH there too.
     const proc = host
-      ? spawn('ssh', ['-o', 'ConnectTimeout=20', '-o', 'ServerAliveInterval=15', '-o', 'BatchMode=yes', host, `cd ${shq(workspace)} && exec "$SHELL" -lc ${shq(this.cfg.codex.command)}`], { stdio: ['pipe', 'pipe', 'pipe'] })
+      ? spawn('ssh', ['-o', 'ConnectTimeout=20', '-o', 'ServerAliveInterval=15', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', host, `cd ${shq(workspace)} && exec "$SHELL" -lc ${shq(this.cfg.codex.command)}`], { stdio: ['pipe', 'pipe', 'pipe'] })
       : spawn('bash', ['-lc', this.cfg.codex.command], { cwd: workspace, stdio: ['pipe', 'pipe', 'pipe'] })
     this.proc = proc
     proc.stdout?.on('data', (d: Buffer) => this.onData(d))

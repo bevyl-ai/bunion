@@ -14,7 +14,7 @@ workspace:
   root: ~/.bunion/workspaces
 hooks:
   after_create: |
-    gh repo clone "$REPO" . -- --depth 1 || git clone "$REPO" .
+    git clone --depth 1 "https://github.com/$REPO.git" . || gh repo clone "$REPO" . -- --depth 1
   timeout_ms: 120000
 agent:
   max_concurrent_agents: 4

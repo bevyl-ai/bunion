@@ -44,6 +44,9 @@ export async function start(workflowPath?: string): Promise<void> {
     if (history.length > 40) history.length = 40
   }
 
+  const logs = new Map<string, string[]>() // per-identifier run log (rolling), kept for the last ~16 runs
+  const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
+
   const slots = (): number => Math.max(cfg.agent.maxConcurrentAgents - running.size, 0)
   const norm = (s: string): string => s.trim().toLowerCase()
   const isTerminal = (s: string): boolean => cfg.tracker.terminalStates.some((t) => norm(t) === norm(s))
@@ -89,6 +92,12 @@ export async function start(workflowPath?: string): Promise<void> {
   const dispatch = (issue: Issue, attempt: number): void => {
     clearRetry(issue.id)
     claimed.add(issue.id)
+    logs.delete(issue.identifier)
+    logs.set(issue.identifier, []) // fresh log at the newest position
+    if (logs.size > 16) {
+      const oldest = logs.keys().next().value
+      if (oldest && oldest !== issue.identifier) logs.delete(oldest)
+    }
     const entry: RunningEntry = { issue, handle: undefined as unknown as AgentHandle, retryAttempt: attempt > 0 ? attempt : 0, startedAt: Date.now(), lastActivity: Date.now(), turn: 0, activity: 'starting…' }
     running.set(issue.id, entry)
     log(`→ ${issue.identifier} (${issue.state})${attempt > 0 ? ` retry#${attempt}` : ''}`)
@@ -96,6 +105,13 @@ export async function start(workflowPath?: string): Promise<void> {
       entry.lastActivity = Date.now()
       if (e.turn != null) entry.turn = e.turn
       if (e.label != null) entry.activity = e.label
+      if (e.log != null) {
+        const arr = logs.get(issue.identifier)
+        if (arr) {
+          arr.push(e.log)
+          if (arr.length > 600) arr.splice(0, arr.length - 600)
+        }
+      }
     })
     void entry.handle.done.then((outcome) => {
       if (running.get(issue.id) !== entry) return // already terminated by reconcile
@@ -176,7 +192,7 @@ export async function start(workflowPath?: string): Promise<void> {
     retrying: [...retries.values()].map((r) => ({ identifier: r.identifier, attempt: r.attempt, dueAt: r.dueAt })),
     recent: history.slice(0, 30),
   })
-  if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, log)
+  if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log)
 
   for (;;) {
     try {

@@ -14,7 +14,8 @@ interface Pending {
 export class AppServerSession {
   private cfg: Config
   private tools: Map<string, DynamicTool>
-  private onEvent: (e: { label?: string }) => void
+  private onEvent: (e: { turn?: number; label?: string; log?: string }) => void
+  private msgBuf = new Map<string, string>() // accumulates agent-message text deltas by itemId
   private proc: ChildProcess | null = null
   private buf = ''
   private nextId = 100
@@ -22,7 +23,7 @@ export class AppServerSession {
   private turn: { resolve: () => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null
   private fatal: Error | null = null
 
-  constructor(cfg: Config, tools: DynamicTool[], onEvent: (e: { label?: string }) => void = () => {}) {
+  constructor(cfg: Config, tools: DynamicTool[], onEvent: (e: { turn?: number; label?: string; log?: string }) => void = () => {}) {
     this.cfg = cfg
     this.tools = new Map(tools.map((t) => [t.spec.name, t]))
     this.onEvent = onEvent
@@ -199,6 +200,7 @@ export class AppServerSession {
 
   private async handleToolCall(id: number, params: Json): Promise<void> {
     const name = typeof params.tool === 'string' ? params.tool : typeof params.name === 'string' ? params.name : ''
+    this.onEvent({ label: 'calling a tool', log: `⚙ ${name}` })
     const tool = this.tools.get(name)
     if (!tool) {
       this.reply(id, toolResult(false, `Unsupported dynamic tool: ${name}`))
@@ -219,12 +221,30 @@ export class AppServerSession {
     if (method === 'item/started') {
       const item = obj(params.item)
       switch (item.type) {
-        case 'commandExecution': return this.onEvent({ label: cmdLabel(item) })
+        case 'commandExecution': return this.onEvent({ label: cmdLabel(item), log: `$ ${cmdStr(item)}` })
         case 'reasoning': return this.onEvent({ label: 'thinking…' })
-        case 'fileChange': return this.onEvent({ label: 'editing files' })
-        case 'agentMessage': return this.onEvent({ label: 'writing a reply…' })
+        case 'fileChange': return this.onEvent({ label: 'editing files', log: '✎ editing files' })
+        case 'agentMessage':
+          this.msgBuf.set(String(item.id ?? ''), '')
+          return this.onEvent({ label: 'writing a reply…' })
         case 'mcpToolCall':
         case 'dynamicToolCall': return this.onEvent({ label: 'calling a tool' })
+      }
+      return
+    }
+    if (method === 'item/agentMessage/delta') {
+      const id = String(params.itemId ?? '')
+      const d = typeof params.textDelta === 'string' ? params.textDelta : ''
+      this.msgBuf.set(id, (this.msgBuf.get(id) ?? '') + d)
+      return
+    }
+    if (method === 'item/completed') {
+      const item = obj(params.item)
+      if (item.type === 'agentMessage') {
+        const id = String(item.id ?? '')
+        const text = typeof item.text === 'string' ? item.text : this.msgBuf.get(id) ?? ''
+        this.msgBuf.delete(id)
+        if (text.trim()) this.onEvent({ log: `● ${text.trim()}` })
       }
     }
   }
@@ -252,11 +272,15 @@ function toolResult(success: boolean, output: string): Json {
   return { success, output, contentItems: [{ type: 'inputText', text: output }] }
 }
 
-function cmdLabel(item: Json): string {
+function cmdStr(item: Json): string {
   const c = item.command
   const s = Array.isArray(c) ? c.map(String).join(' ') : typeof c === 'string' ? c : ''
-  if (!s) return 'running a command'
-  return `run: ${s.length > 64 ? s.slice(0, 61) + '…' : s}`
+  return s || '(command)'
+}
+
+function cmdLabel(item: Json): string {
+  const s = cmdStr(item)
+  return `run: ${s.length > 64 ? `${s.slice(0, 61)}…` : s}`
 }
 
 // Newer item/* approvals want `acceptForSession`; legacy exec/applyPatch approvals want `approved_for_session`.

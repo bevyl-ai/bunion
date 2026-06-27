@@ -10,11 +10,13 @@ export interface Snapshot {
 
 // A tiny status server: GET /state.json is the live orchestrator snapshot; GET / is a self-contained page that
 // polls it and renders the running grid + retry queue + recent outcomes.
-export function startDashboard(port: number, getSnapshot: () => Snapshot, log: (m: string) => void): void {
+export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void): void {
   Bun.serve({
     port,
     fetch(req) {
-      if (new URL(req.url).pathname === '/state.json') return Response.json(getSnapshot())
+      const url = new URL(req.url)
+      if (url.pathname === '/state.json') return Response.json(getSnapshot())
+      if (url.pathname === '/log') return Response.json({ log: getLog(url.searchParams.get('id') ?? '') })
       return new Response(HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } })
     },
   })
@@ -40,6 +42,13 @@ header{display:flex;align-items:center;gap:18px;padding:14px 22px;border-bottom:
 </style></head><body>
 <header><span class="b">&#9679; bunion</span><span class="s" id="scope"></span><span class="s" id="count"></span><span class="s" style="margin-left:auto" id="clock"></span></header>
 <div class="grid" id="grid"></div>
+<div id="drawer" style="display:none;margin:0 22px 18px;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden">
+ <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)">
+  <span id="drawerId" style="font-weight:700"></span>
+  <span id="drawerClose" style="margin-left:auto;cursor:pointer;color:var(--mut)">close &#10005;</span>
+ </div>
+ <pre id="logbody" style="margin:0;padding:14px;max-height:360px;overflow:auto;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;color:var(--fg)"></pre>
+</div>
 <div class="sec"><h2>retry queue</h2><div id="retry" class="muted">&mdash;</div></div>
 <div class="sec"><h2>recent</h2><div id="recent" class="muted">&mdash;</div></div>
 <script>
@@ -55,7 +64,7 @@ function render(){
  clock.textContent=new Date().toLocaleTimeString();
  grid.innerHTML=(snap.running&&snap.running.length)?snap.running.map(r=>{
   const act=now-r.lastActivity,dc=act<30000?'#36a86a':act<120000?'#c9952b':'#cf5a4f',c=SC(r.state);
-  return '<div class="card"><div class="id">'+r.identifier+(r.retryAttempt>0?' <span class="badge" style="background:#3a2b2b;color:#d9a">retry '+r.retryAttempt+'</span>':'')+'</div>'+
+  return '<div class="card" data-id="'+r.identifier+'" style="cursor:pointer'+(r.identifier===expandedId?';outline:2px solid #4a86c5':'')+'"><div class="id">'+r.identifier+(r.retryAttempt>0?' <span class="badge" style="background:#3a2b2b;color:#d9a">retry '+r.retryAttempt+'</span>':'')+'</div>'+
    '<div class="title">'+esc(r.title)+'</div>'+
    '<div class="row"><span class="badge" style="background:'+c+'2a;color:'+c+'">'+esc(r.state)+'</span><span class="t muted">&#9201; '+dur(now-r.startedAt)+'</span></div>'+
    '<div class="row"><span class="muted" style="display:block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,64))+'</span></div>'+
@@ -63,5 +72,10 @@ function render(){
  retry.innerHTML=(snap.retrying&&snap.retrying.length)?snap.retrying.map(x=>'<span class="pill">'+x.identifier+' &middot; attempt '+x.attempt+' &middot; in '+ago(x.dueAt-now)+'</span>').join(''):'&mdash;';
  recent.innerHTML=(snap.recent&&snap.recent.length)?snap.recent.map(x=>'<span class="pill">'+(x.kind==='failed'?'&#10007;':'&#10003;')+' '+x.identifier+' &middot; '+ago(now-x.at)+' ago</span>').join(''):'&mdash;';
 }
-setInterval(render,1000);setInterval(pull,2000);pull();
+let expandedId=null;
+grid.addEventListener('click',e=>{const c=e.target.closest('[data-id]');if(!c)return;const id=c.getAttribute('data-id');expandedId=(expandedId===id)?null:id;syncDrawer();});
+document.getElementById('drawerClose').addEventListener('click',()=>{expandedId=null;syncDrawer();});
+function syncDrawer(){const d=document.getElementById('drawer');if(!expandedId){d.style.display='none';return;}d.style.display='block';document.getElementById('drawerId').textContent=expandedId+' — log';pullLog();}
+async function pullLog(){if(!expandedId)return;try{const j=await (await fetch('/log?id='+encodeURIComponent(expandedId))).json();const b=document.getElementById('logbody');const atEnd=b.scrollTop+b.clientHeight>=b.scrollHeight-40;b.textContent=(j.log&&j.log.length)?j.log.join('\\n'):'(no log yet)';if(atEnd)b.scrollTop=b.scrollHeight;}catch(e){}}
+setInterval(render,1000);setInterval(pull,2000);setInterval(pullLog,1500);pull();
 </script></body></html>`

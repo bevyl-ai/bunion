@@ -156,7 +156,7 @@ export async function fetchLatestNote(cfg: Config, issueId: string): Promise<str
   const useful = raw.filter((b) => !noise(b)).map(clean).filter((c) => c.length >= 8)
   if (!useful.length) return null
   // Prefer the most recent concise note (a verdict / human question); fall back to the latest cleaned comment.
-  const pick = [...useful].reverse().find((c) => c.length <= 320) ?? useful[useful.length - 1]
+  const pick = [...useful].reverse().find((c) => c.length <= 320) ?? useful[useful.length - 1]!
   return pick.slice(0, 400)
 }
 

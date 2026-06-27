@@ -48,6 +48,7 @@ export interface Config {
   hooks: HooksConfig
   agent: { maxConcurrentAgents: number; maxTurns: number; maxRetryBackoffMs: number }
   codex: CodexConfig
+  dashboardPort: number | null // status dashboard HTTP port (server.port / BUNION_PORT); null = off
   promptTemplate: string
   workflowPath: string
 }

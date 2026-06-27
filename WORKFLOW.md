@@ -8,6 +8,8 @@ tracker:
   terminal_states: [Done, Canceled, Cancelled, Duplicate]
 polling:
   interval_ms: 10000
+server:
+  port: 4319                       # live status dashboard at http://localhost:4319 (or set BUNION_PORT)
 workspace:
   root: ~/.bunion/workspaces
 hooks:

@@ -1,9 +1,10 @@
 import { startAgent, type AgentHandle } from './agent-runner'
 import { loadConfig, validateConfig } from './config'
+import { startDashboard, type Snapshot } from './dashboard'
 import { fetchCandidates, fetchStatesByIds } from './linear'
 import { log, warn } from './log'
 import { removeWorkspace } from './workspace'
-import type { Config, Issue } from './types'
+import type { Issue } from './types'
 
 interface RunningEntry {
   issue: Issue
@@ -15,6 +16,9 @@ interface RunningEntry {
 interface RetryTimer {
   timer: ReturnType<typeof setTimeout>
   token: number
+  identifier: string
+  attempt: number
+  dueAt: number
 }
 
 const CONTINUATION_MS = 1000
@@ -30,7 +34,13 @@ export async function start(workflowPath?: string): Promise<void> {
   const running = new Map<string, RunningEntry>()
   const claimed = new Set<string>()
   const retries = new Map<string, RetryTimer>()
+  const history: Snapshot['recent'] = []
   let tokenSeq = 0
+
+  const pushHistory = (identifier: string, kind: string, detail: string | null): void => {
+    history.unshift({ identifier, kind, at: Date.now(), detail })
+    if (history.length > 40) history.length = 40
+  }
 
   const slots = (): number => Math.max(cfg.agent.maxConcurrentAgents - running.size, 0)
   const norm = (s: string): string => s.trim().toLowerCase()
@@ -68,9 +78,10 @@ export async function start(workflowPath?: string): Promise<void> {
 
   const scheduleRetry = (id: string, identifier: string, attempt: number, continuation: boolean): void => {
     clearRetry(id)
+    const delay = retryDelay(attempt, continuation)
     const token = ++tokenSeq
-    const timer = setTimeout(() => void onRetry(id, identifier, attempt, token), retryDelay(attempt, continuation))
-    retries.set(id, { timer, token })
+    const timer = setTimeout(() => void onRetry(id, identifier, attempt, token), delay)
+    retries.set(id, { timer, token, identifier, attempt, dueAt: Date.now() + delay })
   }
 
   const dispatch = (issue: Issue, attempt: number): void => {
@@ -86,9 +97,11 @@ export async function start(workflowPath?: string): Promise<void> {
       if (running.get(issue.id) !== entry) return // already terminated by reconcile
       running.delete(issue.id)
       if (outcome.ok) {
+        pushHistory(issue.identifier, 'done', issue.state)
         scheduleRetry(issue.id, issue.identifier, 1, true) // re-check & continue while active
         log(`✓ ${issue.identifier} session done`)
       } else {
+        pushHistory(issue.identifier, 'failed', (outcome.error ?? '').slice(0, 120))
         const next = entry.retryAttempt > 0 ? entry.retryAttempt + 1 : 1
         scheduleRetry(issue.id, issue.identifier, next, false)
         warn(`✗ ${issue.identifier}: ${(outcome.error ?? '').slice(0, 200)}`)
@@ -149,6 +162,18 @@ export async function start(workflowPath?: string): Promise<void> {
   }
 
   log(`bunion up · scope=${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''} · cap=${cfg.agent.maxConcurrentAgents} · poll=${cfg.pollIntervalMs}ms`)
+
+  const snapshot = (): Snapshot => ({
+    scope: `${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''}`,
+    cap: cfg.agent.maxConcurrentAgents,
+    pollMs: cfg.pollIntervalMs,
+    now: Date.now(),
+    running: [...running.values()].map((e) => ({ identifier: e.issue.identifier, title: e.issue.title, state: e.issue.state, startedAt: e.startedAt, lastActivity: e.lastActivity, retryAttempt: e.retryAttempt })),
+    retrying: [...retries.values()].map((r) => ({ identifier: r.identifier, attempt: r.attempt, dueAt: r.dueAt })),
+    recent: history.slice(0, 30),
+  })
+  if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, log)
+
   for (;;) {
     try {
       // Reload at the top so reconcile + dispatch both see the same fresh config; keep last-known-good on a bad edit

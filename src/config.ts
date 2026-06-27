@@ -62,6 +62,8 @@ export function loadConfig(path?: string): Config {
   const hk = obj(fm.hooks)
   const ag = obj(fm.agent)
   const cx = obj(fm.codex)
+  const srv = obj(fm.server)
+  const portRaw = process.env.BUNION_PORT ?? (typeof srv.port === 'number' ? String(srv.port) : null)
 
   let workspaceRoot = expandHome(pathValue(ws.root, join(tmpdir(), 'bunion_workspaces')))
   if (!isAbsolute(workspaceRoot)) workspaceRoot = resolve(dirname(workflowPath), workspaceRoot)
@@ -91,6 +93,7 @@ export function loadConfig(path?: string): Config {
       readTimeoutMs: num(cx.read_timeout_ms, 5_000),
       stallTimeoutMs: num(cx.stall_timeout_ms, 300_000),
     },
+    dashboardPort: portRaw && Number.isFinite(Number(portRaw)) ? Number(portRaw) : null,
     promptTemplate: prompt,
     workflowPath,
   }

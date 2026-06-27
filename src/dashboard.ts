@@ -111,7 +111,8 @@ const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return S
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 const COLS=[
  {name:'Plan',c:'#7c8493',states:['Triage','Backlog','Todo']},
- {name:'Build',c:'#5b8def',states:['In Progress','QA blocked']},
+ {name:'Build',c:'#5b8def',states:['In Progress']},
+ {name:'Rework',c:'#e0564f',states:['QA blocked']},
  {name:'QA',c:'#d99a2b',states:['QA Requested','QA testing started']},
  {name:'Ready to ship',c:'#3fb27f',states:['Ready to ship']},
  {name:'Merged',c:'#a371f7',states:['Done']}];

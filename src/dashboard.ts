@@ -56,12 +56,16 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 .chip i{width:7px;height:7px;border-radius:50%}
 .cap{color:var(--mut);font-size:12px;align-self:center}
 .clock{margin-left:auto;color:var(--mut2);font-size:12px;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace}
-.board{display:flex;gap:13px;padding:18px 20px;align-items:flex-start;overflow-x:auto}
-.col{flex:1 1 0;min-width:228px;display:flex;flex-direction:column;gap:9px}
+.board{display:flex;gap:12px;padding:18px 20px 26px;align-items:flex-start;overflow-x:auto;scroll-behavior:smooth}
+.board::-webkit-scrollbar{height:10px}
+.board::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px}
+.board::-webkit-scrollbar-thumb:hover{background:#3a4150}
+.board::-webkit-scrollbar-track{background:transparent}
+.col{flex:0 0 248px;display:flex;flex-direction:column;gap:9px}
 .colh{display:flex;align-items:center;gap:8px;padding:1px 3px 5px;font-size:11.5px;font-weight:600;color:var(--mut);letter-spacing:.3px}
 .colh i{width:7px;height:7px;border-radius:50%}
 .colh .ct{margin-left:auto;color:var(--mut2);font-weight:500;font-variant-numeric:tabular-nums}
-.colempty{color:var(--mut2);font-size:12px;padding:15px;text-align:center;border:1px dashed var(--line);border-radius:10px}
+.colempty{color:#363c47;font-size:11.5px;padding:10px 0;text-align:center}
 .card{background:var(--surf);border:1px solid var(--line);border-radius:11px;padding:11px 13px;cursor:pointer;transition:border-color .12s,background .12s}
 .card:hover{background:var(--surf2);border-color:var(--line2)}
 .card.run{border-left:2px solid var(--accent);padding-left:11px}
@@ -110,33 +114,35 @@ const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=
 const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 const COLS=[
- {name:'Plan',c:'#7c8493',states:['Triage','Backlog','Todo']},
- {name:'Build',c:'#5b8def',states:['In Progress']},
+ {name:'Triage',c:'#6b7280',states:['Triage']},
+ {name:'Backlog',c:'#6b7280',states:['Backlog']},
+ {name:'Todo',c:'#8b93a1',states:['Todo']},
+ {name:'In Progress',c:'#5b8def',states:['In Progress']},
+ {name:'QA',c:'#d99a2b',states:['QA Requested']},
+ {name:'QA testing',c:'#c79a3a',states:['QA testing started']},
  {name:'Rework',c:'#e0564f',states:['QA blocked']},
- {name:'QA',c:'#d99a2b',states:['QA Requested','QA testing started']},
- {name:'Ready to ship',c:'#3fb27f',states:['Ready to ship']},
+ {name:'Ready',c:'#3fb27f',states:['Ready to ship']},
  {name:'Merged',c:'#a371f7',states:['Done']}];
 function colIdx(st){for(var i=0;i<COLS.length;i++)if(COLS[i].states.indexOf(st)>=0)return i;return -1;}
 let snap={items:[],cap:0,scope:''};
 async function pull(){try{snap=await (await fetch('/state.json')).json()}catch(e){}render()}
 function cardHtml(r,now){
- const c=SC(r.state),run=r.status==='running';
+ const run=r.status==='running';
  const act=now-r.lastActivity,dc=act<30000?'#3fb27f':act<120000?'#d99a2b':'#e0564f';
- const pr=r.prUrl?'<a class="pr" href="'+r.prUrl+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">PR #'+(r.prUrl.split("/pull/")[1]||"")+'</a>':'';
+ const pr=r.prUrl?'<a class="pr" href="'+r.prUrl+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">#'+(r.prUrl.split("/pull/")[1]||"")+'</a>':'';
  let status;
  if(run) status='<span class="ag t-ago"><i class="dot" style="background:'+dc+'"></i>active '+ago(act)+'</span>';
  else if(r.status==='retrying') status='<span class="ag">&#8635; retry '+(r.retryDueAt?'in '+ago(r.retryDueAt-now):'soon')+'</span>';
  else if(r.state==='Done') status='<span class="ag" style="color:#a371f7">&#10004; merged</span>';
- else if(r.state==='Ready to ship') status='<span class="ag">&#10004; awaiting merge</span>';
- else if(r.status==='handoff') status='<span class="ag">&#10004; handed off</span>';
+ else if(r.state==='Ready to ship') status='<span class="ag" style="color:#3fb27f">&#10004; ready</span>';
+ else if(r.status==='handoff') status='<span class="ag">&#10004; in review</span>';
  else status='<span class="ag">&#9203; queued</span>';
  const tot=r.enteredAt?'<span class="t-tot clk" title="total time in the factory">&#9201; '+ago((r.endedAt||now)-r.enteredAt)+'</span>':'';
- const meta=(run&&r.host?'<span class="host">'+esc(r.host.replace(/\\.exe\\.xyz$/,''))+'</span>':'')+tot+pr;
  return '<div class="card'+(run?' run':'')+'" data-id="'+r.identifier+'">'+
-  '<div class="ctop"><span class="cid">'+r.identifier+'</span><span class="pill" style="color:'+c+';background:'+c+'22">'+esc(r.state)+'</span></div>'+
+  '<div class="ctop"><span class="cid">'+r.identifier+'</span>'+pr+'</div>'+
   '<div class="ctitle">'+esc(r.title)+'</div>'+
-  (run?'<div class="cact t-act">turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,72))+'</div>':'')+
-  '<div class="cfoot">'+status+'<span class="meta">'+meta+'</span></div>'+
+  (run?'<div class="cact t-act">turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,70))+'</div>':'')+
+  '<div class="cfoot">'+status+'<span class="meta">'+tot+(run&&r.host?'<span class="host">'+esc(r.host.replace(/\\.exe\\.xyz$/,''))+'</span>':'')+'</span></div>'+
  '</div>';
 }
 function colHtml(col,arr,now){return '<div class="col"><div class="colh"><i style="background:'+col.c+'"></i>'+col.name+'<span class="ct">'+arr.length+'</span></div>'+(arr.length?arr.map(r=>cardHtml(r,now)).join(''):'<div class="colempty">empty</div>')+'</div>';}

@@ -12,6 +12,8 @@ interface RunningEntry {
   retryAttempt: number
   startedAt: number
   lastActivity: number
+  turn: number
+  activity: string
 }
 interface RetryTimer {
   timer: ReturnType<typeof setTimeout>
@@ -87,11 +89,13 @@ export async function start(workflowPath?: string): Promise<void> {
   const dispatch = (issue: Issue, attempt: number): void => {
     clearRetry(issue.id)
     claimed.add(issue.id)
-    const entry: RunningEntry = { issue, handle: undefined as unknown as AgentHandle, retryAttempt: attempt > 0 ? attempt : 0, startedAt: Date.now(), lastActivity: Date.now() }
+    const entry: RunningEntry = { issue, handle: undefined as unknown as AgentHandle, retryAttempt: attempt > 0 ? attempt : 0, startedAt: Date.now(), lastActivity: Date.now(), turn: 0, activity: 'starting…' }
     running.set(issue.id, entry)
     log(`→ ${issue.identifier} (${issue.state})${attempt > 0 ? ` retry#${attempt}` : ''}`)
-    entry.handle = startAgent(cfg, issue, attempt > 0 ? attempt : null, () => {
+    entry.handle = startAgent(cfg, issue, attempt > 0 ? attempt : null, (e) => {
       entry.lastActivity = Date.now()
+      if (e.turn != null) entry.turn = e.turn
+      if (e.label != null) entry.activity = e.label
     })
     void entry.handle.done.then((outcome) => {
       if (running.get(issue.id) !== entry) return // already terminated by reconcile
@@ -168,7 +172,7 @@ export async function start(workflowPath?: string): Promise<void> {
     cap: cfg.agent.maxConcurrentAgents,
     pollMs: cfg.pollIntervalMs,
     now: Date.now(),
-    running: [...running.values()].map((e) => ({ identifier: e.issue.identifier, title: e.issue.title, state: e.issue.state, startedAt: e.startedAt, lastActivity: e.lastActivity, retryAttempt: e.retryAttempt })),
+    running: [...running.values()].map((e) => ({ identifier: e.issue.identifier, title: e.issue.title, state: e.issue.state, startedAt: e.startedAt, lastActivity: e.lastActivity, retryAttempt: e.retryAttempt, turn: e.turn, activity: e.activity })),
     retrying: [...retries.values()].map((r) => ({ identifier: r.identifier, attempt: r.attempt, dueAt: r.dueAt })),
     recent: history.slice(0, 30),
   })

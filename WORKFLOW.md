@@ -22,7 +22,7 @@ agent:
 codex:
   command: codex --config shell_environment_policy.inherit=all app-server
   approval_policy: never
-  thread_sandbox: workspace-write
+  thread_sandbox: danger-full-access     # the agent runs its own git; workspace-write protects .git and breaks it
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}` in an unattended orchestration session. Drive it through the workflow below to a merged PR. Never ask a human to perform follow-up actions; never stop early except for a true blocker (missing required auth/permissions/secrets).

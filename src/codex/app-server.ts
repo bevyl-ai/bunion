@@ -14,7 +14,7 @@ interface Pending {
 export class AppServerSession {
   private cfg: Config
   private tools: Map<string, DynamicTool>
-  private onActivity: () => void
+  private onEvent: (e: { label?: string }) => void
   private proc: ChildProcess | null = null
   private buf = ''
   private nextId = 100
@@ -22,10 +22,10 @@ export class AppServerSession {
   private turn: { resolve: () => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null
   private fatal: Error | null = null
 
-  constructor(cfg: Config, tools: DynamicTool[], onActivity: () => void = () => {}) {
+  constructor(cfg: Config, tools: DynamicTool[], onEvent: (e: { label?: string }) => void = () => {}) {
     this.cfg = cfg
     this.tools = new Map(tools.map((t) => [t.spec.name, t]))
-    this.onActivity = onActivity
+    this.onEvent = onEvent
   }
 
   async start(workspace: string): Promise<void> {
@@ -157,7 +157,7 @@ export class AppServerSession {
   }
 
   private handle(msg: Json): void {
-    this.onActivity()
+    this.onEvent({})
     const method = typeof msg.method === 'string' ? msg.method : null
     const id = typeof msg.id === 'number' ? msg.id : null
 
@@ -166,7 +166,7 @@ export class AppServerSession {
       return
     }
     if (method) {
-      this.handleNotification(method)
+      this.handleNotification(method, obj(msg.params))
       return
     }
     if (id !== null) {
@@ -212,11 +212,21 @@ export class AppServerSession {
     }
   }
 
-  private handleNotification(method: string): void {
-    if (method === 'turn/completed') this.turn?.resolve()
-    else if (method === 'turn/failed') this.turn?.reject(new Error('turn failed'))
-    else if (method === 'turn/cancelled') this.turn?.reject(new Error('turn cancelled'))
-    // streaming deltas / token usage / item events → ignored (activity already recorded)
+  private handleNotification(method: string, params: Json): void {
+    if (method === 'turn/completed') return void this.turn?.resolve()
+    if (method === 'turn/failed') return void this.turn?.reject(new Error('turn failed'))
+    if (method === 'turn/cancelled') return void this.turn?.reject(new Error('turn cancelled'))
+    if (method === 'item/started') {
+      const item = obj(params.item)
+      switch (item.type) {
+        case 'commandExecution': return this.onEvent({ label: cmdLabel(item) })
+        case 'reasoning': return this.onEvent({ label: 'thinking…' })
+        case 'fileChange': return this.onEvent({ label: 'editing files' })
+        case 'agentMessage': return this.onEvent({ label: 'writing a reply…' })
+        case 'mcpToolCall':
+        case 'dynamicToolCall': return this.onEvent({ label: 'calling a tool' })
+      }
+    }
   }
 
   private reply(id: number, result: Json): void {
@@ -242,6 +252,13 @@ function toolResult(success: boolean, output: string): Json {
   return { success, output, contentItems: [{ type: 'inputText', text: output }] }
 }
 
+function cmdLabel(item: Json): string {
+  const c = item.command
+  const s = Array.isArray(c) ? c.map(String).join(' ') : typeof c === 'string' ? c : ''
+  if (!s) return 'running a command'
+  return `run: ${s.length > 64 ? s.slice(0, 61) + '…' : s}`
+}
+
 // Newer item/* approvals want `acceptForSession`; legacy exec/applyPatch approvals want `approved_for_session`.
 function autoApprove(method: string): string | null {
   if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') return 'acceptForSession'
@@ -265,13 +282,9 @@ function answerUserInput(params: Json): Json {
   return answers
 }
 
-function defaultTurnPolicy(workspace: string): Json {
-  return {
-    type: 'workspaceWrite',
-    writableRoots: [workspace],
-    readOnlyAccess: { type: 'fullAccess' },
-    networkAccess: true, // the agent does its own git/gh/Linear I/O
-    excludeTmpdirEnvVar: false,
-    excludeSlashTmp: false,
-  }
+function defaultTurnPolicy(_workspace: string): Json {
+  // The agent runs its own git (fetch/commit/push) + gh. codex's workspace-write write-protects .git regardless of
+  // writableRoots, which breaks those, so the agent needs full access to drive git itself. Safe to the extent the
+  // host is trusted — the proper containment is running bunion in a disposable VM (the exedev path).
+  return { type: 'dangerFullAccess' }
 }

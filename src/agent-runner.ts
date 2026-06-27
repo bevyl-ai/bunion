@@ -27,7 +27,7 @@ function continuationPrompt(turn: number, maxTurns: number): string {
 
 // One worker session for an issue: prep workspace → run turns on a single app-server thread up to max_turns,
 // refreshing the issue between turns and continuing while it stays active. The AGENT drives Linear/git/gh/merge.
-export function startAgent(cfg: Config, issue: Issue, attempt: number | null, onActivity: () => void): AgentHandle {
+export function startAgent(cfg: Config, issue: Issue, attempt: number | null, onEvent: (e: { turn?: number; label?: string }) => void): AgentHandle {
   let session: AppServerSession | null = null
   let stopped = false
 
@@ -46,13 +46,14 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, on
       if (!h.ok) return { ok: false, error: h.error }
     }
 
-    session = new AppServerSession(cfg, [linearGraphqlTool(cfg)], onActivity)
+    session = new AppServerSession(cfg, [linearGraphqlTool(cfg)], onEvent)
     let current = issue
     try {
       await session.start(dir)
       const threadId = await session.startThread(dir)
       for (let turn = 1; ; turn++) {
         if (stopped) return { ok: false, error: 'terminated' }
+        onEvent({ turn })
         const prompt = turn === 1 ? renderPrompt(cfg.promptTemplate, { attempt, issue: current }) : continuationPrompt(turn, cfg.agent.maxTurns)
         await session.runTurn(threadId, dir, prompt, `${current.identifier}: ${current.title}`)
         current = await fetchById(cfg, issue.id)

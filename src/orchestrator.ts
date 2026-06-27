@@ -37,14 +37,8 @@ export async function start(workflowPath?: string): Promise<void> {
   const running = new Map<string, RunningEntry>()
   const claimed = new Set<string>()
   const retries = new Map<string, RetryTimer>()
-  const history: Snapshot['recent'] = []
   let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
   let tokenSeq = 0
-
-  const pushHistory = (identifier: string, kind: string, detail: string | null): void => {
-    history.unshift({ identifier, kind, at: Date.now(), detail })
-    if (history.length > 40) history.length = 40
-  }
 
   const logs = new Map<string, string[]>() // per-identifier run log (rolling), kept for the last ~16 runs
   const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
@@ -150,11 +144,9 @@ export async function start(workflowPath?: string): Promise<void> {
       if (running.get(issue.id) !== entry) return // already terminated by reconcile
       running.delete(issue.id)
       if (outcome.ok) {
-        pushHistory(issue.identifier, 'done', issue.state)
         scheduleRetry(issue.id, issue.identifier, 1, true) // re-check & continue while active
         log(`✓ ${issue.identifier} session done`)
       } else {
-        pushHistory(issue.identifier, 'failed', (outcome.error ?? '').slice(0, 120))
         const next = entry.retryAttempt > 0 ? entry.retryAttempt + 1 : 1
         scheduleRetry(issue.id, issue.identifier, next, false)
         warn(`✗ ${issue.identifier}: ${(outcome.error ?? '').slice(0, 200)}`)
@@ -255,7 +247,6 @@ export async function start(workflowPath?: string): Promise<void> {
       pollMs: cfg.pollIntervalMs,
       now: Date.now(),
       items,
-      recent: history.slice(0, 30),
     }
   }
   if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log)

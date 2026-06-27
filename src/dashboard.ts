@@ -120,7 +120,7 @@ const COLS=[
  {name:'In Progress',c:'#5b8def',states:['In Progress']},
  {name:'QA',c:'#d99a2b',states:['QA Requested']},
  {name:'QA testing',c:'#c79a3a',states:['QA testing started']},
- {name:'Rework',c:'#e0564f',states:['QA blocked']},
+ {name:'Blocked',c:'#e0564f',states:['QA blocked']},
  {name:'Ready',c:'#3fb27f',states:['Ready to ship']},
  {name:'Merged',c:'#a371f7',states:['Done']}];
 function colIdx(st){for(var i=0;i<COLS.length;i++)if(COLS[i].states.indexOf(st)>=0)return i;return -1;}
@@ -133,6 +133,7 @@ function cardHtml(r,now){
  let status;
  if(run) status='<span class="ag t-ago"><i class="dot" style="background:'+dc+'"></i>active '+ago(act)+'</span>';
  else if(r.status==='retrying') status='<span class="ag">&#8635; retry '+(r.retryDueAt?'in '+ago(r.retryDueAt-now):'soon')+'</span>';
+ else if(r.state==='QA blocked') status='<span class="ag" style="color:#e0564f">&#9888; needs human</span>';
  else if(r.state==='Done') status='<span class="ag" style="color:#a371f7">&#10004; merged</span>';
  else if(r.state==='Ready to ship') status='<span class="ag" style="color:#3fb27f">&#10004; ready</span>';
  else if(r.status==='handoff') status='<span class="ag">&#10004; in review</span>';

@@ -4,13 +4,13 @@ tracker:
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project
   api_key: $LINEAR_API_KEY
   required_labels: [dark-factory]    # opt-in: only tickets carrying this label enter the factory
-  active_states: [Triage, Backlog, Todo, In Progress, QA blocked, QA Requested]   # entry is the label, not the state; Ready to ship NOT active (human merges)
-  terminal_states: [Done, Canceled, Cancelled, Duplicate]
+  active_states: [Triage, Backlog, Todo, In Progress, QA Requested]   # entry is the label; QA blocked + Ready to ship are NOT active (humans handle them)
+  terminal_states: [Done, Canceled, Cancelled, Duplicate, QA blocked]   # QA blocked = the factory stops + needs a human
 polling:
   interval_ms: 10000
 phases:                              # a worker hands off to a FRESH agent when a ticket crosses phases (independence)
   plan: [Triage, Backlog, Todo]      # PLAN (clerk pass): any labeled ticket enters here — Todo isn't special
-  build: [In Progress, QA blocked]   # BUILD: implement + PR + stupify review loop
+  build: [In Progress]               # BUILD: implement + PR + stupify review loop
   qa: [QA Requested]                 # QA (bevops/review pass): independent verification
 server:
   port: 4319                       # live status dashboard at http://localhost:4319 (or set BUNION_PORT)
@@ -78,11 +78,9 @@ A ticket enters the factory by its `dark-factory` label, not its column — `Tod
 5. If the ticket is too vague or looks wrong to plan confidently, post `[codex]` questions in the workpad and leave it in its current status (don't guess your way into building the wrong thing).
 6. When the plan + acceptance criteria are solid, move the ticket to `In Progress`. You are done — a fresh build agent takes over.
 
-## BUILD — status `In Progress` or `QA blocked`
+## BUILD — status `In Progress`
 
-Implement the plan, get a clean, reviewed, green PR, and hand it to QA.
-- On `In Progress` (fresh build): execute the workpad plan.
-- On `QA blocked` (rework): QA or review bounced it back — re-read every QA + PR comment and the workpad, and address exactly what failed.
+Implement the plan, get a clean, reviewed, green PR, and hand it to QA. Execute the workpad plan.
 
 1. Run the `pull` skill to sync `origin/main` before editing.
 2. Implement against the plan + acceptance criteria. Keep it minimal and in-scope; update the workpad after each milestone.
@@ -103,7 +101,7 @@ You are an **independent verifier**. You did NOT write this code; approach it sk
    - Record exactly what you ran and what you saw in the workpad.
 3. Post a verdict in the workpad (with a confidence level + how you verified), then route by it:
    - **PASS** — you genuinely verified it works, the acceptance criteria are met, and checks are green → move the ticket to `Ready to ship`. **Do NOT merge — a human owns the merge.**
-   - **FAIL** — a criterion isn't met, a check is red, or you reproduced a problem → move the ticket to `QA blocked` with a precise `[codex]` comment of what failed and how to reproduce it, so the build agent can fix it.
+   - **FAIL** — a criterion isn't met, a check is red, or you reproduced a problem → move the ticket to `QA blocked`. This is terminal for the factory: a human takes it from here, so write a precise `[codex]` comment of exactly what failed and how to reproduce it. Do not try to fix it yourself.
    - **CANNOT VERIFY** — the change is purely visual/UX, or needs a running environment you can't drive here, or you're simply not confident → leave the ticket in `QA Requested`, post your findings and exactly what a human must check, and stop. Never pass what you could not actually verify.
 
 ## Ready to ship / QA testing started / Done / Canceled / Duplicate

@@ -316,11 +316,13 @@ export async function start(workflowPath?: string): Promise<void> {
     const items = [...board.values()].sort((a, b) => rankStatus(a.status) - rankStatus(b.status) || rank(a.priority) - rank(b.priority) || a.identifier.localeCompare(b.identifier))
     let totalTokens = 0
     let totalInput = 0
+    let totalOutput = 0
     let totalCached = 0
     for (const ph of Object.values(tokens))
       for (const c of Object.values(ph)) {
         totalTokens += c?.total ?? 0
         totalInput += c?.input ?? 0
+        totalOutput += c?.output ?? 0
         totalCached += c?.cached ?? 0
       }
     return {
@@ -331,6 +333,7 @@ export async function start(workflowPath?: string): Promise<void> {
       items,
       totalTokens,
       totalInput,
+      totalOutput,
       totalCached,
     }
   }

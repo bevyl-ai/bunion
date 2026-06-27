@@ -116,6 +116,10 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 .actitem{display:block;width:100%;text-align:left;background:none;border:none;color:var(--fg);font:600 12.5px/1 inherit;padding:8px 11px;border-radius:6px;cursor:pointer;white-space:nowrap}
 .actitem:hover{background:#2a2f3a}
 .actitem.go{color:#9ec1ff}.actitem.danger{color:#eaa6a0}
+#toast{position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(8px);z-index:80;opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;padding:11px 18px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 14px 36px rgba(0,0,0,.55)}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast.ok{background:#13241b;border:1px solid #2f6f4f;color:#7fd6a8}
+#toast.err{background:#2a1414;border:1px solid #6f2f2f;color:#eaa6a0}
 #msub{padding:9px 16px 0}
 .mtitle2{font-size:14.5px;color:var(--fg);font-weight:500;line-height:1.4}
 .mmeta{display:flex;gap:12px;flex-wrap:wrap;margin-top:7px;color:var(--mut);font-size:11.5px}
@@ -173,6 +177,7 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
  <div id="logbody"></div>
 </div></div>
 <div id="actmenu"></div>
+<div id="toast"></div>
 <script>
 const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Requested':'#d99a2b','QA Verify':'#c79a3a','QA blocked':'#e0564f','Needs human':'#d9568c','Ready to ship':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
 const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=Math.floor(s/60);if(m<60)return m+'m '+(s%60)+'s';return Math.floor(m/60)+'h '+(m%60)+'m'};
@@ -284,8 +289,9 @@ function openModal(id){expandedId=id;document.getElementById('modal').style.disp
 function closeModal(){expandedId=null;document.getElementById('modal').style.display='none';}
 async function postAction(btn,id,action,ev,directive){if(ev){ev.stopPropagation();ev.preventDefault();}
  var box=btn&&btn.parentNode;if(box)box.querySelectorAll('button').forEach(function(x){x.classList.add('busy')});
- try{await fetch('/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:id,action:action,directive:directive||''})});}catch(e){}
+ try{var r=await (await fetch('/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:id,action:action,directive:directive||''})})).json();showToast((r&&r.ok)?(id+' &mdash; '+(r.msg||'done')):('Failed: '+((r&&r.msg)||'error')),!(r&&r.ok));}catch(e){showToast('Action failed',true);}
  setTimeout(pull,400);setTimeout(pull,1600);}
+function showToast(msg,isErr){var t=document.getElementById('toast');t.innerHTML=(isErr?'&#10007; ':'&#10003; ')+msg;t.className=(isErr?'err':'ok')+' show';clearTimeout(window._tt);window._tt=setTimeout(function(){t.className=isErr?'err':'ok'},3400);}
 function modalAct(id,action,ev){var d=document.getElementById('mdirective');var dir=d?d.value.trim():'';if(d)d.value='';closeModal();postAction(null,id,action,ev,dir);}
 let menuFor=null;
 function toggleMenu(btn,ev){if(ev){ev.stopPropagation();ev.preventDefault();}

@@ -31,13 +31,24 @@ export interface Snapshot {
 
 // A tiny status server: GET /state.json is the live orchestrator snapshot; GET / is a self-contained page that
 // polls it and renders the board (kanban by pipeline stage) + a per-run log modal.
-export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void): void {
+export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string) => Promise<{ ok: boolean; msg?: string }>): void {
   Bun.serve({
     port,
-    fetch(req) {
+    async fetch(req) {
       const url = new URL(req.url)
       if (url.pathname === '/state.json') return Response.json(getSnapshot())
       if (url.pathname === '/log') return Response.json({ log: getLog(url.searchParams.get('id') ?? '') })
+      if (url.pathname === '/action' && req.method === 'POST') {
+        if (!onAction) return Response.json({ ok: false, msg: 'actions disabled' })
+        let body: { id?: string; action?: string }
+        try {
+          body = (await req.json()) as { id?: string; action?: string }
+        } catch {
+          return Response.json({ ok: false, msg: 'bad request' })
+        }
+        if (!body.id || !body.action) return Response.json({ ok: false, msg: 'missing id/action' })
+        return Response.json(await onAction(body.id, body.action))
+      }
       return new Response(HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } })
     },
   })
@@ -85,6 +96,27 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 .clk{color:var(--mut2);font-size:11px;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace;white-space:nowrap}
 .pr{color:var(--accent);text-decoration:none;font-size:11px;font-weight:600;background:#5b8def1a;padding:2px 7px;border-radius:6px;white-space:nowrap}
 .pr:hover{background:#5b8def2e}
+.pri{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:middle}
+.pri.p1{background:#e5484d}.pri.p2{background:#e0843a}.pri.p3{background:#d9a62b}.pri.p4{background:#5b6675}
+.creason{margin-top:8px;font-size:11.5px;color:#eaa6a0;background:#e0564f12;border:1px solid #e0564f33;border-radius:7px;padding:6px 8px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.cacts{display:flex;gap:6px;margin-top:10px}
+.cbtn{flex:1;min-width:0;font:600 11px/1 inherit;color:var(--fg);background:var(--surf2);border:1px solid var(--line2);border-radius:7px;padding:6px 8px;cursor:pointer;transition:background .12s,border-color .12s;white-space:nowrap}
+.cbtn:hover{background:#2a2f3a;border-color:#3a4150}
+.cbtn.go{color:#9ec1ff;border-color:#5b8def44}.cbtn.go:hover{background:#5b8def1f}
+.cbtn.warn{color:#d9a62b;border-color:#d9a62b44}.cbtn.warn:hover{background:#d9a62b1a}
+.cbtn.danger{color:#eaa6a0;border-color:#e0564f44}.cbtn.danger:hover{background:#e0564f1a}
+.cbtn.busy{opacity:.5;pointer-events:none}
+#msub{padding:9px 16px 0}
+.mtitle2{font-size:14.5px;color:var(--fg);font-weight:500;line-height:1.4}
+.mmeta{display:flex;gap:12px;flex-wrap:wrap;margin-top:7px;color:var(--mut);font-size:11.5px}
+.mmeta .m{display:inline-flex;align-items:center;gap:5px;font-variant-numeric:tabular-nums}
+.mmeta .m .pri{margin-right:0}
+#mactions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 16px 0}
+.mbtn{font:600 12px/1 inherit;color:var(--fg);background:var(--surf2);border:1px solid var(--line2);border-radius:8px;padding:8px 13px;cursor:pointer;transition:background .12s,border-color .12s}
+.mbtn:hover{background:#2a2f3a;border-color:#3a4150}
+.mbtn.go{color:#9ec1ff;border-color:#5b8def55}.mbtn.go:hover{background:#5b8def1f}
+.mbtn.danger{color:#eaa6a0;border-color:#e0564f55}.mbtn.danger:hover{background:#e0564f1a}
+.mbtn.busy{opacity:.6;pointer-events:none}
 .empty{color:var(--mut);padding:64px;text-align:center;width:100%}
 #modal{position:fixed;inset:0;background:rgba(4,5,8,.6);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:50;padding:28px}
 #mpanel{background:var(--surf);border:1px solid var(--line2);border-radius:14px;width:min(960px,100%);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.6)}
@@ -118,8 +150,10 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 <div class="board" id="board"></div>
 <div id="modal"><div id="mpanel">
  <div id="mhead"><span class="live"></span><span id="mtitle"></span><span id="mclose">close &#10005;</span></div>
+ <div id="msub"></div>
  <div id="mbanner" style="display:none"></div>
  <div id="mtokens" style="display:none"></div>
+ <div id="mactions"></div>
  <div id="logbody"></div>
 </div></div>
 <script>
@@ -128,6 +162,14 @@ const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=
 const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 const fmtTok=n=>{n=n||0;return n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e4?Math.round(n/1e3)+'k':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)};
+const PRI={1:'Urgent',2:'High',3:'Medium',4:'Low'};
+function abtn(id,action,label,cls,big){return '<button class="'+(big?'mbtn ':'cbtn ')+(cls||'')+'" onclick="postAction(this,\\''+id+'\\',\\''+action+'\\',event)">'+label+'</button>';}
+function actionsFor(it,big){if(!it)return '';var b=[];
+ if(it.state==='QA blocked'){b.push(abtn(it.identifier,'to-qa','&#8594; QA','go',big));b.push(abtn(it.identifier,'to-build','&#8594; Build','',big));}
+ else if(it.status==='running'){b.push(abtn(it.identifier,'restart','&#8635; Restart','danger',big));if(big)b.push(abtn(it.identifier,'to-build','&#8594; Build','',big));}
+ else if(it.state==='Ready to ship'){b.push(abtn(it.identifier,'to-qa','Re-verify','go',big));if(big)b.push(abtn(it.identifier,'to-build','&#8594; Build','',big));}
+ else if(big){b.push(abtn(it.identifier,'to-qa','&#8594; QA','go',big));b.push(abtn(it.identifier,'to-build','&#8594; Build','',big));}
+ return b.join('');}
 const COLS=[
  {name:'Triage',c:'#6b7280',states:['Triage']},
  {name:'Backlog',c:'#6b7280',states:['Backlog']},
@@ -155,11 +197,16 @@ function cardHtml(r,now){
  else status='<span class="ag">&#9203; queued</span>';
  const tot=r.enteredAt?'<span class="t-tot clk" title="total time in the factory">&#9201; '+ago((r.endedAt||now)-r.enteredAt)+'</span>':'';
  const tk=r.tokens?'<span class="t-tok clk" title="tokens used across all stages">'+fmtTok(r.tokens.total)+' tok</span>':'<span class="t-tok"></span>';
+ const pdot=(r.priority>=1&&r.priority<=4)?'<i class="pri p'+r.priority+'" title="'+PRI[r.priority]+' priority"></i>':'';
+ const reason=(r.state==='QA blocked'&&r.note)?'<div class="creason" title="why a human is needed">'+esc(r.note.slice(0,160))+'</div>':'';
+ const acts=actionsFor(r,false);
  return '<div class="card'+(run?' run':'')+'" data-id="'+r.identifier+'">'+
-  '<div class="ctop"><span class="cid">'+r.identifier+'</span>'+pr+'</div>'+
+  '<div class="ctop"><span class="cid">'+pdot+r.identifier+'</span>'+pr+'</div>'+
   '<div class="ctitle">'+esc(r.title)+'</div>'+
   (run?'<div class="cact t-act">turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,70))+'</div>':'')+
+  reason+
   '<div class="cfoot">'+status+'<span class="meta">'+tk+tot+'</span></div>'+
+  (acts?'<div class="cacts">'+acts+'</div>':'')+
  '</div>';
 }
 function colHtml(col,arr,now){return '<div class="col"><div class="colh"><i style="background:'+col.c+'"></i>'+col.name+'<span class="ct">'+arr.length+'</span></div>'+(arr.length?arr.map(r=>cardHtml(r,now)).join(''):'<div class="colempty">empty</div>')+'</div>';}
@@ -171,7 +218,7 @@ function render(){
  const chip=(col,n,lab)=>'<span class="chip"><i style="background:'+col+'"></i>'+n+' '+lab+'</span>';
  stats.innerHTML=chip('#3fb27f',run,'running')+(q?chip('#7c8493',q,'queued'):'')+(rt?chip('#d99a2b',rt,'retrying'):'')+'<span class="cap">'+(snap.cap||0)+' slots</span>';
  // Rebuild the board ONLY when structure changes (membership / state / status / pr); live fields tick in place.
- const sig=JSON.stringify(items.map(r=>[r.identifier,r.state,r.status,r.host,r.prUrl,r.retryAttempt]));
+ const sig=JSON.stringify(items.map(r=>[r.identifier,r.state,r.status,r.host,r.prUrl,r.retryAttempt,r.state==='QA blocked'?(r.note||''):'']));
  if(sig!==lastSig){
   lastSig=sig;const now=Date.now();
   if(!items.length){board.innerHTML='<div class="empty">no '+esc(snap.scope||'dark-factory')+' tickets in scope</div>';}
@@ -198,16 +245,30 @@ function tickLive(){
 }
 let expandedId=null;
 function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId);const c=it?SC(it.state):'#7c8493';
- document.getElementById('mtitle').innerHTML=esc(expandedId||'')+(it?' <span class="pill" style="color:'+c+';background:'+c+'22">'+esc(it.state)+'</span>':'')+(it&&it.enteredAt?' <span class="clk" style="color:var(--mut)" title="total time in the factory">&#9201; '+ago((it.endedAt||Date.now())-it.enteredAt)+'</span>':'')+(it&&it.host?' <span class="clk" style="color:var(--mut2)">&#9709; '+esc(it.host.replace(/\\.exe\\.xyz$/,''))+'</span>':'')+(it&&it.prUrl?' <a class="pr" href="'+it.prUrl+'" target="_blank" rel="noopener">PR #'+(it.prUrl.split("/pull/")[1]||"")+'</a>':'')+(it&&it.url?' <a class="pr" style="background:#8b929e1a;color:var(--mut)" href="'+it.url+'" target="_blank" rel="noopener">Linear &#8599;</a>':'');
+ document.getElementById('mtitle').innerHTML=esc(expandedId||'')+(it?' <span class="pill" style="color:'+c+';background:'+c+'22">'+esc(it.state)+'</span>':'')+(it&&it.prUrl?' <a class="pr" href="'+it.prUrl+'" target="_blank" rel="noopener">PR #'+(it.prUrl.split("/pull/")[1]||"")+'</a>':'')+(it&&it.url?' <a class="pr" style="background:#8b929e1a;color:var(--mut)" href="'+it.url+'" target="_blank" rel="noopener">Linear &#8599;</a>':'');
+ const sub=document.getElementById('msub');
+ if(it){var m=[];
+  if(it.priority>=1&&it.priority<=4)m.push('<span class="m"><i class="pri p'+it.priority+'"></i>'+PRI[it.priority]+'</span>');
+  if(it.enteredAt)m.push('<span class="m" title="total time in the factory">&#9201; '+ago((it.endedAt||Date.now())-it.enteredAt)+'</span>');
+  if(it.status==='running')m.push('<span class="m">&#9210; turn '+(it.turn||0)+'</span>');
+  if(it.host)m.push('<span class="m">&#9709; '+esc(it.host.replace(/\\.exe\\.xyz$/,''))+'</span>');
+  if(it.tokens)m.push('<span class="m" title="total tokens">&#931; '+fmtTok(it.tokens.total)+' tok</span>');
+  sub.innerHTML='<div class="mtitle2">'+esc(it.title||'')+'</div>'+(m.length?'<div class="mmeta">'+m.join('')+'</div>':'');
+ }else sub.innerHTML='';
  const ban=document.getElementById('mbanner');
- if(it&&it.state==='QA blocked'){ban.style.display='block';ban.className='nh';ban.innerHTML='<b>&#9888; Needs human</b> &mdash; '+(it.note?esc(it.note):'open the QA notes in Linear');}
+ if(it&&it.state==='QA blocked'){ban.style.display='block';ban.className='nh';ban.innerHTML='<b>&#9888; Needs human</b> &mdash; '+(it.note?esc(it.note):'no verdict captured yet &mdash; open the workpad in Linear');}
  else if(it&&it.note&&it.status!=='running'){ban.style.display='block';ban.className='note';ban.innerHTML=esc(it.note);}
  else{ban.style.display='none';}
  const tk=document.getElementById('mtokens');
  if(it&&it.tokens){tk.style.display='flex';tk.innerHTML='<span class="tklab">tokens</span>'+it.tokens.phases.map(function(p){return '<span class="tkph" title="input '+fmtTok(p.input)+' \\u00b7 output '+fmtTok(p.output)+' \\u00b7 cached '+fmtTok(p.cached)+'"><b>'+esc(p.phase)+'</b> '+fmtTok(p.total)+'</span>';}).join('')+'<span class="tktot">&Sigma; '+fmtTok(it.tokens.total)+'</span>';}
- else{tk.style.display='none';}}
+ else{tk.style.display='none';}
+ const ma=document.getElementById('mactions');var ah=actionsFor(it,true);if(ah){ma.style.display='flex';ma.innerHTML=ah;}else{ma.style.display='none';ma.innerHTML='';}}
 function openModal(id){expandedId=id;document.getElementById('modal').style.display='flex';document.getElementById('logbody').innerHTML='<div class="lg" style="color:var(--mut)">loading&hellip;</div>';syncHead();pullLog();}
 function closeModal(){expandedId=null;document.getElementById('modal').style.display='none';}
+async function postAction(btn,id,action,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
+ var box=btn.parentNode;if(box)box.querySelectorAll('button').forEach(function(x){x.classList.add('busy')});
+ try{await fetch('/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:id,action:action})});}catch(e){}
+ setTimeout(pull,400);setTimeout(pull,1600);}
 board.addEventListener('click',function(e){const c=e.target.closest('[data-id]');if(!c)return;openModal(c.getAttribute('data-id'));});
 document.getElementById('mclose').addEventListener('click',closeModal);
 document.getElementById('modal').addEventListener('click',function(e){if(e.target.id==='modal')closeModal();});

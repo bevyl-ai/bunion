@@ -107,6 +107,59 @@ export async function fetchById(cfg: Config, key: string): Promise<Issue> {
   return toIssue(d.issue)
 }
 
+// --- mutations + extra reads for dashboard action buttons ---
+
+let stateCache: { key: string; map: Map<string, string> } | null = null
+async function resolveStateId(cfg: Config, name: string): Promise<string | null> {
+  const key = cfg.tracker.team ?? ''
+  if (!stateCache || stateCache.key !== key) {
+    const d = await query<{ teams: { nodes: { states: { nodes: { id: string; name: string }[] } }[] } }>(
+      cfg,
+      `query States($key: String!) { teams(filter: { key: { eq: $key } }) { nodes { states { nodes { id name } } } } }`,
+      { key },
+    )
+    const states = d.teams.nodes[0]?.states.nodes ?? []
+    stateCache = { key, map: new Map(states.map((s) => [s.name.trim().toLowerCase(), s.id])) }
+  }
+  return stateCache.map.get(name.trim().toLowerCase()) ?? null
+}
+
+// Move an issue to a named workflow state — drives the dashboard's quick-action buttons. Throws on an unknown state.
+export async function moveIssue(cfg: Config, issueId: string, stateName: string): Promise<void> {
+  const sid = await resolveStateId(cfg, stateName)
+  if (!sid) throw new Error(`unknown state: ${stateName}`)
+  const r = await graphql(cfg, `mutation Move($id: String!, $s: String!) { issueUpdate(id: $id, input: { stateId: $s }) { success } }`, { id: issueId, s: sid })
+  const b = r.body as { data?: { issueUpdate?: { success?: boolean } }; errors?: unknown }
+  if (!r.httpOk || (Array.isArray(b.errors) && b.errors.length) || !b.data?.issueUpdate?.success) throw new Error(`move failed: ${JSON.stringify(b.errors ?? b.data)}`)
+}
+
+// The latest meaningful workpad/verdict comment, cleaned up, for surfacing WHY a ticket is blocked on the dashboard.
+export async function fetchLatestNote(cfg: Config, issueId: string): Promise<string | null> {
+  const d = await query<{ issue: { comments: { nodes: { body: string }[] } } | null }>(
+    cfg,
+    `query Note($id: String!) { issue(id: $id) { comments(last: 6) { nodes { body } } } }`,
+    { id: issueId },
+  )
+  const raw = (d.issue?.comments.nodes ?? []).map((n) => n.body).filter(Boolean)
+  if (!raw.length) return null
+  const clean = (b: string): string =>
+    b
+      .replace(/<!--[\s\S]*?-->/g, '') // html comments
+      .replace(/^#{1,6}\s.*$/gm, '') // markdown headers (## Codex Workpad Status…)
+      .replace(/^[-*]\s*\[[ xX]\].*$/gm, '') // checklist lines
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // images
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // links → their text
+      .replace(/[`*_>#]+/g, '') // stray markdown
+      .replace(/\s+/g, ' ')
+      .trim()
+  const noise = (b: string): boolean => /linear-linkback|comment thread is synced|^Created (sub-?)?issue/i.test(b.trim())
+  const useful = raw.filter((b) => !noise(b)).map(clean).filter((c) => c.length >= 8)
+  if (!useful.length) return null
+  // Prefer the most recent concise note (a verdict / human question); fall back to the latest cleaned comment.
+  const pick = [...useful].reverse().find((c) => c.length <= 320) ?? useful[useful.length - 1]
+  return pick.slice(0, 400)
+}
+
 function toIssue(r: RawIssue): Issue {
   return {
     id: r.id,

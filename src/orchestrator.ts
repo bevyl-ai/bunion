@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { startAgent, type AgentHandle } from './agent-runner'
 import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
-import { fetchBoard, fetchCandidates, fetchStatesByIds } from './linear'
+import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue } from './linear'
 import { log, warn } from './log'
 import { removeWorkspace } from './workspace'
 import type { Issue, TokenCounts } from './types'
@@ -81,6 +81,7 @@ export async function start(workflowPath?: string): Promise<void> {
   const summaries = new Map<string, string>() // last agent message per ticket — survives the log buffer, surfaces the human action
   const tokens = loadTokens() // identifier → phase → cumulative token counts; persisted across restarts
   let lastTokenSave = 0
+  const notesFetched = new Set<string>() // blocked tickets whose verdict comment we've pulled once for display
 
   // Worker placement. An issue is PINNED to one host for its whole life (continuation turns reuse the same VM so the
   // cloned workspace + workpad survive). hostCounts = pinned issues per host; the pin is held until the issue is
@@ -315,7 +316,37 @@ export async function start(workflowPath?: string): Promise<void> {
       items,
     }
   }
-  if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log)
+  // Operator actions from the dashboard buttons. to-qa / to-build move the Linear state + wipe the workspace (fresh
+  // skills) so the next poll re-dispatches cleanly; restart re-runs in place; all stop any current session first.
+  const onAction = async (identifier: string, action: string): Promise<{ ok: boolean; msg?: string }> => {
+    const issue = lastBoard.find((i) => i.identifier === identifier)
+    if (!issue) return { ok: false, msg: 'ticket not on the board' }
+    const host = placement.get(issue.id) ?? null
+    try {
+      if (action === 'restart') {
+        terminate(issue.id, false)
+        removeWorkspace(cfg, issue.identifier, host)
+        release(issue.id)
+        log(`action: ${identifier} restart (operator)`)
+        return { ok: true, msg: 'restarting fresh' }
+      }
+      if (action === 'to-qa' || action === 'to-build') {
+        const target = action === 'to-qa' ? 'QA Requested' : 'In Progress'
+        terminate(issue.id, false)
+        removeWorkspace(cfg, issue.identifier, host)
+        await moveIssue(cfg, issue.id, target)
+        release(issue.id)
+        notesFetched.delete(issue.id)
+        summaries.delete(issue.identifier)
+        log(`action: ${identifier} → ${target} (operator)`)
+        return { ok: true, msg: `moved to ${target}` }
+      }
+      return { ok: false, msg: `unknown action: ${action}` }
+    } catch (e) {
+      return { ok: false, msg: e instanceof Error ? e.message : String(e) }
+    }
+  }
+  if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log, onAction)
 
   // Periodic workspace hygiene: each ticket's checkout is ~5-6G (node_modules + git history), and stale ones pile
   // up as tickets cycle across VMs (every restart re-pins and orphans the old copy). Prune workspaces on each VM
@@ -364,6 +395,14 @@ export async function start(workflowPath?: string): Promise<void> {
         continue
       }
       lastBoard = board
+      // For blocked tickets with no in-session note, pull the latest workpad/verdict comment once so the card/modal
+      // can show WHY a human is needed (not just "open Linear").
+      for (const i of board) {
+        if (norm(i.state) === 'qa blocked' && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
+          notesFetched.add(i.id)
+          void fetchLatestNote(cfg, i.id).then((n) => n && summaries.set(i.identifier, n)).catch(() => {})
+        }
+      }
       if (slots() > 0) {
         for (const issue of board.filter((i) => isActive(i.state)).sort(byDispatch)) {
           if (slots() <= 0) break

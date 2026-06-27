@@ -39,8 +39,10 @@ grep -q 'HOME/.profile' "$HOME/.bash_profile" 2>/dev/null || echo '[ -f "$HOME/.
 # 5. Headless chromium for QA agents — the qa skill drives Playwright to verify UI behaviour.
 [ -d "$HOME/.cache/ms-playwright" ] || "$HOME/.bun/bin/bun" x playwright install chromium >/dev/null 2>&1 || echo "playwright chromium install skipped"
 
-# 6. QA preview sign-in (authed routes). Set the test account in the env — NOT committed here:
-#    printf 'export QA_USER=%s\nexport QA_PASS=%s\n' '<test-email>' '<test-pass>' >> "$HOME/.profile"
-#    browser.mjs login then uses them to sign into preview deployments.
+# 6. QA secrets, set in the env — NOT committed here:
+#    - preview sign-in (authed routes): QA_USER + QA_PASS (a test account); browser.mjs login uses them.
+#    - screenshot proof upload: AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY; shot.mjs PUTs to the
+#      bevyl-github-media S3 bucket and returns a public URL to embed in the PR.
+#    printf 'export QA_USER=%s\nexport QA_PASS=%s\nexport AWS_ACCESS_KEY_ID=%s\nexport AWS_SECRET_ACCESS_KEY=%s\n' ... >> "$HOME/.profile"
 
 echo "bunion-vm-setup done"

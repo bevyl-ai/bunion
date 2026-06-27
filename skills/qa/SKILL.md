@@ -29,8 +29,15 @@ bun .codex/skills/qa/browser.mjs click '<sel>'     # 'text=Open billing' | 'butt
 bun .codex/skills/qa/browser.mjs fill '<sel>' '<text>'
 bun .codex/skills/qa/browser.mjs press Enter
 bun .codex/skills/qa/browser.mjs eval '<js>'       # precise assertions, e.g. document.querySelector('[role=dialog]') !== null
-bun .codex/skills/qa/browser.mjs screenshot <path> # your PROOF — save it, reference the path in the workpad
+bun .codex/skills/qa/browser.mjs screenshot <path> # capture the proof
 bun .codex/skills/qa/browser.mjs close
+```
+
+**Post the proof.** Screenshots are your evidence — upload each to S3 and embed it in the PR:
+
+```
+bun .codex/skills/qa/shot.mjs <path.png> <name>          # -> prints a public https URL
+gh pr comment <N> --body "QA: <what it shows> ![proof](<url>)"   # renders inline in the PR
 ```
 
 You don't get pixels back — use `snapshot`/`eval` to perceive and assert, and
@@ -50,7 +57,7 @@ You don't get pixels back — use `snapshot`/`eval` to perceive and assert, and
    - perform the action (click/resize/scroll/type),
    - `eval` the precise condition the acceptance criteria name (is the option offered, did
      the modal close, did the value update),
-   - **`screenshot` the proof** and note its path + what it shows in the workpad.
+   - **`screenshot` the proof, upload it with `shot.mjs`, and post it to the PR** (see "Post the proof"). On a PASS, the PR should carry a screenshot showing the fixed behaviour.
 4. Also run the repo's checks + the plan's validation items + any applicable `bevops` smoke/eval.
 
 If `login` genuinely fails (MFA prompt, account locked) and you can't reach the route, that's BLOCKED —

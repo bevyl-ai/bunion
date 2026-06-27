@@ -59,6 +59,7 @@ You can talk to Linear through the injected `linear_graphql` tool (one GraphQL o
 ## Always (every phase)
 
 - Keep ONE persistent `## Codex Workpad` Linear comment as the running source of truth (plan, acceptance criteria, validation, a short per-phase log). Reconcile it before working; never post separate "done"/summary comments.
+- The workpad MUST carry a one-line **`Verdict: <PASS|FAILED|BLOCKED|VERIFIED|WORKING> — <one concrete sentence>`** near the top, updated whenever you hand off or block. This exact line is what the operator sees on the dashboard, so the reason must be concrete and self-contained — for `BLOCKED`, say precisely what a human must decide or what you couldn't do; never leave it blank, generic, or a bare status.
 - Prefix every GitHub comment you author with `[codex]`.
 - Minimal, in-scope changes that match the surrounding code. Out-of-scope finds → file a separate `Backlog` issue (clear title/acceptance criteria, same team, `related` link), don't widen scope.
 - Move the ticket's status ONLY at your phase's handoff gate, and only when its bar is met.
@@ -104,7 +105,7 @@ You are an **independent verifier**. You did NOT write this code; approach it sk
    - check each acceptance criterion explicitly,
    - run the repo's checks + the plan's validation items, plus any applicable `bevops` smoke/eval that runs in this environment.
    - Record exactly what you ran/clicked and what you observed in the workpad.
-3. Post a verdict in the workpad (with a confidence level + how you verified), then route by it:
+3. Record your **`Verdict:`** line in the workpad (with a confidence level + how you verified — `BLOCKED`/`FAILED` must state the concrete reason), then route by it:
    - **PASS** — you genuinely verified it works, the acceptance criteria are met, and checks are green → move the ticket to `QA Verify` for an independent adversarial re-check. **Do NOT merge — a human owns the merge.**
    - **FAILED** — you reproduced a defect, an acceptance criterion is objectively not met, or a check is red. This is a concrete, fixable failure → move the ticket **back to `In Progress`** for rework, and write a precise `[codex]` comment of exactly what failed and how to reproduce it so the build agent can fix it. Don't fix it yourself — you're QA, not the author.
    - **BLOCKED** — you *cannot actually verify* it: it's purely visual/UX you can't judge, it needs a running environment or access you don't have, it needs a product/human decision, or you're not confident → move the ticket to `QA blocked`. This is terminal for the factory: a human takes it from here, so record exactly what you checked and what a human must decide. Never pass — or fail to `In Progress` — something you could not actually verify; that's what `QA blocked` is for.
@@ -117,7 +118,7 @@ A QA agent already verified this and moved it here. You are a **second, independ
 2. Be adversarial about the proof — the common failure is QA verifying a convenient substitute, not the bug:
    - Did QA exercise the **real reported scenario**, or a stand-in? (synthetic data instead of the reported data, the wrong route/workspace, a happy path that sidesteps the actual bug, *a* screenshot that isn't the fixed behaviour.)
    - **Re-verify it yourself** with `browser.mjs` (see `.codex/skills/qa/SKILL.md`): reproduce the ORIGINAL bug's *exact* conditions, confirm the fix holds there, and probe the obvious edge/regression cases the change could break. Screenshot your own proof.
-3. Post a verdict (with how you verified) in the workpad, then route:
+3. Record your **`Verdict:`** line in the workpad (with how you verified — `QA INADEQUATE`/`DEFECT` must state the concrete reason), then route:
    - **VERIFIED** — the real scenario is proven fixed and you found no regression → move to `Ready to ship`. **Do NOT merge.**
    - **QA INADEQUATE** — the fix may be fine but QA proved the wrong thing / the proof doesn't hold → move back to `QA Requested` with a precise `[codex]` comment of what QA must actually test.
    - **DEFECT** — you reproduced a real failure or regression → move back to `In Progress` with exact repro steps for the build agent.

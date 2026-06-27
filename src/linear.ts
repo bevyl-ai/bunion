@@ -133,29 +133,49 @@ export async function moveIssue(cfg: Config, issueId: string, stateName: string)
   if (!r.httpOk || (Array.isArray(b.errors) && b.errors.length) || !b.data?.issueUpdate?.success) throw new Error(`move failed: ${JSON.stringify(b.errors ?? b.data)}`)
 }
 
-// The latest meaningful workpad/verdict comment, cleaned up, for surfacing WHY a ticket is blocked on the dashboard.
+const cleanMd = (b: string): string =>
+  b
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // links → their text
+    .replace(/[`*_>#]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+// Pull the operator-facing reason a worker recorded in its `## Codex Workpad` — the `Verdict:`/`Dashboard:` line it
+// writes on a handoff (e.g. "Verdict: BLOCKED — <why a human is needed>").
+function workpadReason(workpad: string): string | null {
+  const lines = workpad.split('\n')
+  for (const ln of lines) {
+    const m = ln.match(/\bverdict\b\s*[:\-—]?\s*\*{0,2}\s*(?:blocked|failed|pass(?:ed)?|verified)?\s*\*{0,2}\s*[.\-—:]*\s*(.+)/i)
+    if (m?.[1] && m[1].replace(/[*\s]/g, '').length > 4) return cleanMd(m[1])
+  }
+  for (const ln of lines) {
+    const m = ln.match(/(?:dashboard(?: note)?|reason|blocked because|human must|needs?(?: a)? human)\s*[:\-—]\s*(.+)/i)
+    if (m?.[1] && m[1].trim().length > 4) return cleanMd(m[1])
+  }
+  return null
+}
+
+// The reason to surface for a blocked/handed-off ticket on the dashboard. Primary source is the workpad's verdict
+// line (the worker writes it there); falls back to the most recent concise human/agent comment if there's no workpad.
 export async function fetchLatestNote(cfg: Config, issueId: string): Promise<string | null> {
   const d = await query<{ issue: { comments: { nodes: { body: string }[] } } | null }>(
     cfg,
-    `query Note($id: String!) { issue(id: $id) { comments(last: 6) { nodes { body } } } }`,
+    `query Note($id: String!) { issue(id: $id) { comments(last: 8) { nodes { body } } } }`,
     { id: issueId },
   )
   const raw = (d.issue?.comments.nodes ?? []).map((n) => n.body).filter(Boolean)
   if (!raw.length) return null
-  const clean = (b: string): string =>
-    b
-      .replace(/<!--[\s\S]*?-->/g, '') // html comments
-      .replace(/^#{1,6}\s.*$/gm, '') // markdown headers (## Codex Workpad Status…)
-      .replace(/^[-*]\s*\[[ xX]\].*$/gm, '') // checklist lines
-      .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // images
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // links → their text
-      .replace(/[`*_>#]+/g, '') // stray markdown
-      .replace(/\s+/g, ' ')
-      .trim()
-  const noise = (b: string): boolean => /linear-linkback|comment thread is synced|^Created (sub-?)?issue/i.test(b.trim())
-  const useful = raw.filter((b) => !noise(b)).map(clean).filter((c) => c.length >= 8)
+  const workpad = raw.find((b) => /codex workpad/i.test(b))
+  if (workpad) {
+    const reason = workpadReason(workpad)
+    if (reason) return reason.slice(0, 400)
+  }
+  const noise = (b: string): boolean =>
+    /linear-linkback|comment thread is synced|^Created (sub-?)?issue|^Found \d+ tickets|^Create a Linear ticket|^@Linear\b/i.test(b.trim())
+  const useful = raw.filter((b) => !noise(b)).map(cleanMd).filter((c) => c.length >= 8)
   if (!useful.length) return null
-  // Prefer the most recent concise note (a verdict / human question); fall back to the latest cleaned comment.
   const pick = [...useful].reverse().find((c) => c.length <= 320) ?? useful[useful.length - 1]!
   return pick.slice(0, 400)
 }

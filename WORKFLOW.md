@@ -4,12 +4,12 @@ tracker:
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project
   api_key: $LINEAR_API_KEY
   required_labels: [dark-factory]    # opt-in: only tickets carrying this label enter the factory
-  active_states: [Todo, In Progress, QA blocked, QA Requested]   # Ready to ship is NOT active — a human merges (no automerge)
+  active_states: [Triage, Backlog, Todo, In Progress, QA blocked, QA Requested]   # entry is the label, not the state; Ready to ship NOT active (human merges)
   terminal_states: [Done, Canceled, Cancelled, Duplicate]
 polling:
   interval_ms: 10000
 phases:                              # a worker hands off to a FRESH agent when a ticket crosses phases (independence)
-  plan: [Todo]                       # PLAN (clerk pass): scope + acceptance criteria, no code
+  plan: [Triage, Backlog, Todo]      # PLAN (clerk pass): any labeled ticket enters here — Todo isn't special
   build: [In Progress, QA blocked]   # BUILD: implement + PR + stupify review loop
   qa: [QA Requested]                 # QA (bevops/review pass): independent verification
 server:
@@ -64,9 +64,9 @@ You can talk to Linear through the injected `linear_graphql` tool (one GraphQL o
 
 ---
 
-## PLAN — status `Todo` (the clerk pass)
+## PLAN — status `Triage`, `Backlog`, or `Todo` (the clerk pass)
 
-Scope and groom the ticket so the build phase can execute without guessing. **Do NOT write product code in this phase.**
+A ticket enters the factory by its `dark-factory` label, not its column — `Todo` isn't special, so handle whichever of these states it's in identically. Scope and groom it so the build phase can execute without guessing. **Do NOT write product code in this phase.**
 
 1. Ensure the `## Codex Workpad` exists. Run the `pull` skill to sync `origin/main` first.
 2. Read the ticket and investigate the codebase enough to find the real owner of the change (the files / function / service / route that actually needs to change).
@@ -75,7 +75,7 @@ Scope and groom the ticket so the build phase can execute without guessing. **Do
    - root cause and the intended change (with the owner files),
    - explicit **acceptance criteria** — what "fixed" means, stated observably,
    - a **validation plan** — the exact checks/tests/preview steps QA will later run to prove it.
-5. If the ticket is too vague or looks wrong to plan confidently, post `[codex]` questions in the workpad and leave it in `Todo` (don't guess your way into building the wrong thing).
+5. If the ticket is too vague or looks wrong to plan confidently, post `[codex]` questions in the workpad and leave it in its current status (don't guess your way into building the wrong thing).
 6. When the plan + acceptance criteria are solid, move the ticket to `In Progress`. You are done — a fresh build agent takes over.
 
 ## BUILD — status `In Progress` or `QA blocked`

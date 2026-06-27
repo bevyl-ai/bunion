@@ -1,5 +1,5 @@
 import { startAgent, type AgentHandle } from './agent-runner'
-import { loadConfig, validateConfig } from './config'
+import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
 import { fetchBoard, fetchCandidates, fetchStatesByIds } from './linear'
 import { log, warn } from './log'
@@ -78,9 +78,9 @@ export async function start(workflowPath?: string): Promise<void> {
   const isTerminal = (s: string): boolean => cfg.tracker.terminalStates.some((t) => norm(t) === norm(s))
   const isActive = (s: string): boolean => cfg.tracker.activeStates.some((t) => norm(t) === norm(s))
   const isRoutable = (i: Issue): boolean => cfg.tracker.requiredLabels.every((l) => i.labels.some((x) => norm(x) === l))
-  const todoBlocked = (i: Issue): boolean => norm(i.state) === 'todo' && i.blockers.some((b) => b.state == null || !isTerminal(b.state))
+  const planBlocked = (i: Issue): boolean => phaseOf(cfg, i.state) === 'plan' && i.blockers.some((b) => b.state == null || !isTerminal(b.state))
   const eligible = (i: Issue): boolean =>
-    isActive(i.state) && !isTerminal(i.state) && isRoutable(i) && !todoBlocked(i) && !claimed.has(i.id) && !running.has(i.id)
+    isActive(i.state) && !isTerminal(i.state) && isRoutable(i) && !planBlocked(i) && !claimed.has(i.id) && !running.has(i.id)
 
   const clearRetry = (id: string): void => {
     const r = retries.get(id)

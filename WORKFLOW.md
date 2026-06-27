@@ -80,7 +80,9 @@ A ticket enters the factory by its `dark-factory` label, not its column — `Tod
 
 ## BUILD — status `In Progress`
 
-Implement the plan, get a clean, reviewed, green PR, and hand it to QA. Execute the workpad plan.
+Implement the plan, get a clean, reviewed, green PR, and hand it to QA.
+- **Fresh build:** execute the workpad plan.
+- **Rework** (a PR is already open and a `[codex]` QA comment / the workpad records a FAILED verdict — QA bounced it back): re-read exactly what QA reproduced and address *that*; don't restart from scratch.
 
 1. Run the `pull` skill to sync `origin/main` before editing.
 2. Implement against the plan + acceptance criteria. Keep it minimal and in-scope; update the workpad after each milestone.
@@ -101,8 +103,8 @@ You are an **independent verifier**. You did NOT write this code; approach it sk
    - Record exactly what you ran and what you saw in the workpad.
 3. Post a verdict in the workpad (with a confidence level + how you verified), then route by it:
    - **PASS** — you genuinely verified it works, the acceptance criteria are met, and checks are green → move the ticket to `Ready to ship`. **Do NOT merge — a human owns the merge.**
-   - **FAIL** — a criterion isn't met, a check is red, or you reproduced a problem → move the ticket to `QA blocked`. This is terminal for the factory: a human takes it from here, so write a precise `[codex]` comment of exactly what failed and how to reproduce it. Do not try to fix it yourself.
-   - **CANNOT VERIFY** — the change is purely visual/UX, or needs a running environment you can't drive here, or you're simply not confident → leave the ticket in `QA Requested`, post your findings and exactly what a human must check, and stop. Never pass what you could not actually verify.
+   - **FAILED** — you reproduced a defect, an acceptance criterion is objectively not met, or a check is red. This is a concrete, fixable failure → move the ticket **back to `In Progress`** for rework, and write a precise `[codex]` comment of exactly what failed and how to reproduce it so the build agent can fix it. Don't fix it yourself — you're QA, not the author.
+   - **BLOCKED** — you *cannot actually verify* it: it's purely visual/UX you can't judge, it needs a running environment or access you don't have, it needs a product/human decision, or you're not confident → move the ticket to `QA blocked`. This is terminal for the factory: a human takes it from here, so record exactly what you checked and what a human must decide. Never pass — or fail to `In Progress` — something you could not actually verify; that's what `QA blocked` is for.
 
 ## Ready to ship / QA testing started / Done / Canceled / Duplicate
 

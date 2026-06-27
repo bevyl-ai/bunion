@@ -22,6 +22,10 @@ EOF
 # 2. Route github clones through the integration proxy (which carries the gh credential helper).
 git config --global url."https://bevyl-web.int.exe.xyz/".insteadOf "https://github.com/"
 
+# 2b. gh has no github.com creds on the VM, only the proxy — point gh at it so `gh pr` works
+#     (otherwise every gh pr command fails with "gh auth login" and agents fall back to raw `gh api`).
+grep -q 'GH_HOST=' "$HOME/.profile" 2>/dev/null || echo 'export GH_HOST=bevyl-web.int.exe.xyz' >> "$HOME/.profile"
+
 # 3. The repo's toolchain. The base image ships codex + gh + python3 but NO bun/node, and the
 #    bevyl repo is bun-based — without this the build/QA agents can't run tests/typecheck.
 [ -x "$HOME/.bun/bin/bun" ] || curl -fsSL https://bun.sh/install | bash

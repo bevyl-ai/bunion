@@ -6,7 +6,7 @@ export interface BoardItem {
   state: string
   priority: number
   host: string | null
-  status: 'running' | 'retrying' | 'queued'
+  status: 'running' | 'retrying' | 'queued' | 'handoff' // handoff = left the active states (e.g. in QA), bunion is done with it for now
   turn: number
   activity: string
   startedAt: number
@@ -76,9 +76,9 @@ async function pull(){try{snap=await (await fetch('/state.json')).json()}catch(e
 function render(){
  const now=Date.now();
  const items=snap.items||[];
- const run=items.filter(r=>r.status==='running').length,q=items.filter(r=>r.status==='queued').length,rt=items.filter(r=>r.status==='retrying').length;
+ const run=items.filter(r=>r.status==='running').length,q=items.filter(r=>r.status==='queued').length,rt=items.filter(r=>r.status==='retrying').length,hf=items.filter(r=>r.status==='handoff').length;
  scope.textContent=snap.scope||'';
- count.textContent=run+' running'+(rt?' · '+rt+' retrying':'')+' · '+q+' queued · '+(snap.cap||0)+' cap';
+ count.textContent=run+' running'+(rt?' · '+rt+' retrying':'')+(q?' · '+q+' queued':'')+(hf?' · '+hf+' in QA/handoff':'')+' · '+(snap.cap||0)+' cap';
  clock.textContent=new Date().toLocaleTimeString();
  grid.innerHTML=items.length?items.map(r=>{
   const c=SC(r.state),run=r.status==='running';
@@ -86,6 +86,7 @@ function render(){
   let foot;
   if(run) foot='<span class="muted"><span class="dot" style="background:'+dc+'"></span>active '+ago(act)+' ago</span>'+(r.host?'<span class="muted" style="max-width:48%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(r.host)+'">&#9709; '+esc(r.host)+'</span>':'');
   else if(r.status==='retrying') foot='<span class="muted">&#8635; retry '+(r.retryDueAt?'in '+ago(r.retryDueAt-now):'soon')+(r.retryAttempt>0?' &middot; attempt '+r.retryAttempt:'')+'</span>';
+  else if(r.status==='handoff') foot='<span class="muted">&#10004; handed off &middot; in QA / review</span>';
   else foot='<span class="muted">&#9203; queued &middot; waiting for a slot</span>';
   return '<div class="card" data-id="'+r.identifier+'" style="cursor:pointer;opacity:'+(run?'1':'.62')+(r.identifier===expandedId?';outline:2px solid #4a86c5':'')+'"><div class="id">'+r.identifier+'</div>'+
    '<div class="title">'+esc(r.title)+'</div>'+

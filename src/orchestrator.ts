@@ -1,7 +1,7 @@
 import { startAgent, type AgentHandle } from './agent-runner'
 import { loadConfig, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
-import { fetchCandidates, fetchStatesByIds } from './linear'
+import { fetchBoard, fetchCandidates, fetchStatesByIds } from './linear'
 import { log, warn } from './log'
 import { removeWorkspace } from './workspace'
 import type { Issue } from './types'
@@ -38,7 +38,7 @@ export async function start(workflowPath?: string): Promise<void> {
   const claimed = new Set<string>()
   const retries = new Map<string, RetryTimer>()
   const history: Snapshot['recent'] = []
-  let lastCandidates: Issue[] = [] // every active+labeled ticket from the last poll — the board, not just the running ones
+  let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
   let tokenSeq = 0
 
   const pushHistory = (identifier: string, kind: string, detail: string | null): void => {
@@ -217,14 +217,14 @@ export async function start(workflowPath?: string): Promise<void> {
   const workerDesc = hosts().length === 0 ? 'local' : `${hosts().length} VM${hosts().length > 1 ? 's' : ''}×${cfg.worker.maxPerHost}`
   log(`bunion up · scope=${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''} · cap=${displayCap()} · workers=${workerDesc} · poll=${cfg.pollIntervalMs}ms`)
 
-  const rankStatus = (s: BoardItem['status']): number => (s === 'running' ? 0 : s === 'retrying' ? 1 : 2)
+  const rankStatus = (s: BoardItem['status']): number => (s === 'running' ? 0 : s === 'retrying' ? 1 : s === 'queued' ? 2 : 3)
   const snapshot = (): Snapshot => {
     const board = new Map<string, BoardItem>()
     const base = (i: Issue): BoardItem => ({
       identifier: i.identifier, title: i.title, state: i.state, priority: i.priority, host: placement.get(i.id) ?? null,
-      status: 'queued', turn: 0, activity: '', startedAt: 0, lastActivity: 0, retryAttempt: 0, retryDueAt: null,
+      status: isActive(i.state) ? 'queued' : 'handoff', turn: 0, activity: '', startedAt: 0, lastActivity: 0, retryAttempt: 0, retryDueAt: null,
     })
-    for (const c of lastCandidates) board.set(c.id, base(c))
+    for (const c of lastBoard) board.set(c.id, base(c))
     for (const [id, r] of retries) {
       const it = board.get(id)
       if (it) {
@@ -270,17 +270,19 @@ export async function start(workflowPath?: string): Promise<void> {
         warn(`config: ${e instanceof Error ? e.message : e} (keeping last good)`)
       }
       await reconcile()
-      let candidates: Issue[]
+      let board: Issue[]
       try {
-        candidates = await fetchCandidates(cfg) // every poll (not just when slots are free) so the board shows the queue
+        // One labeled query is the whole board (active + handed-off). For an unlabeled config, fall back to the
+        // active-states query. Either way, narrow host-side to the opt-in set.
+        board = (cfg.tracker.requiredLabels.length ? await fetchBoard(cfg) : await fetchCandidates(cfg)).filter(isRoutable)
       } catch (e) {
         warn(`poll: ${e instanceof Error ? e.message : e}`)
         await sleep(cfg.pollIntervalMs)
         continue
       }
-      lastCandidates = candidates.filter(isRoutable) // the board is the OPT-IN set (labels filter host-side, not in the query)
+      lastBoard = board
       if (slots() > 0) {
-        for (const issue of candidates.sort(byDispatch)) {
+        for (const issue of board.filter((i) => isActive(i.state)).sort(byDispatch)) {
           if (slots() <= 0) break
           if (!eligible(issue)) continue
           const host = placeFor(issue.id)

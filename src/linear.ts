@@ -58,6 +58,10 @@ const BY_IDS = `query ByIds($ids: [ID!]) {
   issues(first: 100, filter: { id: { in: $ids } }) { nodes { ${ISSUE_FIELDS} } }
 }`
 
+const BOARD = `query Board($filter: IssueFilter) {
+  issues(first: 50, filter: $filter) { nodes { ${ISSUE_FIELDS} } }
+}`
+
 const BY_KEY = `query ByKey($id: String!) { issue(id: $id) { ${ISSUE_FIELDS} } }`
 
 export async function fetchCandidates(cfg: Config): Promise<Issue[]> {
@@ -67,6 +71,18 @@ export async function fetchCandidates(cfg: Config): Promise<Issue[]> {
   if (cfg.tracker.team) filter.team = { key: { eq: cfg.tracker.team } }
   if (cfg.tracker.projectSlug) filter.project = { slugId: { eq: cfg.tracker.projectSlug } }
   const d = await query<{ issues: { nodes: RawIssue[] } }>(cfg, CANDIDATES, { filter })
+  return d.issues.nodes.map(toIssue)
+}
+
+// The board = every non-terminal labeled ticket (active + handed-off downstream, e.g. QA Requested), so the
+// dashboard can show the whole opt-in set, not just what's actively running. Label filter is server-side here
+// (case-sensitive) for efficiency; the orchestrator re-filters host-side (case-insensitive) for correctness.
+export async function fetchBoard(cfg: Config): Promise<Issue[]> {
+  const filter: Record<string, unknown> = { state: { type: { nin: ['completed', 'canceled'] } } }
+  if (cfg.tracker.team) filter.team = { key: { eq: cfg.tracker.team } }
+  if (cfg.tracker.projectSlug) filter.project = { slugId: { eq: cfg.tracker.projectSlug } }
+  if (cfg.tracker.requiredLabels.length) filter.labels = { name: { in: cfg.tracker.requiredLabels } }
+  const d = await query<{ issues: { nodes: RawIssue[] } }>(cfg, BOARD, { filter })
   return d.issues.nodes.map(toIssue)
 }
 

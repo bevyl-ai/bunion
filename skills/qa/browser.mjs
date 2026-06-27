@@ -54,6 +54,16 @@ async function handle(page, consoleErrors, cmd, args) {
     case 'eval': return { result: await page.evaluate(args.join(' ')) }
     case 'url': return { url: page.url() }
     case 'screenshot': { const path = a || `/tmp/qa-${Date.now()}.png`; await page.screenshot({ path, fullPage: true }); return { shot: path } }
+    case 'login': {
+      const email = process.env.QA_USER, pass = process.env.QA_PASS
+      if (!email || !pass) return { error: 'QA_USER / QA_PASS not set in the env' }
+      await page.fill('input[type="email"], input[name="email"]', email, { timeout: 10000 })
+      await page.fill('input[type="password"], input[name="password"]', pass, { timeout: 10000 })
+      await page.click('button[type="submit"]', { timeout: 10000 }).catch(() => page.getByRole('button', { name: /sign ?in|log ?in|continue/i }).first().click())
+      await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {})
+      await page.waitForTimeout(1500)
+      return { url: page.url(), title: await page.title(), signedIn: !/sign.?in|\/auth\//i.test(page.url()) }
+    }
     case 'snapshot': return snapshot(page, consoleErrors)
     case 'close': return { ok: true }
     default: return { error: `unknown cmd: ${cmd}` }

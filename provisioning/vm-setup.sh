@@ -39,4 +39,8 @@ grep -q 'HOME/.profile' "$HOME/.bash_profile" 2>/dev/null || echo '[ -f "$HOME/.
 # 5. Headless chromium for QA agents — the qa skill drives Playwright to verify UI behaviour.
 [ -d "$HOME/.cache/ms-playwright" ] || "$HOME/.bun/bin/bun" x playwright install chromium >/dev/null 2>&1 || echo "playwright chromium install skipped"
 
+# 6. QA preview sign-in (authed routes). Set the test account in the env — NOT committed here:
+#    printf 'export QA_USER=%s\nexport QA_PASS=%s\n' '<test-email>' '<test-pass>' >> "$HOME/.profile"
+#    browser.mjs login then uses them to sign into preview deployments.
+
 echo "bunion-vm-setup done"

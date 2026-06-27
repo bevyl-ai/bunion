@@ -38,18 +38,23 @@ You don't get pixels back — use `snapshot`/`eval` to perceive and assert, and
 
 ## Verify the ticket
 
-1. Find the PR's preview deployment (don't guess the host): `gh pr view <N> --json comments`
-   and the `Deploy preview` / `Trigger Preview Check` check-runs carry a
-   `pr-<N>.preview.bevyl.ai` (web) / `pr-<N>.admin-preview.bevyl.ai` (admin) host.
-2. Reproduce the ORIGINAL bug (production `www.bevyl.ai` or the base), then go to the
+1. Find the PR's preview URL (a Vercel deployment, a `*.preview.bevyl.ai` host):
+   `sha=$(gh pr view <N> --json headRefOid -q .headRefOid)`, then for a deployment id from
+   `gh api "repos/bevyl-ai/bevyl.ai/deployments?sha=$sha" -q '.[].id'` read
+   `gh api "repos/bevyl-ai/bevyl.ai/deployments/<id>/statuses" -q '.[0].environment_url'`.
+2. **Sign in** (the editor / home / admin all require it): `browser.mjs open <preview>/home` then
+   `browser.mjs login` — it uses the QA test account already in the VM env and lands you in the app
+   (check `signedIn:true`). Public routes (marketing, glossary) need no login.
+3. Reproduce the ORIGINAL bug (production `www.bevyl.ai` or the base), then go to the
    preview and **drive the exact user flow that the fix changes**:
    - perform the action (click/resize/scroll/type),
    - `eval` the precise condition the acceptance criteria name (is the option offered, did
      the modal close, did the value update),
    - **`screenshot` the proof** and note its path + what it shows in the workpad.
-3. Also run the repo's checks + the plan's validation items + any applicable `bevops` smoke/eval.
-4. **Auth:** logged-in routes (editor, home, admin) redirect to `/auth/sign-in`. Public routes
-   need no login. If the bug is behind auth and you have no working session, that's BLOCKED.
+4. Also run the repo's checks + the plan's validation items + any applicable `bevops` smoke/eval.
+
+If `login` genuinely fails (MFA prompt, account locked) and you can't reach the route, that's BLOCKED —
+don't guess. Otherwise authed routes are fully testable.
 
 ## Route (post the verdict + confidence in the workpad first)
 

@@ -106,6 +106,13 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 .cbtn.warn{color:#d9a62b;border-color:#d9a62b44}.cbtn.warn:hover{background:#d9a62b1a}
 .cbtn.danger{color:#eaa6a0;border-color:#e0564f44}.cbtn.danger:hover{background:#e0564f1a}
 .cbtn.busy{opacity:.5;pointer-events:none}
+.ctr{display:inline-flex;align-items:center;gap:6px;flex:none}
+.kebab{background:none;border:none;color:var(--mut2);font-size:15px;line-height:1;cursor:pointer;padding:1px 5px;border-radius:6px}
+.kebab:hover{background:var(--surf2);color:var(--fg)}
+#actmenu{position:fixed;z-index:60;background:var(--surf2);border:1px solid var(--line2);border-radius:9px;padding:5px;box-shadow:0 14px 36px rgba(0,0,0,.55);display:none;flex-direction:column;gap:2px;min-width:144px}
+.actitem{display:block;width:100%;text-align:left;background:none;border:none;color:var(--fg);font:600 12.5px/1 inherit;padding:8px 11px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.actitem:hover{background:#2a2f3a}
+.actitem.go{color:#9ec1ff}.actitem.danger{color:#eaa6a0}
 #msub{padding:9px 16px 0}
 .mtitle2{font-size:14.5px;color:var(--fg);font-weight:500;line-height:1.4}
 .mmeta{display:flex;gap:12px;flex-wrap:wrap;margin-top:7px;color:var(--mut);font-size:11.5px}
@@ -156,6 +163,7 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
  <div id="mactions"></div>
  <div id="logbody"></div>
 </div></div>
+<div id="actmenu"></div>
 <script>
 const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Requested':'#d99a2b','QA Verify':'#c79a3a','QA blocked':'#e0564f','Ready to ship':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
 const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=Math.floor(s/60);if(m<60)return m+'m '+(s%60)+'s';return Math.floor(m/60)+'h '+(m%60)+'m'};
@@ -163,13 +171,13 @@ const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return S
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 const fmtTok=n=>{n=n||0;return n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e4?Math.round(n/1e3)+'k':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)};
 const PRI={1:'Urgent',2:'High',3:'Medium',4:'Low'};
-function abtn(id,action,label,cls,big){return '<button class="'+(big?'mbtn ':'cbtn ')+(cls||'')+'" onclick="postAction(this,\\''+id+'\\',\\''+action+'\\',event)">'+label+'</button>';}
-function actionsFor(it,big){if(!it)return '';var b=[];
- if(it.state==='QA blocked'){b.push(abtn(it.identifier,'to-qa','&#8594; QA','go',big));b.push(abtn(it.identifier,'to-build','&#8594; Build','',big));}
- else if(it.status==='running'){if(big){b.push(abtn(it.identifier,'restart','&#8635; Restart','danger',big));b.push(abtn(it.identifier,'to-build','&#8594; Build','',big));}}
- else if(it.state==='Ready to ship'){b.push(abtn(it.identifier,'to-qa','Re-verify','go',big));if(big)b.push(abtn(it.identifier,'to-build','&#8594; Build','',big));}
- else if(big){b.push(abtn(it.identifier,'to-qa','&#8594; QA','go',big));b.push(abtn(it.identifier,'to-build','&#8594; Build','',big));}
- return b.join('');}
+function actionList(it){if(!it||it.state==='Done')return [];
+ if(it.state==='QA blocked')return [{a:'to-qa',l:'&#8594; QA',c:'go'},{a:'to-build',l:'&#8594; Build',c:''}];
+ if(it.status==='running')return [{a:'restart',l:'&#8635; Restart',c:'danger'},{a:'to-build',l:'&#8594; Build',c:''}];
+ if(it.state==='Ready to ship')return [{a:'to-qa',l:'Re-verify',c:'go'},{a:'to-build',l:'&#8594; Build',c:''}];
+ return [{a:'to-qa',l:'&#8594; QA',c:'go'},{a:'to-build',l:'&#8594; Build',c:''}];}
+function abtn(id,d){return '<button class="mbtn '+(d.c||'')+'" onclick="postAction(this,\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>';}
+function kebab(it){return actionList(it).length?'<button class="kebab" data-id="'+it.identifier+'" onclick="toggleMenu(this,event)" title="actions">&#8943;</button>':'';}
 const COLS=[
  {name:'Triage',c:'#6b7280',states:['Triage']},
  {name:'Backlog',c:'#6b7280',states:['Backlog']},
@@ -199,14 +207,12 @@ function cardHtml(r,now){
  const tk=r.tokens?'<span class="t-tok clk" title="tokens used across all stages">'+fmtTok(r.tokens.total)+' tok</span>':'<span class="t-tok"></span>';
  const pdot=(r.priority>=1&&r.priority<=4)?'<i class="pri p'+r.priority+'" title="'+PRI[r.priority]+' priority"></i>':'';
  const reason=(r.state==='QA blocked'&&r.note)?'<div class="creason" title="why a human is needed">'+esc(r.note.slice(0,160))+'</div>':'';
- const acts=actionsFor(r,false);
  return '<div class="card'+(run?' run':'')+'" data-id="'+r.identifier+'">'+
-  '<div class="ctop"><span class="cid">'+pdot+r.identifier+'</span>'+pr+'</div>'+
+  '<div class="ctop"><span class="cid">'+pdot+r.identifier+'</span><span class="ctr">'+pr+kebab(r)+'</span></div>'+
   '<div class="ctitle">'+esc(r.title)+'</div>'+
   (run?'<div class="cact t-act">turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,70))+'</div>':'')+
   reason+
   '<div class="cfoot">'+status+'<span class="meta">'+tk+tot+'</span></div>'+
-  (acts?'<div class="cacts">'+acts+'</div>':'')+
  '</div>';
 }
 function colHtml(col,arr,now){return '<div class="col"><div class="colh"><i style="background:'+col.c+'"></i>'+col.name+'<span class="ct">'+arr.length+'</span></div>'+(arr.length?arr.map(r=>cardHtml(r,now)).join(''):'<div class="colempty">empty</div>')+'</div>';}
@@ -262,13 +268,30 @@ function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId)
  const tk=document.getElementById('mtokens');
  if(it&&it.tokens){tk.style.display='flex';tk.innerHTML='<span class="tklab">tokens</span>'+it.tokens.phases.map(function(p){return '<span class="tkph" title="input '+fmtTok(p.input)+' \\u00b7 output '+fmtTok(p.output)+' \\u00b7 cached '+fmtTok(p.cached)+'"><b>'+esc(p.phase)+'</b> '+fmtTok(p.total)+'</span>';}).join('')+'<span class="tktot">&Sigma; '+fmtTok(it.tokens.total)+'</span>';}
  else{tk.style.display='none';}
- const ma=document.getElementById('mactions');var ah=actionsFor(it,true);if(ah){ma.style.display='flex';ma.innerHTML=ah;}else{ma.style.display='none';ma.innerHTML='';}}
+ const ma=document.getElementById('mactions');var ah=it?actionList(it).map(function(d){return abtn(it.identifier,d)}).join(''):'';if(ah){ma.style.display='flex';ma.innerHTML=ah;}else{ma.style.display='none';ma.innerHTML='';}}
 function openModal(id){expandedId=id;document.getElementById('modal').style.display='flex';document.getElementById('logbody').innerHTML='<div class="lg" style="color:var(--mut)">loading&hellip;</div>';syncHead();pullLog();}
 function closeModal(){expandedId=null;document.getElementById('modal').style.display='none';}
 async function postAction(btn,id,action,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
- var box=btn.parentNode;if(box)box.querySelectorAll('button').forEach(function(x){x.classList.add('busy')});
+ var box=btn&&btn.parentNode;if(box)box.querySelectorAll('button').forEach(function(x){x.classList.add('busy')});
  try{await fetch('/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:id,action:action})});}catch(e){}
  setTimeout(pull,400);setTimeout(pull,1600);}
+let menuFor=null;
+function toggleMenu(btn,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
+ var id=btn.getAttribute('data-id');
+ if(menuFor===id){closeMenu();return;}
+ var it=(snap.items||[]).find(function(x){return x.identifier===id});
+ var acts=actionList(it);if(!acts.length){closeMenu();return;}
+ var m=document.getElementById('actmenu');
+ m.innerHTML=acts.map(function(d){return '<button class="actitem '+(d.c||'')+'" onclick="menuAction(\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>'}).join('');
+ m.style.display='flex';m.style.visibility='hidden';
+ var r=btn.getBoundingClientRect(),mw=m.offsetWidth,mh=m.offsetHeight;
+ var left=Math.max(8,r.right-mw),top=r.bottom+5;if(top+mh>window.innerHeight-8)top=Math.max(8,r.top-mh-5);
+ m.style.left=left+'px';m.style.top=top+'px';m.style.visibility='visible';
+ menuFor=id;}
+function menuAction(id,action,ev){if(ev){ev.stopPropagation();ev.preventDefault();}closeMenu();postAction(null,id,action);}
+function closeMenu(){var m=document.getElementById('actmenu');m.style.display='none';m.innerHTML='';menuFor=null;}
+document.addEventListener('click',function(e){if(!e.target.closest('#actmenu')&&!e.target.closest('.kebab'))closeMenu();});
+window.addEventListener('scroll',closeMenu,true);window.addEventListener('resize',closeMenu);
 board.addEventListener('click',function(e){const c=e.target.closest('[data-id]');if(!c)return;openModal(c.getAttribute('data-id'));});
 document.getElementById('mclose').addEventListener('click',closeModal);
 document.getElementById('modal').addEventListener('click',function(e){if(e.target.id==='modal')closeModal();});

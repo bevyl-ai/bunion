@@ -166,7 +166,7 @@ const PRI={1:'Urgent',2:'High',3:'Medium',4:'Low'};
 function abtn(id,action,label,cls,big){return '<button class="'+(big?'mbtn ':'cbtn ')+(cls||'')+'" onclick="postAction(this,\\''+id+'\\',\\''+action+'\\',event)">'+label+'</button>';}
 function actionsFor(it,big){if(!it)return '';var b=[];
  if(it.state==='QA blocked'){b.push(abtn(it.identifier,'to-qa','&#8594; QA','go',big));b.push(abtn(it.identifier,'to-build','&#8594; Build','',big));}
- else if(it.status==='running'){b.push(abtn(it.identifier,'restart','&#8635; Restart','danger',big));if(big)b.push(abtn(it.identifier,'to-build','&#8594; Build','',big));}
+ else if(it.status==='running'){if(big){b.push(abtn(it.identifier,'restart','&#8635; Restart','danger',big));b.push(abtn(it.identifier,'to-build','&#8594; Build','',big));}}
  else if(it.state==='Ready to ship'){b.push(abtn(it.identifier,'to-qa','Re-verify','go',big));if(big)b.push(abtn(it.identifier,'to-build','&#8594; Build','',big));}
  else if(big){b.push(abtn(it.identifier,'to-qa','&#8594; QA','go',big));b.push(abtn(it.identifier,'to-build','&#8594; Build','',big));}
  return b.join('');}

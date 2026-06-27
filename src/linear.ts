@@ -157,8 +157,8 @@ function workpadReason(workpad: string): string | null {
   return null
 }
 
-// The reason to surface for a blocked/handed-off ticket on the dashboard. Primary source is the workpad's verdict
-// line (the worker writes it there); falls back to the most recent concise human/agent comment if there's no workpad.
+// The reason to surface for a blocked ticket on the dashboard: ONLY the worker's own `Verdict:` line from its
+// workpad. Never a human comment or other chatter — if there's no workpad verdict yet, show nothing.
 export async function fetchLatestNote(cfg: Config, issueId: string): Promise<string | null> {
   const d = await query<{ issue: { comments: { nodes: { body: string }[] } } | null }>(
     cfg,
@@ -166,18 +166,8 @@ export async function fetchLatestNote(cfg: Config, issueId: string): Promise<str
     { id: issueId },
   )
   const raw = (d.issue?.comments.nodes ?? []).map((n) => n.body).filter(Boolean)
-  if (!raw.length) return null
   const workpad = raw.find((b) => /codex workpad/i.test(b))
-  if (workpad) {
-    const reason = workpadReason(workpad)
-    if (reason) return reason.slice(0, 400)
-  }
-  const noise = (b: string): boolean =>
-    /linear-linkback|comment thread is synced|^Created (sub-?)?issue|^Found \d+ tickets|^Create a Linear ticket|^@Linear\b/i.test(b.trim())
-  const useful = raw.filter((b) => !noise(b)).map(cleanMd).filter((c) => c.length >= 8)
-  if (!useful.length) return null
-  const pick = [...useful].reverse().find((c) => c.length <= 320) ?? useful[useful.length - 1]!
-  return pick.slice(0, 400)
+  return workpad ? workpadReason(workpad) : null
 }
 
 function toIssue(r: RawIssue): Issue {

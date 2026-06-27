@@ -278,7 +278,7 @@ export async function start(workflowPath?: string): Promise<void> {
         await sleep(cfg.pollIntervalMs)
         continue
       }
-      lastCandidates = candidates
+      lastCandidates = candidates.filter(isRoutable) // the board is the OPT-IN set (labels filter host-side, not in the query)
       if (slots() > 0) {
         for (const issue of candidates.sort(byDispatch)) {
           if (slots() <= 0) break

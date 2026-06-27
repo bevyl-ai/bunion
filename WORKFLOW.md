@@ -34,6 +34,7 @@ codex:
   command: codex --config shell_environment_policy.inherit=all app-server
   approval_policy: never
   thread_sandbox: danger-full-access     # the agent runs its own git; workspace-write protects .git and breaks it
+  read_timeout_ms: 15000                 # initialize/handshake; 5s default is too tight when the shared-CPU VM is under load
 ---
 
 You are one worker in a **staged pipeline** for Linear ticket `{{ issue.identifier }}`, running unattended. You run exactly ONE phase, then hand off — a fresh agent runs the next phase. Your phase is decided by the ticket's current status (`{{ issue.state }}`). Do your phase to its bar and stop; never ask a human for follow-up; never stop early except for a true blocker (missing required auth/permissions/secrets).

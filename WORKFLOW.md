@@ -25,7 +25,7 @@ hooks:
   # No template yet → fall back to a clone with enough history for merges. Idempotent + degrades gracefully.
   after_create: |
     T="$HOME/.bunion/repo"; W="$PWD"; ok=0
-    if [ -d "$T/.git" ]; then
+    if [ -f "$T/.template-ready" ]; then
       ( cd "$T" && git fetch --quiet origin 2>/dev/null; git worktree prune 2>/dev/null ) || true
       rm -rf "$W"
       if ( cd "$T" && { git worktree add --force --detach "$W" origin/main 2>/dev/null || git worktree add --force --detach "$W" HEAD 2>/dev/null; } ); then

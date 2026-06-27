@@ -114,6 +114,7 @@ Implement the plan, get a clean, reviewed, green PR, and hand it to QA.
 2. Implement against the plan + acceptance criteria. Keep it minimal and in-scope; update the workpad after each milestone.
 3. Validate: run the repo's checks (see the `push` skill) and the plan's validation items until green.
 4. `commit`, then `push` (open/update the PR, ensure the `bunion` label, attach the PR URL to the issue).
+   - **The PR must be authored by the operator, never a bot.** Check `gh pr view <N> --json author -q .author.login`. If it's `app/exe-dev-github-integration` or ends in `[bot]`, stupify runs as that *same* app and can never review it (GitHub forbids reviewing your own PR). Close it (`gh pr close <N>`) and re-open from the same branch with `gh pr create` — the branch + commits are untouched, but the new PR is operator-authored and reviewable.
 5. **Code-review gate (stupify) — the build phase is NOT done until stupify LGTMs the current head commit.** stupify reviews every push: it submits a PR review from `exe-dev-github-integration[bot]`, tagged `<!-- stupify:<commit-sha> -->` for the commit it reviewed. It **approves with a body that starts `LGTM`** (e.g. `LGTM ✅`, `nice, all fixed ✅`); otherwise the body lists what's wrong. Loop:
    - After each push, read `head=$(gh pr view <N> --json headRefOid -q .headRefOid)` and `gh api repos/$REPO/pulls/<N>/reviews`.
    - Find stupify's review whose `stupify:<sha>` marker equals `head`. **None yet → stupify hasn't reviewed your latest push; wait and re-check** (don't proceed).

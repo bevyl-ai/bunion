@@ -10,6 +10,7 @@ export interface Issue {
   createdAt: string // ISO
   labels: string[]
   blockers: { state: string | null }[]
+  prUrl: string | null // the GitHub PR attached to the issue, if any
 }
 
 export interface TrackerConfig {

@@ -43,12 +43,14 @@ interface RawIssue {
   state: { name: string }
   labels: { nodes: { name: string }[] }
   inverseRelations: { nodes: { type: string; issue: { state: { name: string } | null } | null }[] }
+  attachments: { nodes: { url: string }[] }
 }
 
 const ISSUE_FIELDS = `id identifier title description url priority createdAt
   state { name }
   labels { nodes { name } }
-  inverseRelations { nodes { type issue { state { name } } } }`
+  inverseRelations { nodes { type issue { state { name } } } }
+  attachments { nodes { url } }`
 
 const CANDIDATES = `query Candidates($filter: IssueFilter) {
   issues(first: 100, filter: $filter) { nodes { ${ISSUE_FIELDS} } }
@@ -111,5 +113,6 @@ function toIssue(r: RawIssue): Issue {
     createdAt: r.createdAt,
     labels: r.labels.nodes.map((n) => n.name),
     blockers: r.inverseRelations.nodes.filter((n) => n.type === 'blocks').map((n) => ({ state: n.issue?.state?.name ?? null })),
+    prUrl: r.attachments?.nodes.map((a) => a.url).find((u) => /github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(u)) ?? null,
   }
 }

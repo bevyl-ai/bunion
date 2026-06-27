@@ -223,7 +223,7 @@ export async function start(workflowPath?: string): Promise<void> {
   const snapshot = (): Snapshot => {
     const board = new Map<string, BoardItem>()
     const base = (i: Issue): BoardItem => ({
-      identifier: i.identifier, title: i.title, state: i.state, priority: i.priority, host: placement.get(i.id) ?? null,
+      identifier: i.identifier, title: i.title, state: i.state, priority: i.priority, host: placement.get(i.id) ?? null, prUrl: i.prUrl,
       status: isActive(i.state) ? 'queued' : 'handoff', turn: 0, activity: '', startedAt: 0, lastActivity: 0, retryAttempt: 0, retryDueAt: null,
     })
     for (const c of lastBoard) board.set(c.id, base(c))

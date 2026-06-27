@@ -6,6 +6,7 @@ export interface BoardItem {
   state: string
   priority: number
   host: string | null
+  prUrl: string | null
   status: 'running' | 'retrying' | 'queued' | 'handoff' // handoff = left the active states (e.g. in QA), bunion is done with it for now
   turn: number
   activity: string
@@ -90,7 +91,7 @@ function render(){
   else foot='<span class="muted">&#9203; queued &middot; waiting for a slot</span>';
   return '<div class="card" data-id="'+r.identifier+'" style="cursor:pointer;opacity:'+(run?'1':'.62')+(r.identifier===expandedId?';outline:2px solid #4a86c5':'')+'"><div class="id">'+r.identifier+'</div>'+
    '<div class="title">'+esc(r.title)+'</div>'+
-   '<div class="row"><span class="badge" style="background:'+c+'2a;color:'+c+'">'+esc(r.state)+'</span>'+(run?'<span class="t muted">&#9201; '+dur(now-r.startedAt)+'</span>':'')+'</div>'+
+   '<div class="row"><span class="badge" style="background:'+c+'2a;color:'+c+'">'+esc(r.state)+'</span><span style="display:flex;gap:10px;align-items:center">'+(r.prUrl?'<a href="'+r.prUrl+'" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#4a86c5;text-decoration:none;font-size:11px">PR #'+(r.prUrl.split("/pull/")[1]||"")+' &#8599;</a>':'')+(run?'<span class="t muted">&#9201; '+dur(now-r.startedAt)+'</span>':'')+'</span></div>'+
    (run?'<div class="row"><span class="muted" style="display:block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,64))+'</span></div>':'')+
    '<div class="row">'+foot+'</div></div>'}).join(''):'<div class="empty">no '+esc(snap.scope||'dark-factory')+' tickets in scope</div>';
  recent.innerHTML=(snap.recent&&snap.recent.length)?snap.recent.map(x=>'<span class="pill">'+(x.kind==='failed'?'&#10007;':'&#10003;')+' '+x.identifier+' &middot; '+ago(now-x.at)+' ago</span>').join(''):'&mdash;';

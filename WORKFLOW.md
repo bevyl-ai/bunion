@@ -4,8 +4,8 @@ tracker:
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project
   api_key: $LINEAR_API_KEY
   required_labels: [dark-factory]    # opt-in: only tickets carrying this label enter the factory
-  active_states: [Triage, Backlog, Todo, In Progress, QA Requested, QA Verify]   # entry is the label; QA blocked + Ready to ship are NOT active (humans handle them)
-  terminal_states: [Done, Canceled, Cancelled, Duplicate, QA blocked]   # QA blocked = the factory stops + needs a human
+  active_states: [Triage, Backlog, Todo, In Progress, QA Requested, QA Verify, QA blocked]   # entry is the label; Ready to ship + Needs human are NOT active (humans handle them)
+  terminal_states: [Done, Canceled, Cancelled, Duplicate, Needs human]   # Needs human = the factory stops + a person must decide
 polling:
   interval_ms: 10000
 phases:                              # a worker hands off to a FRESH agent when a ticket crosses phases (independence)
@@ -13,6 +13,7 @@ phases:                              # a worker hands off to a FRESH agent when 
   build: [In Progress]               # BUILD: implement + PR + stupify review loop
   qa: [QA Requested]                 # QA CHECK: independent verification + screenshot proof
   verify: [QA Verify]                # VERIFY QA: a 2nd, adversarial agent — did QA test the REAL scenario? is it proven safe?
+  unblock: [QA blocked]              # UNBLOCK: triage a stuck ticket — clear the meta-problem or escalate to a human
 server:
   port: 4319                       # live status dashboard at http://localhost:4319 (or set BUNION_PORT)
 workspace:
@@ -108,7 +109,7 @@ You are an **independent verifier**. You did NOT write this code; approach it sk
 3. Record your **`Verdict:`** line in the workpad (with a confidence level + how you verified — `BLOCKED`/`FAILED` must state the concrete reason), then route by it:
    - **PASS** — you genuinely verified it works, the acceptance criteria are met, and checks are green → move the ticket to `QA Verify` for an independent adversarial re-check. **Do NOT merge — a human owns the merge.**
    - **FAILED** — you reproduced a defect, an acceptance criterion is objectively not met, or a check is red. This is a concrete, fixable failure → move the ticket **back to `In Progress`** for rework, and write a precise `[codex]` comment of exactly what failed and how to reproduce it so the build agent can fix it. Don't fix it yourself — you're QA, not the author.
-   - **BLOCKED** — you *cannot actually verify* it: it's purely visual/UX you can't judge, it needs a running environment or access you don't have, it needs a product/human decision, or you're not confident → move the ticket to `QA blocked`. This is terminal for the factory: a human takes it from here, so record exactly what you checked and what a human must decide. Never pass — or fail to `In Progress` — something you could not actually verify; that's what `QA blocked` is for.
+   - **BLOCKED** — you *cannot actually verify* it: it needs a running environment or access you don't have, a product/human decision, or you're not confident → move the ticket to `QA blocked`. An **unblocker** agent picks it up next — it tries to clear the path (find the missing access/env/data/URL) or escalate to a human — so record exactly what you tried and what was missing. Never pass — or fail to `In Progress` — something you could not actually verify; that's what `QA blocked` is for.
 
 ## VERIFY QA — status `QA Verify` (the adversarial check)
 
@@ -123,7 +124,19 @@ A QA agent already verified this and moved it here. You are a **second, independ
    - **QA INADEQUATE** — the fix may be fine but QA proved the wrong thing / the proof doesn't hold → move back to `QA Requested` with a precise `[codex]` comment of what QA must actually test.
    - **DEFECT** — you reproduced a real failure or regression → move back to `In Progress` with exact repro steps for the build agent.
 
-## Ready to ship / Done / Canceled / Duplicate
+## UNBLOCK — status `QA blocked` (the unblocker)
+
+A QA or verify agent got stuck and parked this here. You are the **unblocker**: figure out WHY it's stuck and clear the path, so a human only ever sees the ones that genuinely need a person. **Do NOT write product code** — a real defect is a build problem, not a block.
+
+1. Read the workpad `Verdict:` and exactly what the previous agent says it could not do, plus the PR + checks. Run the `pull` skill.
+2. Classify the blocker:
+   - **Fixable meta-problem** — a missing/forgotten preview URL, gh/credential or workspace/test-data access, a wrong route, an environment or tooling gap, or a question you can answer by investigating the code/docs. These are most blocks. Resolve it: find the real preview URL (it's in the PR body), locate or set up the data/access, research the answer, and record what you found.
+   - **Genuine human call** — a product/UX decision, an ambiguous or contradictory requirement, an external dependency, or something needing a real person's judgment or credentials you must not handle.
+3. Record your `Verdict:` line and route:
+   - **UNBLOCKED** — you cleared the meta-problem → move back to `QA Requested` so QA can now verify (or to `In Progress` if you proved it genuinely needs a code change, with a precise `[codex]` note of what). `Verdict: UNBLOCKED — <what you cleared and how>`.
+   - **NEEDS HUMAN** — it truly requires a person → move to `Needs human`. `Verdict: NEEDS HUMAN — <the single concrete decision or action a person must take>`. Make the ask self-contained.
+
+## Ready to ship / Needs human / Done / Canceled / Duplicate
 
 Not your job — stop and do nothing. A human merges `Ready to ship`; bunion does not auto-merge.
 

@@ -147,7 +147,7 @@ const cleanMd = (b: string): string =>
 function workpadReason(workpad: string): string | null {
   const lines = workpad.split('\n')
   for (const ln of lines) {
-    const m = ln.match(/\bverdict\b\s*[:\-—]?\s*\*{0,2}\s*(?:blocked|failed|pass(?:ed)?|verified)?\s*\*{0,2}\s*[.\-—:]*\s*(.+)/i)
+    const m = ln.match(/\bverdict\b\s*[:\-—]?\s*\*{0,2}\s*(?:blocked|failed|pass(?:ed)?|verified|unblocked|needs?\s*human|working)?\s*\*{0,2}\s*[.\-—:]*\s*(.+)/i)
     if (m?.[1] && m[1].replace(/[*\s]/g, '').length > 4) return cleanMd(m[1])
   }
   for (const ln of lines) {

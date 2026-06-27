@@ -165,7 +165,7 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 </div></div>
 <div id="actmenu"></div>
 <script>
-const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Requested':'#d99a2b','QA Verify':'#c79a3a','QA blocked':'#e0564f','Ready to ship':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
+const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Requested':'#d99a2b','QA Verify':'#c79a3a','QA blocked':'#e0564f','Needs human':'#d9568c','Ready to ship':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
 const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=Math.floor(s/60);if(m<60)return m+'m '+(s%60)+'s';return Math.floor(m/60)+'h '+(m%60)+'m'};
 const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
@@ -173,8 +173,8 @@ const fmtTok=n=>{n=n||0;return n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e4?Math.round(n
 const PRI={1:'Urgent',2:'High',3:'Medium',4:'Low'};
 var A_REWORK={a:'to-build',l:'Send to coding',c:'',t:'Move to In Progress so a fresh agent (re)writes the code and updates the PR'};
 function actionList(it){if(!it||it.state==='Done')return [];
- if(it.state==='QA blocked')return [{a:'to-qa',l:'Re-run QA',c:'go',t:'Move to QA Requested and re-verify with a fresh QA agent'},A_REWORK];
  if(it.status==='running')return [{a:'restart',l:'Restart this agent',c:'danger',t:'Stop the current agent, wipe its workspace, and re-run this phase from scratch'},A_REWORK];
+ if(it.state==='Needs human')return [{a:'to-qa',l:'Re-run QA',c:'go',t:'Send back to QA Requested to re-verify'},A_REWORK];
  if(it.state==='Ready to ship')return [{a:'to-qa',l:'Re-verify before ship',c:'go',t:'Send back through QA before it ships'},A_REWORK];
  return [{a:'to-qa',l:'Run QA on it',c:'go',t:'Move to QA Requested and verify with a fresh QA agent'},A_REWORK];}
 function abtn(id,d){return '<button class="mbtn '+(d.c||'')+'" title="'+(d.t||'')+'" onclick="postAction(this,\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>';}
@@ -186,7 +186,8 @@ const COLS=[
  {name:'In Progress',c:'#5b8def',states:['In Progress']},
  {name:'QA check',c:'#d99a2b',states:['QA Requested']},
  {name:'Verify QA',c:'#c79a3a',states:['QA Verify']},
- {name:'Blocked',c:'#e0564f',states:['QA blocked']},
+ {name:'Unblocking',c:'#e0564f',states:['QA blocked']},
+ {name:'Needs human',c:'#d9568c',states:['Needs human']},
  {name:'Ready',c:'#3fb27f',states:['Ready to ship']},
  {name:'Merged',c:'#a371f7',states:['Done']}];
 function colIdx(st){for(var i=0;i<COLS.length;i++)if(COLS[i].states.indexOf(st)>=0)return i;return -1;}
@@ -199,7 +200,7 @@ function cardHtml(r,now){
  let status;
  if(run) status='<span class="ag t-ago"><i class="dot" style="background:'+dc+'"></i>active '+ago(act)+'</span>';
  else if(r.status==='retrying') status='<span class="ag">&#8635; retry '+(r.retryDueAt?'in '+ago(r.retryDueAt-now):'soon')+'</span>';
- else if(r.state==='QA blocked') status='<span class="ag" style="color:#e0564f">&#9888; needs human</span>';
+ else if(r.state==='Needs human') status='<span class="ag" style="color:#d9568c">&#9888; needs human</span>';
  else if(r.state==='Done') status='<span class="ag" style="color:#a371f7">&#10004; merged</span>';
  else if(r.state==='Ready to ship') status='<span class="ag" style="color:#3fb27f">&#10004; ready</span>';
  else if(r.status==='handoff') status='<span class="ag">&#10004; in review</span>';
@@ -207,7 +208,7 @@ function cardHtml(r,now){
  const tot=r.enteredAt?'<span class="t-tot clk" title="total time in the factory">&#9201; '+ago((r.endedAt||now)-r.enteredAt)+'</span>':'';
  const tk=r.tokens?'<span class="t-tok clk" title="tokens used across all stages">'+fmtTok(r.tokens.total)+' tok</span>':'<span class="t-tok"></span>';
  const pdot=(r.priority>=1&&r.priority<=4)?'<i class="pri p'+r.priority+'" title="'+PRI[r.priority]+' priority"></i>':'';
- const reason=(r.state==='QA blocked'&&r.note)?'<div class="creason" title="why a human is needed">'+esc(r.note.slice(0,160))+'</div>':'';
+ const reason=((r.state==='QA blocked'||r.state==='Needs human')&&r.note)?'<div class="creason" title="why it is stuck">'+esc(r.note.slice(0,160))+'</div>':'';
  return '<div class="card'+(run?' run':'')+'" data-id="'+r.identifier+'">'+
   '<div class="ctop"><span class="cid">'+pdot+r.identifier+'</span><span class="ctr">'+pr+kebab(r)+'</span></div>'+
   '<div class="ctitle">'+esc(r.title)+'</div>'+
@@ -263,7 +264,7 @@ function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId)
   sub.innerHTML='<div class="mtitle2">'+esc(it.title||'')+'</div>'+(m.length?'<div class="mmeta">'+m.join('')+'</div>':'');
  }else sub.innerHTML='';
  const ban=document.getElementById('mbanner');
- if(it&&it.state==='QA blocked'){ban.style.display='block';ban.className='nh';ban.innerHTML='<b>&#9888; Needs human</b> &mdash; '+(it.note?esc(it.note):'no verdict captured yet &mdash; open the workpad in Linear');}
+ if(it&&it.state==='Needs human'){ban.style.display='block';ban.className='nh';ban.innerHTML='<b>&#9888; Needs human</b> &mdash; '+(it.note?esc(it.note):'open the workpad in Linear for the decision needed');}
  else if(it&&it.note&&it.status!=='running'){ban.style.display='block';ban.className='note';ban.innerHTML=esc(it.note);}
  else{ban.style.display='none';}
  const tk=document.getElementById('mtokens');

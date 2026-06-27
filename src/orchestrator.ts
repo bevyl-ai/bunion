@@ -83,7 +83,8 @@ export async function start(workflowPath?: string): Promise<void> {
   const summaries = new Map<string, string>() // last agent message per ticket — survives the log buffer, surfaces the human action
   const tokens = loadTokens() // identifier → phase → cumulative token counts; persisted across restarts
   let lastTokenSave = 0
-  const notesFetched = new Set<string>() // blocked tickets whose verdict comment we've pulled once for display
+  const notesFetched = new Set<string>() // stuck tickets whose verdict comment we've pulled once for display
+  const lastState = new Map<string, string>() // last-seen Linear state per ticket — drops a stale note on transition
 
   // Worker placement. An issue is PINNED to one host for its whole life (continuation turns reuse the same VM so the
   // cloned workspace + workpad survive). hostCounts = pinned issues per host; the pin is held until the issue is
@@ -397,10 +398,17 @@ export async function start(workflowPath?: string): Promise<void> {
         continue
       }
       lastBoard = board
-      // For blocked tickets with no in-session note, pull the latest workpad/verdict comment once so the card/modal
-      // can show WHY a human is needed (not just "open Linear").
+      // Surface WHY a ticket is stuck: pull its workpad Verdict for the unblock + needs-human states (not while an
+      // agent is live on it — its own messages fill the note then). Clear a cached note when a ticket changes state
+      // so a qa-blocked verdict doesn't linger after the unblocker escalates it to Needs human.
       for (const i of board) {
-        if (norm(i.state) === 'qa blocked' && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
+        if (lastState.get(i.id) !== i.state) {
+          lastState.set(i.id, i.state)
+          summaries.delete(i.identifier)
+          notesFetched.delete(i.id)
+        }
+        const s = norm(i.state)
+        if ((s === 'qa blocked' || s === 'needs human') && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
           notesFetched.add(i.id)
           void fetchLatestNote(cfg, i.id).then((n) => n && summaries.set(i.identifier, n)).catch(() => {})
         }

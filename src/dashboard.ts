@@ -116,7 +116,7 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
  <div id="logbody"></div>
 </div></div>
 <script>
-const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Requested':'#d99a2b','QA testing started':'#d99a2b','QA blocked':'#e0564f','Ready to ship':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
+const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Requested':'#d99a2b','QA Verify':'#c79a3a','QA blocked':'#e0564f','Ready to ship':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
 const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=Math.floor(s/60);if(m<60)return m+'m '+(s%60)+'s';return Math.floor(m/60)+'h '+(m%60)+'m'};
 const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
@@ -125,8 +125,8 @@ const COLS=[
  {name:'Backlog',c:'#6b7280',states:['Backlog']},
  {name:'Todo',c:'#8b93a1',states:['Todo']},
  {name:'In Progress',c:'#5b8def',states:['In Progress']},
- {name:'QA',c:'#d99a2b',states:['QA Requested']},
- {name:'QA testing',c:'#c79a3a',states:['QA testing started']},
+ {name:'QA check',c:'#d99a2b',states:['QA Requested']},
+ {name:'Verify QA',c:'#c79a3a',states:['QA Verify']},
  {name:'Blocked',c:'#e0564f',states:['QA blocked']},
  {name:'Ready',c:'#3fb27f',states:['Ready to ship']},
  {name:'Merged',c:'#a371f7',states:['Done']}];

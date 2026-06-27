@@ -4,14 +4,15 @@ tracker:
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project
   api_key: $LINEAR_API_KEY
   required_labels: [dark-factory]    # opt-in: only tickets carrying this label enter the factory
-  active_states: [Triage, Backlog, Todo, In Progress, QA Requested]   # entry is the label; QA blocked + Ready to ship are NOT active (humans handle them)
+  active_states: [Triage, Backlog, Todo, In Progress, QA Requested, QA Verify]   # entry is the label; QA blocked + Ready to ship are NOT active (humans handle them)
   terminal_states: [Done, Canceled, Cancelled, Duplicate, QA blocked]   # QA blocked = the factory stops + needs a human
 polling:
   interval_ms: 10000
 phases:                              # a worker hands off to a FRESH agent when a ticket crosses phases (independence)
   plan: [Triage, Backlog, Todo]      # PLAN (clerk pass): any labeled ticket enters here — Todo isn't special
   build: [In Progress]               # BUILD: implement + PR + stupify review loop
-  qa: [QA Requested]                 # QA (bevops/review pass): independent verification
+  qa: [QA Requested]                 # QA CHECK: independent verification + screenshot proof
+  verify: [QA Verify]                # VERIFY QA: a 2nd, adversarial agent — did QA test the REAL scenario? is it proven safe?
 server:
   port: 4319                       # live status dashboard at http://localhost:4319 (or set BUNION_PORT)
 workspace:
@@ -92,7 +93,7 @@ Implement the plan, get a clean, reviewed, green PR, and hand it to QA.
 5. **Code review loop (stupify):** stupify auto-reviews every PR — its review arrives as a PR or issue comment beginning `## Codex Review — <persona>` from a bot account. Treat every actionable reviewer comment (stupify, any other bot, or a human) as BLOCKING until it is fixed in code/tests OR answered with explicit, justified `[codex]` pushback (reply inline with `in_reply_to` = the numeric review-comment id). Re-validate, push, and repeat until no actionable comments remain and checks are green.
 6. When the PR is green, the review loop is clean, and the acceptance criteria are met, move the ticket to `QA Requested`. You are done — a fresh, independent QA agent verifies it.
 
-## QA — status `QA Requested` (the review/QA pass)
+## QA CHECK — status `QA Requested` (the review/QA pass)
 
 You are an **independent verifier**. You did NOT write this code; approach it skeptically — your job is to catch what the author missed, not to rubber-stamp. **Do NOT change product code.**
 
@@ -104,11 +105,24 @@ You are an **independent verifier**. You did NOT write this code; approach it sk
    - run the repo's checks + the plan's validation items, plus any applicable `bevops` smoke/eval that runs in this environment.
    - Record exactly what you ran/clicked and what you observed in the workpad.
 3. Post a verdict in the workpad (with a confidence level + how you verified), then route by it:
-   - **PASS** — you genuinely verified it works, the acceptance criteria are met, and checks are green → move the ticket to `Ready to ship`. **Do NOT merge — a human owns the merge.**
+   - **PASS** — you genuinely verified it works, the acceptance criteria are met, and checks are green → move the ticket to `QA Verify` for an independent adversarial re-check. **Do NOT merge — a human owns the merge.**
    - **FAILED** — you reproduced a defect, an acceptance criterion is objectively not met, or a check is red. This is a concrete, fixable failure → move the ticket **back to `In Progress`** for rework, and write a precise `[codex]` comment of exactly what failed and how to reproduce it so the build agent can fix it. Don't fix it yourself — you're QA, not the author.
    - **BLOCKED** — you *cannot actually verify* it: it's purely visual/UX you can't judge, it needs a running environment or access you don't have, it needs a product/human decision, or you're not confident → move the ticket to `QA blocked`. This is terminal for the factory: a human takes it from here, so record exactly what you checked and what a human must decide. Never pass — or fail to `In Progress` — something you could not actually verify; that's what `QA blocked` is for.
 
-## Ready to ship / QA testing started / Done / Canceled / Duplicate
+## VERIFY QA — status `QA Verify` (the adversarial check)
+
+A QA agent already verified this and moved it here. You are a **second, independent reviewer of the QA itself** — assume the QA pass may have proven the wrong thing. Your one question: **is this feature actually proven safe to ship?** You did NOT write the code and you did NOT run the original QA. **Do NOT change product code.**
+
+1. Read the workpad: acceptance criteria, the QA verdict, and exactly what QA claims it verified (steps + screenshot). Open the PR (diff + checks); run the `pull` skill for the PR branch.
+2. Be adversarial about the proof — the common failure is QA verifying a convenient substitute, not the bug:
+   - Did QA exercise the **real reported scenario**, or a stand-in? (synthetic data instead of the reported data, the wrong route/workspace, a happy path that sidesteps the actual bug, *a* screenshot that isn't the fixed behaviour.)
+   - **Re-verify it yourself** with `browser.mjs` (see `.codex/skills/qa/SKILL.md`): reproduce the ORIGINAL bug's *exact* conditions, confirm the fix holds there, and probe the obvious edge/regression cases the change could break. Screenshot your own proof.
+3. Post a verdict (with how you verified) in the workpad, then route:
+   - **VERIFIED** — the real scenario is proven fixed and you found no regression → move to `Ready to ship`. **Do NOT merge.**
+   - **QA INADEQUATE** — the fix may be fine but QA proved the wrong thing / the proof doesn't hold → move back to `QA Requested` with a precise `[codex]` comment of what QA must actually test.
+   - **DEFECT** — you reproduced a real failure or regression → move back to `In Progress` with exact repro steps for the build agent.
+
+## Ready to ship / Done / Canceled / Duplicate
 
 Not your job — stop and do nothing. A human merges `Ready to ship`; bunion does not auto-merge.
 

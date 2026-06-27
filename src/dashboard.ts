@@ -3,7 +3,7 @@ export interface Snapshot {
   cap: number
   pollMs: number
   now: number
-  running: { identifier: string; title: string; state: string; startedAt: number; lastActivity: number; retryAttempt: number; turn: number; activity: string }[]
+  running: { identifier: string; title: string; state: string; startedAt: number; lastActivity: number; retryAttempt: number; turn: number; activity: string; host: string | null }[]
   retrying: { identifier: string; attempt: number; dueAt: number }[]
   recent: { identifier: string; kind: string; at: number; detail: string | null }[]
 }
@@ -68,7 +68,7 @@ function render(){
    '<div class="title">'+esc(r.title)+'</div>'+
    '<div class="row"><span class="badge" style="background:'+c+'2a;color:'+c+'">'+esc(r.state)+'</span><span class="t muted">&#9201; '+dur(now-r.startedAt)+'</span></div>'+
    '<div class="row"><span class="muted" style="display:block;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,64))+'</span></div>'+
-   '<div class="row"><span class="muted"><span class="dot" style="background:'+dc+'"></span>active '+ago(act)+' ago</span></div></div>'}).join(''):'<div class="empty">idle &mdash; no runs in flight</div>';
+   '<div class="row"><span class="muted"><span class="dot" style="background:'+dc+'"></span>active '+ago(act)+' ago</span>'+(r.host?'<span class="muted" style="max-width:48%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="'+esc(r.host)+'">&#9709; '+esc(r.host)+'</span>':'')+'</div></div>'}).join(''):'<div class="empty">idle &mdash; no runs in flight</div>';
  retry.innerHTML=(snap.retrying&&snap.retrying.length)?snap.retrying.map(x=>'<span class="pill">'+x.identifier+' &middot; attempt '+x.attempt+' &middot; in '+ago(x.dueAt-now)+'</span>').join(''):'&mdash;';
  recent.innerHTML=(snap.recent&&snap.recent.length)?snap.recent.map(x=>'<span class="pill">'+(x.kind==='failed'?'&#10007;':'&#10003;')+' '+x.identifier+' &middot; '+ago(now-x.at)+' ago</span>').join(''):'&mdash;';
 }

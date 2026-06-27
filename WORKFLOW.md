@@ -19,6 +19,13 @@ hooks:
 agent:
   max_concurrent_agents: 4
   max_turns: 20
+worker:
+  # Empty → agents run locally (workspace + clone + codex on this machine; max_concurrent_agents is the only cap).
+  # List ssh hosts (e.g. exe.dev VMs) and each ticket's workspace, clone, and codex run THERE, driven over the ssh
+  # pipe — the orchestrator stays here and answers linear_graphql centrally, so the VMs need no bunion + no secrets
+  # (their exe.dev github integration clones; their exe-llm gateway runs codex). Or set BUNION_SSH_HOSTS=a,b,c.
+  ssh_hosts: []
+  max_concurrent_agents_per_host: 1      # one disposable VM per ticket; danger-full-access is contained per-box
 codex:
   command: codex --config shell_environment_policy.inherit=all app-server
   approval_policy: never

@@ -76,6 +76,20 @@ When a ticket reaches `Merging`, the agent runs the `land` loop: `land_watch.py`
 
 The agent has network access plus `gh` and `linear_graphql`, and Codex runs with `approval_policy: never` (the host auto-approves its command/file/tool requests). Suitable for trusted repos with team-authored tickets.
 
+## Scaling across VMs
+
+By default every agent runs on the machine hosting the daemon — the clone, the build, and Codex all compete for one box's CPU/RAM/disk, so a handful of concurrent tickets is the practical ceiling. To scale past that, point `worker.ssh_hosts` at a pool of VMs (the daemon also reads `BUNION_SSH_HOSTS=a,b,c`):
+
+```yaml
+worker:
+  ssh_hosts: [vm-a, vm-b, vm-c]      # anything ssh accepts
+  max_concurrent_agents_per_host: 1  # one disposable VM per ticket
+```
+
+Each ticket's workspace, clone, and `codex app-server` then run **on** the VM — the orchestrator stays central, drives Codex over the ssh stdio pipe, and answers `linear_graphql` itself, so the VMs need neither bunion nor any secret. A ticket is pinned to one VM for its whole life, so continuation turns reuse the same checkout and workpad. Because each agent is in its own disposable box, `danger-full-access` is contained rather than trusting the daemon host.
+
+On [exe.dev](https://exe.dev) this composes cleanly: a VM's **github integration** clones the repo (no `gh` token) and its **exe-llm gateway** runs Codex against your ChatGPT/Codex plan (no API key), so a freshly provisioned VM is a ready worker with nothing to configure. Auto-provisioning VMs per-ticket is not built — you bring the pool.
+
 ## Layout
 
 ```
@@ -90,13 +104,14 @@ src/
   codex/app-server.ts    the JSON-RPC app-server client (spawn, turns, tools, approvals)
   codex/dynamic-tool.ts  the linear_graphql host tool
   agent-runner.ts        one worker session: turns until done or max_turns
-  workspace.ts           per-issue workspace, hooks, skill install
-  orchestrator.ts        poll → dispatch → reconcile; state machine; retry/backoff
+  workspace.ts           per-issue workspace, hooks, skill install (local or over ssh)
+  ssh.ts                 run workspace ops + spawn codex on a worker VM
+  orchestrator.ts        poll → dispatch → reconcile; state machine; retry/backoff; VM pool
 ```
 
 ## Not ported
 
-The SSH worker pool, the `Blocked`/operator-input-hold state (the host auto-approves instead), the observability dashboard, and per-state concurrency (`max_concurrent_agents_by_state` — only the global cap applies) are omitted. A single daemon is assumed (no distributed claim). The app-server protocol is pinned to the Codex build the host spawns.
+The `Blocked`/operator-input-hold state (the host auto-approves instead) and per-state concurrency (`max_concurrent_agents_by_state` — only the global cap applies) are omitted, and VMs are a pool you provide rather than auto-provisioned per ticket. A single daemon is assumed (no distributed claim). The app-server protocol is pinned to the Codex build the host spawns.
 
 ## License
 

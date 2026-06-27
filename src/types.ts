@@ -47,6 +47,7 @@ export interface Config {
   workspaceRoot: string
   hooks: HooksConfig
   agent: { maxConcurrentAgents: number; maxTurns: number; maxRetryBackoffMs: number }
+  worker: { sshHosts: string[]; maxPerHost: number } // [] = run agents locally; else fan out across these hosts
   codex: CodexConfig
   dashboardPort: number | null // status dashboard HTTP port (server.port / BUNION_PORT); null = off
   promptTemplate: string

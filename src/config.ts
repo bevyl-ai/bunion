@@ -61,7 +61,9 @@ export function loadConfig(path?: string): Config {
   const ws = obj(fm.workspace)
   const hk = obj(fm.hooks)
   const ag = obj(fm.agent)
+  const wk = obj(fm.worker)
   const cx = obj(fm.codex)
+  const envHosts = (process.env.BUNION_SSH_HOSTS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
   const srv = obj(fm.server)
   const portRaw = process.env.BUNION_PORT ?? (typeof srv.port === 'number' ? String(srv.port) : null)
 
@@ -83,6 +85,10 @@ export function loadConfig(path?: string): Config {
       maxConcurrentAgents: num(ag.max_concurrent_agents, 10),
       maxTurns: num(ag.max_turns, 20),
       maxRetryBackoffMs: num(ag.max_retry_backoff_ms, 300_000),
+    },
+    worker: {
+      sshHosts: arr(wk.ssh_hosts).length ? arr(wk.ssh_hosts) : envHosts,
+      maxPerHost: num(wk.max_concurrent_agents_per_host, 1),
     },
     codex: {
       command: str(cx.command) ?? 'codex app-server',

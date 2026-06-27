@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { shq } from '../ssh'
 import type { Config, DynamicTool } from '../types'
 
 type Json = Record<string, unknown>
@@ -29,9 +30,13 @@ export class AppServerSession {
     this.onEvent = onEvent
   }
 
-  async start(workspace: string): Promise<void> {
-    // bash specifically: `-lc` must source the bash login profile so codex is on PATH and its auth env is present.
-    const proc = spawn('bash', ['-lc', this.cfg.codex.command], { cwd: workspace, stdio: ['pipe', 'pipe', 'pipe'] })
+  async start(workspace: string, host: string | null = null): Promise<void> {
+    // Local: bash `-lc` sources the login profile so codex is on PATH with its auth env. Remote: ssh into the worker
+    // VM and run the same app-server in the VM's workspace — the JSON-RPC stream rides the ssh stdio pipe unchanged,
+    // and a login shell (`exec $SHELL -lc`) puts codex on PATH there too.
+    const proc = host
+      ? spawn('ssh', ['-o', 'ConnectTimeout=20', '-o', 'ServerAliveInterval=15', '-o', 'BatchMode=yes', host, `cd ${shq(workspace)} && exec "$SHELL" -lc ${shq(this.cfg.codex.command)}`], { stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawn('bash', ['-lc', this.cfg.codex.command], { cwd: workspace, stdio: ['pipe', 'pipe', 'pipe'] })
     this.proc = proc
     proc.stdout?.on('data', (d: Buffer) => this.onData(d))
     proc.stderr?.on('data', (d: Buffer) => this.onData(d)) // stderr merged; skip non-JSON lines

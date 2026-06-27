@@ -27,29 +27,30 @@ function continuationPrompt(turn: number, maxTurns: number): string {
 
 // One worker session for an issue: prep workspace → run turns on a single app-server thread up to max_turns,
 // refreshing the issue between turns and continuing while it stays active. The AGENT drives Linear/git/gh/merge.
-export function startAgent(cfg: Config, issue: Issue, attempt: number | null, onEvent: (e: { turn?: number; label?: string; log?: string }) => void): AgentHandle {
+// `host` null = run locally; else the workspace, clone, and codex all live on that ssh worker (an exe.dev VM).
+export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, onEvent: (e: { turn?: number; label?: string; log?: string }) => void): AgentHandle {
   let session: AppServerSession | null = null
   let stopped = false
 
   const done = (async (): Promise<AgentOutcome> => {
-    const { dir, created } = ensureWorkspace(cfg, issue.identifier)
+    const { dir, created } = ensureWorkspace(cfg, issue.identifier, host)
     if (created && cfg.hooks.afterCreate) {
-      const h = runHook(cfg, dir, 'after_create', cfg.hooks.afterCreate)
+      const h = runHook(cfg, dir, 'after_create', cfg.hooks.afterCreate, host)
       if (!h.ok) {
-        removeWorkspace(cfg, issue.identifier) // don't leave a half-made dir — the retry must re-create + re-clone
+        removeWorkspace(cfg, issue.identifier, host) // don't leave a half-made dir — the retry must re-create + re-clone
         return { ok: false, error: h.error }
       }
     }
-    if (created) installSkills(dir)
+    if (created) installSkills(dir, host)
     if (cfg.hooks.beforeRun) {
-      const h = runHook(cfg, dir, 'before_run', cfg.hooks.beforeRun)
+      const h = runHook(cfg, dir, 'before_run', cfg.hooks.beforeRun, host)
       if (!h.ok) return { ok: false, error: h.error }
     }
 
     session = new AppServerSession(cfg, [linearGraphqlTool(cfg)], onEvent)
     let current = issue
     try {
-      await session.start(dir)
+      await session.start(dir, host)
       const threadId = await session.startThread(dir)
       for (let turn = 1; ; turn++) {
         if (stopped) return { ok: false, error: 'terminated' }
@@ -66,7 +67,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, on
     } finally {
       session.stop()
       if (cfg.hooks.afterRun) {
-        const h = runHook(cfg, dir, 'after_run', cfg.hooks.afterRun)
+        const h = runHook(cfg, dir, 'after_run', cfg.hooks.afterRun, host)
         if (!h.ok) log(`warn: ${h.error}`)
       }
     }

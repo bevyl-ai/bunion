@@ -14,6 +14,7 @@ interface RunningEntry {
   lastActivity: number
   turn: number
   activity: string
+  host: string | null // the worker VM this run is pinned to (null = local)
 }
 interface RetryTimer {
   timer: ReturnType<typeof setTimeout>
@@ -47,6 +48,28 @@ export async function start(workflowPath?: string): Promise<void> {
   const logs = new Map<string, string[]>() // per-identifier run log (rolling), kept for the last ~16 runs
   const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
 
+  // Worker placement. An issue is PINNED to one host for its whole life (continuation turns reuse the same VM so the
+  // cloned workspace + workpad survive). hostCounts = pinned issues per host; the pin is held until the issue is
+  // released (terminal / ineligible / hard-stop), NOT dropped between continuation turns.
+  const placement = new Map<string, string>() // issue.id → host
+  const hostCounts = new Map<string, number>()
+  const hosts = (): string[] => cfg.worker.sshHosts
+  const freePlacement = (id: string): void => {
+    const h = placement.get(id)
+    if (h) hostCounts.set(h, Math.max((hostCounts.get(h) ?? 1) - 1, 0))
+    placement.delete(id)
+  }
+  // Where to run an issue: null = local (no hosts configured); its existing pin if any; else the first host with a
+  // free slot; else undefined = every worker is full, wait for one.
+  const placeFor = (id: string): string | null | undefined => {
+    if (hosts().length === 0) return null
+    const pinned = placement.get(id)
+    if (pinned && hosts().includes(pinned)) return pinned
+    for (const h of hosts()) if ((hostCounts.get(h) ?? 0) < cfg.worker.maxPerHost) return h
+    return undefined
+  }
+  const displayCap = (): number => (hosts().length === 0 ? cfg.agent.maxConcurrentAgents : Math.min(cfg.agent.maxConcurrentAgents, hosts().length * cfg.worker.maxPerHost))
+
   const slots = (): number => Math.max(cfg.agent.maxConcurrentAgents - running.size, 0)
   const norm = (s: string): string => s.trim().toLowerCase()
   const isTerminal = (s: string): boolean => cfg.tracker.terminalStates.some((t) => norm(t) === norm(s))
@@ -66,16 +89,19 @@ export async function start(workflowPath?: string): Promise<void> {
   const release = (id: string): void => {
     claimed.delete(id)
     clearRetry(id)
+    freePlacement(id)
   }
   const terminate = (id: string, cleanup: boolean): void => {
     const e = running.get(id)
+    const host = placement.get(id) ?? null
     if (e) {
       e.handle.stop()
       running.delete(id)
     }
     claimed.delete(id)
     clearRetry(id)
-    if (cleanup && e) removeWorkspace(cfg, e.issue.identifier)
+    freePlacement(id)
+    if (cleanup && e) removeWorkspace(cfg, e.issue.identifier, host)
   }
 
   const retryDelay = (attempt: number, continuation: boolean): number =>
@@ -89,19 +115,23 @@ export async function start(workflowPath?: string): Promise<void> {
     retries.set(id, { timer, token, identifier, attempt, dueAt: Date.now() + delay })
   }
 
-  const dispatch = (issue: Issue, attempt: number): void => {
+  const dispatch = (issue: Issue, attempt: number, host: string | null): void => {
     clearRetry(issue.id)
     claimed.add(issue.id)
+    if (host && !placement.has(issue.id)) {
+      placement.set(issue.id, host)
+      hostCounts.set(host, (hostCounts.get(host) ?? 0) + 1)
+    }
     logs.delete(issue.identifier)
     logs.set(issue.identifier, []) // fresh log at the newest position
     if (logs.size > 16) {
       const oldest = logs.keys().next().value
       if (oldest && oldest !== issue.identifier) logs.delete(oldest)
     }
-    const entry: RunningEntry = { issue, handle: undefined as unknown as AgentHandle, retryAttempt: attempt > 0 ? attempt : 0, startedAt: Date.now(), lastActivity: Date.now(), turn: 0, activity: 'starting…' }
+    const entry: RunningEntry = { issue, handle: undefined as unknown as AgentHandle, retryAttempt: attempt > 0 ? attempt : 0, startedAt: Date.now(), lastActivity: Date.now(), turn: 0, activity: 'starting…', host }
     running.set(issue.id, entry)
-    log(`→ ${issue.identifier} (${issue.state})${attempt > 0 ? ` retry#${attempt}` : ''}`)
-    entry.handle = startAgent(cfg, issue, attempt > 0 ? attempt : null, (e) => {
+    log(`→ ${issue.identifier} (${issue.state})${attempt > 0 ? ` retry#${attempt}` : ''}${host ? ` @ ${host}` : ''}`)
+    entry.handle = startAgent(cfg, issue, attempt > 0 ? attempt : null, host, (e) => {
       entry.lastActivity = Date.now()
       if (e.turn != null) entry.turn = e.turn
       if (e.label != null) entry.activity = e.label
@@ -142,12 +172,14 @@ export async function start(workflowPath?: string): Promise<void> {
     const issue = candidates.find((i) => i.id === id)
     if (!issue) return release(id)
     if (isTerminal(issue.state)) {
-      removeWorkspace(cfg, issue.identifier)
+      removeWorkspace(cfg, issue.identifier, placement.get(id) ?? null)
       return release(id)
     }
     if (!eligible(issue)) return release(id)
     if (slots() <= 0) return scheduleRetry(id, identifier, attempt + 1, false)
-    dispatch(issue, attempt)
+    const host = placeFor(id) // a continuation reuses its pinned VM; a fresh retry takes any free worker
+    if (host === undefined) return scheduleRetry(id, identifier, attempt + 1, false)
+    dispatch(issue, attempt, host)
   }
 
   async function reconcile(): Promise<void> {
@@ -181,14 +213,15 @@ export async function start(workflowPath?: string): Promise<void> {
     for (const id of ids) if (!seen.has(id) && running.has(id)) terminate(id, false)
   }
 
-  log(`bunion up · scope=${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''} · cap=${cfg.agent.maxConcurrentAgents} · poll=${cfg.pollIntervalMs}ms`)
+  const workerDesc = hosts().length === 0 ? 'local' : `${hosts().length} VM${hosts().length > 1 ? 's' : ''}×${cfg.worker.maxPerHost}`
+  log(`bunion up · scope=${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''} · cap=${displayCap()} · workers=${workerDesc} · poll=${cfg.pollIntervalMs}ms`)
 
   const snapshot = (): Snapshot => ({
     scope: `${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''}`,
-    cap: cfg.agent.maxConcurrentAgents,
+    cap: displayCap(),
     pollMs: cfg.pollIntervalMs,
     now: Date.now(),
-    running: [...running.values()].map((e) => ({ identifier: e.issue.identifier, title: e.issue.title, state: e.issue.state, startedAt: e.startedAt, lastActivity: e.lastActivity, retryAttempt: e.retryAttempt, turn: e.turn, activity: e.activity })),
+    running: [...running.values()].map((e) => ({ identifier: e.issue.identifier, title: e.issue.title, state: e.issue.state, startedAt: e.startedAt, lastActivity: e.lastActivity, retryAttempt: e.retryAttempt, turn: e.turn, activity: e.activity, host: e.host })),
     retrying: [...retries.values()].map((r) => ({ identifier: r.identifier, attempt: r.attempt, dueAt: r.dueAt })),
     recent: history.slice(0, 30),
   })
@@ -217,7 +250,10 @@ export async function start(workflowPath?: string): Promise<void> {
         }
         for (const issue of candidates.sort(byDispatch)) {
           if (slots() <= 0) break
-          if (eligible(issue)) dispatch(issue, 0)
+          if (!eligible(issue)) continue
+          const host = placeFor(issue.id)
+          if (host === undefined) continue // every worker VM is full — try this issue again next poll
+          dispatch(issue, 0, host)
         }
       }
     } catch (e) {

@@ -56,15 +56,25 @@ header{display:flex;align-items:center;gap:18px;padding:14px 22px;border-bottom:
 .sec{padding:0 22px 18px}.sec h2{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:1.5px;margin:0 0 8px}
 .pill{display:inline-block;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:3px 11px;margin:3px 3px 0 0;font-size:12px}
 .empty{color:var(--mut);padding:48px;text-align:center;grid-column:1/-1}
+#drawer{margin:0 22px 18px;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+#dhead{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);font-size:13px}
+#logbody{margin:0;padding:6px 14px 12px;max-height:60vh;overflow:auto;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace}
+.lg{padding:.5px 0;white-space:pre-wrap;word-break:break-word}
+.lg-turn{margin:12px 0 5px;color:#6aa3da;font-weight:700;border-top:1px solid var(--line);padding-top:9px;letter-spacing:.5px}
+.lg-msg{color:var(--fg)}.lg-msg b{color:#46c08a;font-weight:700}
+.lg-cmd{color:#8b97a4}.lg-cmd b{color:#46c08a}
+.lg-tool{color:#c9952b}.lg-edit{color:#b88cd9}
+.live{width:7px;height:7px;border-radius:50%;background:#36a86a;display:inline-block;animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 </style></head><body>
 <header><span class="b">&#9679; bunion</span><span class="s" id="scope"></span><span class="s" id="count"></span><span class="s" style="margin-left:auto" id="clock"></span></header>
 <div class="grid" id="grid"></div>
-<div id="drawer" style="display:none;margin:0 22px 18px;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden">
- <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)">
-  <span id="drawerId" style="font-weight:700"></span>
+<div id="drawer" style="display:none">
+ <div id="dhead">
+  <span class="live"></span><span id="drawerId" style="font-weight:700"></span>
   <span id="drawerClose" style="margin-left:auto;cursor:pointer;color:var(--mut)">close &#10005;</span>
  </div>
- <pre id="logbody" style="margin:0;padding:14px;max-height:360px;overflow:auto;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word;color:var(--fg)"></pre>
+ <div id="logbody"></div>
 </div>
 <div class="sec"><h2>recent</h2><div id="recent" class="muted">&mdash;</div></div>
 <script>
@@ -99,7 +109,14 @@ function render(){
 let expandedId=null;
 grid.addEventListener('click',e=>{const c=e.target.closest('[data-id]');if(!c)return;const id=c.getAttribute('data-id');expandedId=(expandedId===id)?null:id;syncDrawer();});
 document.getElementById('drawerClose').addEventListener('click',()=>{expandedId=null;syncDrawer();});
-function syncDrawer(){const d=document.getElementById('drawer');if(!expandedId){d.style.display='none';return;}d.style.display='block';document.getElementById('drawerId').textContent=expandedId+' — log';pullLog();}
-async function pullLog(){if(!expandedId)return;try{const j=await (await fetch('/log?id='+encodeURIComponent(expandedId))).json();const b=document.getElementById('logbody');const atEnd=b.scrollTop+b.clientHeight>=b.scrollHeight-40;b.textContent=(j.log&&j.log.length)?j.log.join('\\n'):'(no log yet)';if(atEnd)b.scrollTop=b.scrollHeight;}catch(e){}}
-setInterval(render,1000);setInterval(pull,2000);setInterval(pullLog,1500);pull();
+function syncDrawer(){const d=document.getElementById('drawer');if(!expandedId){d.style.display='none';return;}d.style.display='block';const it=(snap.items||[]).find(x=>x.identifier===expandedId);document.getElementById('drawerId').innerHTML=esc(expandedId)+(it?' <span class="muted">'+esc(it.state)+'</span>':'')+(it&&it.prUrl?' <a href="'+it.prUrl+'" target="_blank" rel="noopener" style="color:#6aa3da;text-decoration:none">PR #'+(it.prUrl.split("/pull/")[1]||"")+' &#8599;</a>':'');pullLog();}
+function logHtml(line){var t=(line||'').replace(/^\\n+/,''),e=esc(t);
+ if(t.indexOf('\\u2500\\u2500')===0)return '<div class="lg lg-turn">'+e+'</div>';
+ if(t.indexOf('\\u25cf ')===0)return '<div class="lg lg-msg"><b>\\u25cf</b> '+esc(t.slice(2))+'</div>';
+ if(t.indexOf('$ ')===0)return '<div class="lg lg-cmd"><b>$</b> '+esc(t.slice(2))+'</div>';
+ if(t.indexOf('\\u2699')===0)return '<div class="lg lg-tool">'+e+'</div>';
+ if(t.indexOf('\\u270e')===0)return '<div class="lg lg-edit">'+e+'</div>';
+ return '<div class="lg">'+e+'</div>';}
+async function pullLog(){if(!expandedId)return;try{const j=await (await fetch('/log?id='+encodeURIComponent(expandedId))).json();const b=document.getElementById('logbody');const atEnd=b.scrollTop+b.clientHeight>=b.scrollHeight-60;b.innerHTML=(j.log&&j.log.length)?j.log.map(logHtml).join(''):'<div class="lg" style="color:var(--mut)">(no log yet)</div>';if(atEnd)b.scrollTop=b.scrollHeight;}catch(e){}}
+setInterval(render,1000);setInterval(pull,1000);setInterval(pullLog,1000);pull();
 </script></body></html>`

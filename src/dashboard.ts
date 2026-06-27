@@ -61,12 +61,12 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 .board::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px}
 .board::-webkit-scrollbar-thumb:hover{background:#3a4150}
 .board::-webkit-scrollbar-track{background:transparent}
-.col{flex:0 0 248px;display:flex;flex-direction:column;gap:9px}
+.col{flex:0 0 248px;min-width:0;max-width:248px;display:flex;flex-direction:column;gap:9px}
 .colh{display:flex;align-items:center;gap:8px;padding:1px 3px 5px;font-size:11.5px;font-weight:600;color:var(--mut);letter-spacing:.3px}
 .colh i{width:7px;height:7px;border-radius:50%}
 .colh .ct{margin-left:auto;color:var(--mut2);font-weight:500;font-variant-numeric:tabular-nums}
 .colempty{color:#363c47;font-size:11.5px;padding:10px 0;text-align:center}
-.card{background:var(--surf);border:1px solid var(--line);border-radius:11px;padding:11px 13px;cursor:pointer;transition:border-color .12s,background .12s}
+.card{background:var(--surf);border:1px solid var(--line);border-radius:11px;padding:11px 13px;cursor:pointer;overflow:hidden;transition:border-color .12s,background .12s}
 .card:hover{background:var(--surf2);border-color:var(--line2)}
 .card.run{border-left:2px solid var(--accent);padding-left:11px}
 .ctop{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -79,7 +79,7 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 .ag .dot{width:7px;height:7px;border-radius:50%}
 .meta{display:inline-flex;align-items:center;gap:8px;min-width:0}
 .host{color:var(--mut2);font-size:11px;max-width:92px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,Menlo,monospace}
-.clk{color:var(--mut2);font-size:11px;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace}
+.clk{color:var(--mut2);font-size:11px;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace;white-space:nowrap}
 .pr{color:var(--accent);text-decoration:none;font-size:11px;font-weight:600;background:#5b8def1a;padding:2px 7px;border-radius:6px;white-space:nowrap}
 .pr:hover{background:#5b8def2e}
 .empty{color:var(--mut);padding:64px;text-align:center;width:100%}
@@ -143,7 +143,7 @@ function cardHtml(r,now){
   '<div class="ctop"><span class="cid">'+r.identifier+'</span>'+pr+'</div>'+
   '<div class="ctitle">'+esc(r.title)+'</div>'+
   (run?'<div class="cact t-act">turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,70))+'</div>':'')+
-  '<div class="cfoot">'+status+'<span class="meta">'+tot+(run&&r.host?'<span class="host">'+esc(r.host.replace(/\\.exe\\.xyz$/,''))+'</span>':'')+'</span></div>'+
+  '<div class="cfoot">'+status+'<span class="meta">'+tot+'</span></div>'+
  '</div>';
 }
 function colHtml(col,arr,now){return '<div class="col"><div class="colh"><i style="background:'+col.c+'"></i>'+col.name+'<span class="ct">'+arr.length+'</span></div>'+(arr.length?arr.map(r=>cardHtml(r,now)).join(''):'<div class="colempty">empty</div>')+'</div>';}
@@ -180,7 +180,7 @@ function tickLive(){
  });
 }
 let expandedId=null;
-function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId);const c=it?SC(it.state):'#7c8493';document.getElementById('mtitle').innerHTML=esc(expandedId||'')+(it?' <span class="pill" style="color:'+c+';background:'+c+'22">'+esc(it.state)+'</span>':'')+(it&&it.enteredAt?' <span class="clk" style="color:var(--mut)" title="total time in the factory">&#9201; '+ago((it.endedAt||Date.now())-it.enteredAt)+'</span>':'')+(it&&it.prUrl?' <a class="pr" href="'+it.prUrl+'" target="_blank" rel="noopener">PR #'+(it.prUrl.split("/pull/")[1]||"")+'</a>':'');}
+function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId);const c=it?SC(it.state):'#7c8493';document.getElementById('mtitle').innerHTML=esc(expandedId||'')+(it?' <span class="pill" style="color:'+c+';background:'+c+'22">'+esc(it.state)+'</span>':'')+(it&&it.enteredAt?' <span class="clk" style="color:var(--mut)" title="total time in the factory">&#9201; '+ago((it.endedAt||Date.now())-it.enteredAt)+'</span>':'')+(it&&it.host?' <span class="clk" style="color:var(--mut2)">&#9709; '+esc(it.host.replace(/\\.exe\\.xyz$/,''))+'</span>':'')+(it&&it.prUrl?' <a class="pr" href="'+it.prUrl+'" target="_blank" rel="noopener">PR #'+(it.prUrl.split("/pull/")[1]||"")+'</a>':'');}
 function openModal(id){expandedId=id;document.getElementById('modal').style.display='flex';document.getElementById('logbody').innerHTML='<div class="lg" style="color:var(--mut)">loading&hellip;</div>';syncHead();pullLog();}
 function closeModal(){expandedId=null;document.getElementById('modal').style.display='none';}
 board.addEventListener('click',function(e){const c=e.target.closest('[data-id]');if(!c)return;openModal(c.getAttribute('data-id'));});

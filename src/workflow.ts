@@ -41,9 +41,10 @@ const liquid = new Liquid({ strictVariables: true, strictFilters: true })
 
 // Render the prompt template with the strict Liquid engine Symphony uses. `attempt` is null on the first run of a
 // fresh worker and an integer on retry/continuation; the template branches on it via `{% if attempt %}`.
-export function renderPrompt(template: string, vars: { attempt: number | null; issue: Issue }): string {
+export function renderPrompt(template: string, vars: { attempt: number | null; issue: Issue; directive?: string | null }): string {
   return liquid.parseAndRenderSync(template, {
     attempt: vars.attempt,
+    directive: vars.directive ?? null, // operator directive injected into this dispatch's first turn (else null)
     issue: {
       id: vars.issue.id,
       identifier: vars.issue.identifier,

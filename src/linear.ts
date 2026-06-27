@@ -133,6 +133,13 @@ export async function moveIssue(cfg: Config, issueId: string, stateName: string)
   if (!r.httpOk || (Array.isArray(b.errors) && b.errors.length) || !b.data?.issueUpdate?.success) throw new Error(`move failed: ${JSON.stringify(b.errors ?? b.data)}`)
 }
 
+// Post a comment as the operator (the personal key) — the durable record for a dashboard directive.
+export async function postComment(cfg: Config, issueId: string, body: string): Promise<void> {
+  const r = await graphql(cfg, `mutation($i: String!, $b: String!) { commentCreate(input: { issueId: $i, body: $b }) { success } }`, { i: issueId, b: body })
+  const d = r.body as { data?: { commentCreate?: { success?: boolean } }; errors?: unknown }
+  if (!r.httpOk || (Array.isArray(d.errors) && d.errors.length) || !d.data?.commentCreate?.success) throw new Error(`comment failed: ${JSON.stringify(d.errors ?? d.data)}`)
+}
+
 const cleanMd = (b: string): string =>
   b
     .replace(/<!--[\s\S]*?-->/g, '')

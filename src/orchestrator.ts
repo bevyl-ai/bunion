@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { startAgent, type AgentHandle } from './agent-runner'
 import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
-import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue } from './linear'
+import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment } from './linear'
 import { log, warn } from './log'
 import { removeWorkspace } from './workspace'
 import type { Issue, TokenCounts } from './types'
@@ -85,6 +85,7 @@ export async function start(workflowPath?: string): Promise<void> {
   let lastTokenSave = 0
   const notesFetched = new Set<string>() // stuck tickets whose verdict comment we've pulled once for display
   const lastState = new Map<string, string>() // last-seen Linear state per ticket — drops a stale note on transition
+  const directives = new Map<string, string>() // operator directive to inject into a ticket's next dispatch (one-shot)
 
   // Worker placement. An issue is PINNED to one host for its whole life (continuation turns reuse the same VM so the
   // cloned workspace + workpad survive). hostCounts = pinned issues per host; the pin is held until the issue is
@@ -171,7 +172,9 @@ export async function start(workflowPath?: string): Promise<void> {
     const entry: RunningEntry = { issue, handle: undefined as unknown as AgentHandle, retryAttempt: attempt > 0 ? attempt : 0, startedAt: Date.now(), lastActivity: Date.now(), turn: 0, activity: 'starting…', host, phase: phaseOf(cfg, issue.state), tokenBase: zeroCounts() }
     running.set(issue.id, entry)
     log(`→ ${issue.identifier} (${issue.state})${attempt > 0 ? ` retry#${attempt}` : ''}${host ? ` @ ${host}` : ''}`)
-    entry.handle = startAgent(cfg, issue, attempt > 0 ? attempt : null, host, (e) => {
+    const directive = directives.get(issue.id) ?? null
+    directives.delete(issue.id) // one-shot: consumed by this dispatch's first turn (the comment is the durable fallback)
+    entry.handle = startAgent(cfg, issue, attempt > 0 ? attempt : null, host, directive, (e) => {
       entry.lastActivity = Date.now()
       if (e.turn != null) entry.turn = e.turn
       if (e.label != null) entry.activity = e.label
@@ -333,17 +336,23 @@ export async function start(workflowPath?: string): Promise<void> {
   }
   // Operator actions from the dashboard buttons. to-qa / to-build move the Linear state + wipe the workspace (fresh
   // skills) so the next poll re-dispatches cleanly; restart re-runs in place; all stop any current session first.
-  const onAction = async (identifier: string, action: string): Promise<{ ok: boolean; msg?: string }> => {
+  const onAction = async (identifier: string, action: string, directive?: string): Promise<{ ok: boolean; msg?: string }> => {
     const issue = lastBoard.find((i) => i.identifier === identifier)
     if (!issue) return { ok: false, msg: 'ticket not on the board' }
     const host = placement.get(issue.id) ?? null
+    const dir = (directive ?? '').trim()
     try {
+      // An operator directive: record it as a comment (durable) AND queue it for injection into the next dispatch.
+      if (dir) {
+        await postComment(cfg, issue.id, `## ⚡ Operator directive\n${dir}`)
+        directives.set(issue.id, dir)
+      }
       if (action === 'restart') {
         terminate(issue.id, false)
         removeWorkspace(cfg, issue.identifier, host)
         release(issue.id)
-        log(`action: ${identifier} restart (operator)`)
-        return { ok: true, msg: 'restarting fresh' }
+        log(`action: ${identifier} restart (operator)${dir ? ' +directive' : ''}`)
+        return { ok: true, msg: dir ? 'restarting with your directive' : 'restarting fresh' }
       }
       if (action === 'to-qa' || action === 'to-build') {
         const target = action === 'to-qa' ? 'QA Requested' : 'In Progress'
@@ -353,8 +362,8 @@ export async function start(workflowPath?: string): Promise<void> {
         release(issue.id)
         notesFetched.delete(issue.id)
         summaries.delete(issue.identifier)
-        log(`action: ${identifier} → ${target} (operator)`)
-        return { ok: true, msg: `moved to ${target}` }
+        log(`action: ${identifier} → ${target} (operator)${dir ? ' +directive' : ''}`)
+        return { ok: true, msg: `moved to ${target}${dir ? ' with your directive' : ''}` }
       }
       return { ok: false, msg: `unknown action: ${action}` }
     } catch (e) {

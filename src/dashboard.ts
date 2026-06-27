@@ -34,7 +34,7 @@ export interface Snapshot {
 
 // A tiny status server: GET /state.json is the live orchestrator snapshot; GET / is a self-contained page that
 // polls it and renders the board (kanban by pipeline stage) + a per-run log modal.
-export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string) => Promise<{ ok: boolean; msg?: string }>): void {
+export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string, directive?: string) => Promise<{ ok: boolean; msg?: string }>): void {
   Bun.serve({
     port,
     async fetch(req) {
@@ -43,14 +43,14 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
       if (url.pathname === '/log') return Response.json({ log: getLog(url.searchParams.get('id') ?? '') })
       if (url.pathname === '/action' && req.method === 'POST') {
         if (!onAction) return Response.json({ ok: false, msg: 'actions disabled' })
-        let body: { id?: string; action?: string }
+        let body: { id?: string; action?: string; directive?: string }
         try {
-          body = (await req.json()) as { id?: string; action?: string }
+          body = (await req.json()) as { id?: string; action?: string; directive?: string }
         } catch {
           return Response.json({ ok: false, msg: 'bad request' })
         }
         if (!body.id || !body.action) return Response.json({ ok: false, msg: 'missing id/action' })
-        return Response.json(await onAction(body.id, body.action))
+        return Response.json(await onAction(body.id, body.action, body.directive))
       }
       return new Response(HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } })
     },
@@ -121,7 +121,10 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 .mmeta{display:flex;gap:12px;flex-wrap:wrap;margin-top:7px;color:var(--mut);font-size:11.5px}
 .mmeta .m{display:inline-flex;align-items:center;gap:5px;font-variant-numeric:tabular-nums}
 .mmeta .m .pri{margin-right:0}
-#mactions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 16px 0}
+#mdirective{display:block;margin:12px 16px 0;width:calc(100% - 32px);background:var(--surf2);border:1px solid var(--line2);border-radius:8px;color:var(--fg);font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:9px 11px;resize:vertical;min-height:38px;outline:none;box-sizing:border-box}
+#mdirective:focus{border-color:var(--accent)}
+#mdirective::placeholder{color:var(--mut2)}
+#mactions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 16px 0}
 .mbtn{font:600 12px/1 inherit;color:var(--fg);background:var(--surf2);border:1px solid var(--line2);border-radius:8px;padding:8px 13px;cursor:pointer;transition:background .12s,border-color .12s}
 .mbtn:hover{background:#2a2f3a;border-color:#3a4150}
 .mbtn.go{color:#9ec1ff;border-color:#5b8def55}.mbtn.go:hover{background:#5b8def1f}
@@ -165,6 +168,7 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
  <div id="msub"></div>
  <div id="mbanner" style="display:none"></div>
  <div id="mtokens" style="display:none"></div>
+ <textarea id="mdirective" placeholder="Optional directive for the agent (sent with the action below) — e.g. &quot;also handle the empty-state&quot;"></textarea>
  <div id="mactions"></div>
  <div id="logbody"></div>
 </div></div>
@@ -182,7 +186,7 @@ function actionList(it){if(!it||it.state==='Done')return [];
  if(it.state==='Needs human')return [{a:'to-qa',l:'Re-run QA',c:'go',t:'Send back to QA Requested to re-verify'},A_REWORK];
  if(it.state==='Ready to ship')return [{a:'to-qa',l:'Re-verify before ship',c:'go',t:'Send back through QA before it ships'},A_REWORK];
  return [{a:'to-qa',l:'Run QA on it',c:'go',t:'Move to QA Requested and verify with a fresh QA agent'},A_REWORK];}
-function abtn(id,d){return '<button class="mbtn '+(d.c||'')+'" title="'+(d.t||'')+'" onclick="postAction(this,\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>';}
+function abtn(id,d){return '<button class="mbtn '+(d.c||'')+'" title="'+(d.t||'')+'" onclick="modalAct(\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>';}
 function kebab(it){return actionList(it).length?'<button class="kebab" data-id="'+it.identifier+'" onclick="toggleMenu(this,event)" title="actions">&#8943;</button>':'';}
 const COLS=[
  {name:'Triage',c:'#6b7280',states:['Triage']},
@@ -278,10 +282,11 @@ function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId)
  const ma=document.getElementById('mactions');var ah=it?actionList(it).map(function(d){return abtn(it.identifier,d)}).join(''):'';if(ah){ma.style.display='flex';ma.innerHTML=ah;}else{ma.style.display='none';ma.innerHTML='';}}
 function openModal(id){expandedId=id;document.getElementById('modal').style.display='flex';document.getElementById('logbody').innerHTML='<div class="lg" style="color:var(--mut)">loading&hellip;</div>';syncHead();pullLog();}
 function closeModal(){expandedId=null;document.getElementById('modal').style.display='none';}
-async function postAction(btn,id,action,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
+async function postAction(btn,id,action,ev,directive){if(ev){ev.stopPropagation();ev.preventDefault();}
  var box=btn&&btn.parentNode;if(box)box.querySelectorAll('button').forEach(function(x){x.classList.add('busy')});
- try{await fetch('/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:id,action:action})});}catch(e){}
+ try{await fetch('/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:id,action:action,directive:directive||''})});}catch(e){}
  setTimeout(pull,400);setTimeout(pull,1600);}
+function modalAct(id,action,ev){var d=document.getElementById('mdirective');var dir=d?d.value.trim():'';if(d)d.value='';closeModal();postAction(null,id,action,ev,dir);}
 let menuFor=null;
 function toggleMenu(btn,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
  var id=btn.getAttribute('data-id');

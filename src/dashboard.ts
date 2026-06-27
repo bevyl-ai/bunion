@@ -18,6 +18,7 @@ export interface BoardItem {
   lastActivity: number
   retryAttempt: number
   retryDueAt: number | null
+  tokens: { total: number; phases: Array<{ phase: string; total: number; input: number; output: number; cached: number; reasoning: number }> } | null // cumulative token use, per pipeline stage
 }
 
 export interface Snapshot {
@@ -92,6 +93,11 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 #mbanner.nh{background:#e0564f18;border:1px solid #e0564f44;color:#eaa6a0}
 #mbanner.nh b{color:#e0564f}
 #mbanner.note{background:var(--surf2);border:1px solid var(--line);color:var(--mut)}
+#mtokens{margin:11px 16px 0;display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12px}
+#mtokens .tklab{text-transform:uppercase;letter-spacing:.5px;font-size:10px;color:var(--mut2)}
+#mtokens .tkph{background:var(--surf2);border:1px solid var(--line);border-radius:6px;padding:2px 8px;color:var(--mut);font-family:ui-monospace,Menlo,monospace}
+#mtokens .tkph b{color:var(--fg);font-weight:600;text-transform:capitalize}
+#mtokens .tktot{margin-left:auto;color:var(--fg);font-family:ui-monospace,Menlo,monospace;font-weight:600}
 #mtitle{display:flex;align-items:center;gap:10px;font-family:ui-monospace,Menlo,monospace;font-weight:600;font-size:14px}
 #mclose{margin-left:auto;cursor:pointer;color:var(--mut);font-size:12.5px}
 #mclose:hover{color:var(--fg)}
@@ -113,6 +119,7 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 <div id="modal"><div id="mpanel">
  <div id="mhead"><span class="live"></span><span id="mtitle"></span><span id="mclose">close &#10005;</span></div>
  <div id="mbanner" style="display:none"></div>
+ <div id="mtokens" style="display:none"></div>
  <div id="logbody"></div>
 </div></div>
 <script>
@@ -120,6 +127,7 @@ const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progre
 const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=Math.floor(s/60);if(m<60)return m+'m '+(s%60)+'s';return Math.floor(m/60)+'h '+(m%60)+'m'};
 const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+const fmtTok=n=>{n=n||0;return n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e4?Math.round(n/1e3)+'k':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)};
 const COLS=[
  {name:'Triage',c:'#6b7280',states:['Triage']},
  {name:'Backlog',c:'#6b7280',states:['Backlog']},
@@ -146,11 +154,12 @@ function cardHtml(r,now){
  else if(r.status==='handoff') status='<span class="ag">&#10004; in review</span>';
  else status='<span class="ag">&#9203; queued</span>';
  const tot=r.enteredAt?'<span class="t-tot clk" title="total time in the factory">&#9201; '+ago((r.endedAt||now)-r.enteredAt)+'</span>':'';
+ const tk=r.tokens?'<span class="t-tok clk" title="tokens used across all stages">'+fmtTok(r.tokens.total)+' tok</span>':'<span class="t-tok"></span>';
  return '<div class="card'+(run?' run':'')+'" data-id="'+r.identifier+'">'+
   '<div class="ctop"><span class="cid">'+r.identifier+'</span>'+pr+'</div>'+
   '<div class="ctitle">'+esc(r.title)+'</div>'+
   (run?'<div class="cact t-act">turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,70))+'</div>':'')+
-  '<div class="cfoot">'+status+'<span class="meta">'+tot+'</span></div>'+
+  '<div class="cfoot">'+status+'<span class="meta">'+tk+tot+'</span></div>'+
  '</div>';
 }
 function colHtml(col,arr,now){return '<div class="col"><div class="colh"><i style="background:'+col.c+'"></i>'+col.name+'<span class="ct">'+arr.length+'</span></div>'+(arr.length?arr.map(r=>cardHtml(r,now)).join(''):'<div class="colempty">empty</div>')+'</div>';}
@@ -184,6 +193,7 @@ function tickLive(){
   const tt=card.querySelector('.t-tot');if(tt&&r.enteredAt)tt.innerHTML='&#9201; '+ago((r.endedAt||now)-r.enteredAt);
   const ag=card.querySelector('.t-ago');if(ag){const act=now-r.lastActivity,dc=act<30000?'#3fb27f':act<120000?'#d99a2b':'#e0564f';ag.innerHTML='<i class="dot" style="background:'+dc+'"></i>active '+ago(act)}
   const ac=card.querySelector('.t-act');if(ac)ac.innerHTML='turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,72));
+  const tk=card.querySelector('.t-tok');if(tk)tk.innerHTML=r.tokens?fmtTok(r.tokens.total)+' tok':'';
  });
 }
 let expandedId=null;
@@ -192,7 +202,10 @@ function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId)
  const ban=document.getElementById('mbanner');
  if(it&&it.state==='QA blocked'){ban.style.display='block';ban.className='nh';ban.innerHTML='<b>&#9888; Needs human</b> &mdash; '+(it.note?esc(it.note):'open the QA notes in Linear');}
  else if(it&&it.note&&it.status!=='running'){ban.style.display='block';ban.className='note';ban.innerHTML=esc(it.note);}
- else{ban.style.display='none';}}
+ else{ban.style.display='none';}
+ const tk=document.getElementById('mtokens');
+ if(it&&it.tokens){tk.style.display='flex';tk.innerHTML='<span class="tklab">tokens</span>'+it.tokens.phases.map(function(p){return '<span class="tkph" title="input '+fmtTok(p.input)+' \\u00b7 output '+fmtTok(p.output)+' \\u00b7 cached '+fmtTok(p.cached)+'"><b>'+esc(p.phase)+'</b> '+fmtTok(p.total)+'</span>';}).join('')+'<span class="tktot">&Sigma; '+fmtTok(it.tokens.total)+'</span>';}
+ else{tk.style.display='none';}}
 function openModal(id){expandedId=id;document.getElementById('modal').style.display='flex';document.getElementById('logbody').innerHTML='<div class="lg" style="color:var(--mut)">loading&hellip;</div>';syncHead();pullLog();}
 function closeModal(){expandedId=null;document.getElementById('modal').style.display='none';}
 board.addEventListener('click',function(e){const c=e.target.closest('[data-id]');if(!c)return;openModal(c.getAttribute('data-id'));});

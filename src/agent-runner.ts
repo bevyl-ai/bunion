@@ -5,7 +5,7 @@ import { fetchById } from './linear'
 import { log } from './log'
 import { ensureWorkspace, installSkills, removeWorkspace, runHook } from './workspace'
 import { renderPrompt } from './workflow'
-import type { Config, Issue } from './types'
+import type { AgentEvent, Config, Issue } from './types'
 
 export interface AgentOutcome {
   ok: boolean
@@ -29,7 +29,7 @@ function continuationPrompt(turn: number, maxTurns: number): string {
 // One worker session for an issue: prep workspace → run turns on a single app-server thread up to max_turns,
 // refreshing the issue between turns and continuing while it stays active. The AGENT drives Linear/git/gh/merge.
 // `host` null = run locally; else the workspace, clone, and codex all live on that ssh worker (an exe.dev VM).
-export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, onEvent: (e: { turn?: number; label?: string; log?: string }) => void): AgentHandle {
+export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, onEvent: (e: AgentEvent) => void): AgentHandle {
   let session: AppServerSession | null = null
   let stopped = false
 

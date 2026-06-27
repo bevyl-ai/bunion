@@ -58,6 +58,23 @@ export interface Config {
   workflowPath: string
 }
 
+// Per-turn token usage, from codex's thread/tokenUsage/updated notification (its thread-cumulative `total`).
+export interface TokenCounts {
+  total: number
+  input: number
+  output: number
+  cached: number
+  reasoning: number
+}
+
+// What an app-server session reports up to the orchestrator on each step: progress + the rolling token total.
+export interface AgentEvent {
+  turn?: number
+  label?: string
+  log?: string
+  tokens?: TokenCounts
+}
+
 // A host-side dynamic tool offered to the agent over the app-server (e.g. linear_graphql).
 export interface DynamicTool {
   spec: { name: string; description: string; inputSchema: Record<string, unknown> }

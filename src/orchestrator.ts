@@ -1,11 +1,14 @@
 import { spawn } from 'node:child_process'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { startAgent, type AgentHandle } from './agent-runner'
 import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
 import { fetchBoard, fetchCandidates, fetchStatesByIds } from './linear'
 import { log, warn } from './log'
 import { removeWorkspace } from './workspace'
-import type { Issue } from './types'
+import type { Issue, TokenCounts } from './types'
 
 interface RunningEntry {
   issue: Issue
@@ -16,6 +19,8 @@ interface RunningEntry {
   turn: number
   activity: string
   host: string | null // the worker VM this run is pinned to (null = local)
+  phase: string // the pipeline phase this session is running (tokens are attributed here)
+  tokenBase: TokenCounts // last-folded thread-cumulative usage, so we add only the delta to the persistent tally
 }
 interface RetryTimer {
   timer: ReturnType<typeof setTimeout>
@@ -27,6 +32,36 @@ interface RetryTimer {
 
 const CONTINUATION_MS = 1000
 const FAILURE_BASE_MS = 10_000
+
+// Per-ticket / per-phase token tracking. codex reports thread-cumulative usage per turn; we fold the delta into a
+// tally keyed by issue identifier → phase, persisted to disk so the numbers survive daemon restarts.
+const TOKENS_FILE = join(homedir(), '.bunion', 'tokens.json')
+const PHASE_ORDER = ['plan', 'build', 'qa', 'verify']
+type TokenTally = Record<string, Record<string, TokenCounts>>
+const zeroCounts = (): TokenCounts => ({ total: 0, input: 0, output: 0, cached: 0, reasoning: 0 })
+const foldDelta = (acc: TokenCounts, cur: TokenCounts, base: TokenCounts): void => {
+  acc.total += cur.total - base.total
+  acc.input += cur.input - base.input
+  acc.output += cur.output - base.output
+  acc.cached += cur.cached - base.cached
+  acc.reasoning += cur.reasoning - base.reasoning
+}
+function loadTokens(): TokenTally {
+  try {
+    const v = JSON.parse(readFileSync(TOKENS_FILE, 'utf8'))
+    return v && typeof v === 'object' ? (v as TokenTally) : {}
+  } catch {
+    return {}
+  }
+}
+function saveTokens(t: TokenTally): void {
+  try {
+    mkdirSync(dirname(TOKENS_FILE), { recursive: true })
+    writeFileSync(TOKENS_FILE, JSON.stringify(t))
+  } catch {
+    // best effort; tracking is non-critical
+  }
+}
 
 // The thin harness. Poll the tracker's active states, dispatch a Codex worker per issue (bounded), reconcile
 // running issues against the tracker, and retry. It never touches Linear state or git — the AGENT does, via the
@@ -44,6 +79,8 @@ export async function start(workflowPath?: string): Promise<void> {
   const logs = new Map<string, string[]>() // per-identifier run log (rolling), kept for the last ~16 runs
   const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
   const summaries = new Map<string, string>() // last agent message per ticket — survives the log buffer, surfaces the human action
+  const tokens = loadTokens() // identifier → phase → cumulative token counts; persisted across restarts
+  let lastTokenSave = 0
 
   // Worker placement. An issue is PINNED to one host for its whole life (continuation turns reuse the same VM so the
   // cloned workspace + workpad survive). hostCounts = pinned issues per host; the pin is held until the issue is
@@ -127,7 +164,7 @@ export async function start(workflowPath?: string): Promise<void> {
       const oldest = logs.keys().next().value
       if (oldest && oldest !== issue.identifier) logs.delete(oldest)
     }
-    const entry: RunningEntry = { issue, handle: undefined as unknown as AgentHandle, retryAttempt: attempt > 0 ? attempt : 0, startedAt: Date.now(), lastActivity: Date.now(), turn: 0, activity: 'starting…', host }
+    const entry: RunningEntry = { issue, handle: undefined as unknown as AgentHandle, retryAttempt: attempt > 0 ? attempt : 0, startedAt: Date.now(), lastActivity: Date.now(), turn: 0, activity: 'starting…', host, phase: phaseOf(cfg, issue.state), tokenBase: zeroCounts() }
     running.set(issue.id, entry)
     log(`→ ${issue.identifier} (${issue.state})${attempt > 0 ? ` retry#${attempt}` : ''}${host ? ` @ ${host}` : ''}`)
     entry.handle = startAgent(cfg, issue, attempt > 0 ? attempt : null, host, (e) => {
@@ -141,6 +178,18 @@ export async function start(workflowPath?: string): Promise<void> {
           if (arr.length > 600) arr.splice(0, arr.length - 600)
         }
         if (e.log.startsWith('● ')) summaries.set(issue.identifier, e.log.slice(2, 400)) // keep the latest agent message
+      }
+      if (e.tokens) {
+        // codex sends the thread-cumulative total each turn; fold the delta into this ticket's phase tally.
+        const tbl = (tokens[issue.identifier] ??= {})
+        const acc = (tbl[entry.phase] ??= zeroCounts())
+        foldDelta(acc, e.tokens, entry.tokenBase)
+        entry.tokenBase = e.tokens
+        const t = Date.now()
+        if (t - lastTokenSave > 3000) {
+          lastTokenSave = t
+          saveTokens(tokens)
+        }
       }
     })
     void entry.handle.done.then((outcome) => {
@@ -215,6 +264,16 @@ export async function start(workflowPath?: string): Promise<void> {
   log(`bunion up · scope=${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''} · cap=${displayCap()} · workers=${workerDesc} · poll=${cfg.pollIntervalMs}ms`)
 
   const rankStatus = (s: BoardItem['status']): number => (s === 'running' ? 0 : s === 'retrying' ? 1 : s === 'queued' ? 2 : 3)
+  const tokenSummary = (identifier: string): BoardItem['tokens'] => {
+    const tbl = tokens[identifier]
+    if (!tbl) return null
+    const phases = Object.keys(tbl)
+      .sort((a, b) => (PHASE_ORDER.indexOf(a) + 1 || 99) - (PHASE_ORDER.indexOf(b) + 1 || 99))
+      .map((ph) => ({ phase: ph, ...tbl[ph]! }))
+      .filter((p) => p.total > 0)
+    const total = phases.reduce((s, p) => s + p.total, 0)
+    return total > 0 ? { total, phases } : null
+  }
   const snapshot = (): Snapshot => {
     const board = new Map<string, BoardItem>()
     const base = (i: Issue): BoardItem => ({
@@ -223,6 +282,7 @@ export async function start(workflowPath?: string): Promise<void> {
       status: isActive(i.state) ? 'queued' : 'handoff',
       enteredAt: i.startedAt ? Date.parse(i.startedAt) : null, endedAt: i.completedAt ? Date.parse(i.completedAt) : null,
       turn: 0, activity: '', startedAt: 0, lastActivity: 0, retryAttempt: 0, retryDueAt: null,
+      tokens: tokenSummary(i.identifier),
     })
     for (const c of lastBoard) board.set(c.id, base(c))
     for (const [id, r] of retries) {

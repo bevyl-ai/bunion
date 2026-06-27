@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { shq } from '../ssh'
-import type { Config, DynamicTool } from '../types'
+import type { AgentEvent, Config, DynamicTool } from '../types'
 
 type Json = Record<string, unknown>
 interface Pending {
@@ -15,7 +15,7 @@ interface Pending {
 export class AppServerSession {
   private cfg: Config
   private tools: Map<string, DynamicTool>
-  private onEvent: (e: { turn?: number; label?: string; log?: string }) => void
+  private onEvent: (e: AgentEvent) => void
   private msgBuf = new Map<string, string>() // accumulates agent-message text deltas by itemId
   private proc: ChildProcess | null = null
   private buf = ''
@@ -24,7 +24,7 @@ export class AppServerSession {
   private turn: { resolve: () => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null
   private fatal: Error | null = null
 
-  constructor(cfg: Config, tools: DynamicTool[], onEvent: (e: { turn?: number; label?: string; log?: string }) => void = () => {}) {
+  constructor(cfg: Config, tools: DynamicTool[], onEvent: (e: AgentEvent) => void = () => {}) {
     this.cfg = cfg
     this.tools = new Map(tools.map((t) => [t.spec.name, t]))
     this.onEvent = onEvent
@@ -223,6 +223,11 @@ export class AppServerSession {
     if (method === 'turn/completed') return void this.turn?.resolve()
     if (method === 'turn/failed') return void this.turn?.reject(new Error('turn failed'))
     if (method === 'turn/cancelled') return void this.turn?.reject(new Error('turn cancelled'))
+    if (method === 'thread/tokenUsage/updated') {
+      // `total` is the thread-cumulative usage for this session; the orchestrator folds it into per-ticket/phase tallies.
+      const t = obj(obj(params.tokenUsage).total)
+      return this.onEvent({ tokens: { total: numv(t.totalTokens), input: numv(t.inputTokens), output: numv(t.outputTokens), cached: numv(t.cachedInputTokens), reasoning: numv(t.reasoningOutputTokens) } })
+    }
     if (method === 'item/started') {
       const item = obj(params.item)
       switch (item.type) {
@@ -271,6 +276,10 @@ export class AppServerSession {
 
 function obj(v: unknown): Json {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Json) : {}
+}
+
+function numv(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0
 }
 
 function toolResult(success: boolean, output: string): Json {

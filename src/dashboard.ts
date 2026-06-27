@@ -171,12 +171,13 @@ const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return S
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 const fmtTok=n=>{n=n||0;return n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e4?Math.round(n/1e3)+'k':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)};
 const PRI={1:'Urgent',2:'High',3:'Medium',4:'Low'};
+var A_REWORK={a:'to-build',l:'Send back to dev',c:'',t:'Move to In Progress so a fresh build agent re-codes the fix'};
 function actionList(it){if(!it||it.state==='Done')return [];
- if(it.state==='QA blocked')return [{a:'to-qa',l:'&#8594; QA',c:'go'},{a:'to-build',l:'&#8594; Build',c:''}];
- if(it.status==='running')return [{a:'restart',l:'&#8635; Restart',c:'danger'},{a:'to-build',l:'&#8594; Build',c:''}];
- if(it.state==='Ready to ship')return [{a:'to-qa',l:'Re-verify',c:'go'},{a:'to-build',l:'&#8594; Build',c:''}];
- return [{a:'to-qa',l:'&#8594; QA',c:'go'},{a:'to-build',l:'&#8594; Build',c:''}];}
-function abtn(id,d){return '<button class="mbtn '+(d.c||'')+'" onclick="postAction(this,\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>';}
+ if(it.state==='QA blocked')return [{a:'to-qa',l:'Re-run QA',c:'go',t:'Move to QA Requested and re-verify with a fresh QA agent'},A_REWORK];
+ if(it.status==='running')return [{a:'restart',l:'Restart this agent',c:'danger',t:'Stop the current agent, wipe its workspace, and re-run this phase from scratch'},A_REWORK];
+ if(it.state==='Ready to ship')return [{a:'to-qa',l:'Re-verify before ship',c:'go',t:'Send back through QA before it ships'},A_REWORK];
+ return [{a:'to-qa',l:'Run QA on it',c:'go',t:'Move to QA Requested and verify with a fresh QA agent'},A_REWORK];}
+function abtn(id,d){return '<button class="mbtn '+(d.c||'')+'" title="'+(d.t||'')+'" onclick="postAction(this,\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>';}
 function kebab(it){return actionList(it).length?'<button class="kebab" data-id="'+it.identifier+'" onclick="toggleMenu(this,event)" title="actions">&#8943;</button>':'';}
 const COLS=[
  {name:'Triage',c:'#6b7280',states:['Triage']},
@@ -282,7 +283,7 @@ function toggleMenu(btn,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
  var it=(snap.items||[]).find(function(x){return x.identifier===id});
  var acts=actionList(it);if(!acts.length){closeMenu();return;}
  var m=document.getElementById('actmenu');
- m.innerHTML=acts.map(function(d){return '<button class="actitem '+(d.c||'')+'" onclick="menuAction(\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>'}).join('');
+ m.innerHTML=acts.map(function(d){return '<button class="actitem '+(d.c||'')+'" title="'+(d.t||'')+'" onclick="menuAction(\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>'}).join('');
  m.style.display='flex';m.style.visibility='hidden';
  var r=btn.getBoundingClientRect(),mw=m.offsetWidth,mh=m.offsetHeight;
  var left=Math.max(8,r.right-mw),top=r.bottom+5;if(top+mh>window.innerHeight-8)top=Math.max(8,r.top-mh-5);

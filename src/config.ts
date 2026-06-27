@@ -50,6 +50,7 @@ export function loadConfig(path?: string): Config {
     kind: str(tk.kind) ?? '',
     endpoint: str(tk.endpoint) ?? 'https://api.linear.app/graphql',
     apiKey: secret(tk.api_key, 'LINEAR_API_KEY'),
+    appToken: secret(tk.app_token, 'LINEAR_APP_TOKEN'),
     projectSlug: secret(tk.project_slug, 'LINEAR_PROJECT_SLUG'),
     team: secret(tk.team, 'LINEAR_TEAM'),
     requiredLabels: [...new Set(arr(tk.required_labels).map((l) => l.trim().toLowerCase()).filter(Boolean))],

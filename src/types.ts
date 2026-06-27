@@ -19,6 +19,8 @@ export interface TrackerConfig {
   kind: string
   endpoint: string
   apiKey: string | null
+  appToken: string | null // OAuth actor=app token: the AGENT posts/edits through this so it acts as the app, with a
+  // per-phase name via createAsUser. The orchestrator's own reads/operator-actions keep using apiKey (the operator).
   projectSlug: string | null // scope to one project, OR
   team: string | null // scope to a whole team (key, e.g. BEV) — pair with required_labels for opt-in
   requiredLabels: string[] // normalized: trim + lowercase + dedupe; matched host-side (AND)

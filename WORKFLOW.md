@@ -58,7 +58,7 @@ You can talk to Linear through the injected `linear_graphql` tool (one GraphQL o
 
 ## Always (every phase)
 
-- Keep ONE persistent `## Codex Workpad` Linear comment as the running source of truth (plan, acceptance criteria, validation, a short per-phase log). Reconcile it before working; never post separate "done"/summary comments.
+- Keep ONE persistent `## Codex Workpad` Linear comment as the running source of truth (plan, acceptance criteria, validation, a short per-phase log). Reconcile it before working; never post separate "done"/summary comments. If updating the existing workpad fails with a permission error (it predates the current app identity), create a fresh `## Codex Workpad` and continue in it.
 - The workpad MUST carry a one-line **`Verdict: <PASS|FAILED|BLOCKED|VERIFIED|WORKING> — <one concrete sentence>`** near the top, updated whenever you hand off or block. This exact line is what the operator sees on the dashboard, so the reason must be concrete and self-contained — for `BLOCKED`, say precisely what a human must decide or what you couldn't do; never leave it blank, generic, or a bare status.
 - Prefix every GitHub comment you author with `[codex]`.
 - Minimal, in-scope changes that match the surrounding code. Out-of-scope finds → file a separate `Backlog` issue (clear title/acceptance criteria, same team, `related` link), don't widen scope.

@@ -56,7 +56,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
 
-    session = new AppServerSession(cfg, [linearGraphqlTool(cfg)], onEvent)
+    session = new AppServerSession(cfg, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state))], onEvent)
     let current = issue
     try {
       await session.start(dir, host)

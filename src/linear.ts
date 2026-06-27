@@ -8,10 +8,10 @@ export interface GraphqlResult {
 
 // Raw single-operation GraphQL against the configured Linear endpoint with the tracker auth. Used by the
 // linear_graphql host tool AND by the orchestrator's reads below.
-export async function graphql(cfg: Config, query: string, variables: Record<string, unknown>): Promise<GraphqlResult> {
+export async function graphql(cfg: Config, query: string, variables: Record<string, unknown>, token?: string | null): Promise<GraphqlResult> {
   const res = await fetch(cfg.tracker.endpoint, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: cfg.tracker.apiKey ?? '' },
+    headers: { 'content-type': 'application/json', authorization: (token ?? cfg.tracker.apiKey) ?? '' },
     body: JSON.stringify({ query, variables }),
   })
   let body: unknown

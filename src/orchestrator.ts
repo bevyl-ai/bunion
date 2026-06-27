@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { startAgent, type AgentHandle } from './agent-runner'
 import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
@@ -255,6 +256,30 @@ export async function start(workflowPath?: string): Promise<void> {
     }
   }
   if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log)
+
+  // Periodic workspace hygiene: each ticket's checkout is ~5-6G (node_modules + git history), and stale ones pile
+  // up as tickets cycle across VMs (every restart re-pins and orphans the old copy). Prune workspaces on each VM
+  // that aren't currently pinned there AND haven't been touched in 20min. Fire-and-forget; never blocks the loop.
+  const pruneWorkspaces = (): void => {
+    const hosts = cfg.worker.sshHosts
+    if (hosts.length === 0) return
+    const keepByHost = new Map<string, string[]>()
+    const keep = (h: string, id: string): void => {
+      keepByHost.set(h, [...(keepByHost.get(h) ?? []), id])
+    }
+    for (const e of running.values()) if (e.host) keep(e.host, e.issue.identifier)
+    for (const [id, r] of retries) {
+      const h = placement.get(id)
+      if (h) keep(h, r.identifier)
+    }
+    for (const host of hosts) {
+      const list = `${(keepByHost.get(host) ?? []).join(' ')} SMOKE CLONETEST`
+      const cmd = `for d in ~/.bunion/workspaces/*/; do [ -d "$d" ] || continue; id=$(basename "$d"); case " ${list} " in *" $id "*) continue;; esac; [ -z "$(find "$d" -maxdepth 0 -mmin -20 2>/dev/null)" ] && rm -rf "$d"; done`
+      spawn('ssh', ['-o', 'ConnectTimeout=15', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', host, cmd], { stdio: 'ignore' }).on('error', () => {})
+    }
+    log(`workspace prune swept ${hosts.length} VM(s)`)
+  }
+  if (cfg.worker.sshHosts.length) setInterval(pruneWorkspaces, 20 * 60 * 1000)
 
   for (;;) {
     try {

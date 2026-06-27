@@ -98,7 +98,7 @@ You are an **independent verifier**. You did NOT write this code; approach it sk
 
 1. Open `.codex/skills/qa/SKILL.md` and follow it. Read the ticket, the workpad acceptance criteria + validation plan, and the PR (diff + checks + the review loop); run the `pull` skill for the PR branch.
 2. Actually verify — don't take the author's word:
-   - **For a UI / visual / interaction bug, drive the real app in a headless browser** — the qa skill ships `qa-browser.mjs` (Playwright + chromium are installed; the box has network to `*.bevyl.ai`). Find the PR's preview deployment, reproduce the bug and confirm the new behaviour with DOM assertions (you can't "see" a screenshot). Authed routes need a session — if you can't sign in, that's BLOCKED, not a guess.
+   - **For a UI / visual / interaction bug, drive the real app in a browser** — the qa skill ships `browser.mjs`, a stateful Playwright CLI you drive step by step (`open`, `snapshot`, `click`, `fill`, `screenshot`); chromium + network to `*.bevyl.ai` are ready. Find the PR's preview, perform the exact user flow, assert the fixed behaviour with `eval`, and **`screenshot` it as proof** (note the path in the workpad). Authed routes need a session — if you can't sign in, that's BLOCKED, not a guess.
    - reproduce the ORIGINAL problem (on production or the PR base), then confirm it is GONE on the fix,
    - check each acceptance criterion explicitly,
    - run the repo's checks + the plan's validation items, plus any applicable `bevops` smoke/eval that runs in this environment.

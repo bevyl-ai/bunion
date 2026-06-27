@@ -8,6 +8,8 @@ export interface BoardItem {
   host: string | null
   prUrl: string | null
   status: 'running' | 'retrying' | 'queued' | 'handoff' // handoff = left the active states (e.g. in QA), bunion is done with it for now
+  enteredAt: number | null // ms — Linear startedAt; the clock for total elapsed in the factory
+  endedAt: number | null // ms — Linear completedAt; freezes total elapsed once merged/Done
   turn: number
   activity: string
   startedAt: number
@@ -55,7 +57,7 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 .cap{color:var(--mut);font-size:12px;align-self:center}
 .clock{margin-left:auto;color:var(--mut2);font-size:12px;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace}
 .board{display:flex;gap:13px;padding:18px 20px;align-items:flex-start;overflow-x:auto}
-.col{flex:1 1 0;min-width:250px;display:flex;flex-direction:column;gap:9px}
+.col{flex:1 1 0;min-width:228px;display:flex;flex-direction:column;gap:9px}
 .colh{display:flex;align-items:center;gap:8px;padding:1px 3px 5px;font-size:11.5px;font-weight:600;color:var(--mut);letter-spacing:.3px}
 .colh i{width:7px;height:7px;border-radius:50%}
 .colh .ct{margin-left:auto;color:var(--mut2);font-weight:500;font-variant-numeric:tabular-nums}
@@ -103,7 +105,7 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
  <div id="logbody"></div>
 </div></div>
 <script>
-const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Requested':'#d99a2b','QA testing started':'#d99a2b','QA blocked':'#e0564f','Ready to ship':'#3fb27f','Done':'#3fb27f'}[s]||'#7c8493');
+const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Requested':'#d99a2b','QA testing started':'#d99a2b','QA blocked':'#e0564f','Ready to ship':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
 const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=Math.floor(s/60);if(m<60)return m+'m '+(s%60)+'s';return Math.floor(m/60)+'h '+(m%60)+'m'};
 const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
@@ -111,7 +113,8 @@ const COLS=[
  {name:'Plan',c:'#7c8493',states:['Triage','Backlog','Todo']},
  {name:'Build',c:'#5b8def',states:['In Progress','QA blocked']},
  {name:'QA',c:'#d99a2b',states:['QA Requested','QA testing started']},
- {name:'Ready to ship',c:'#3fb27f',states:['Ready to ship']}];
+ {name:'Ready to ship',c:'#3fb27f',states:['Ready to ship']},
+ {name:'Merged',c:'#a371f7',states:['Done']}];
 function colIdx(st){for(var i=0;i<COLS.length;i++)if(COLS[i].states.indexOf(st)>=0)return i;return -1;}
 let snap={items:[],cap:0,scope:''};
 async function pull(){try{snap=await (await fetch('/state.json')).json()}catch(e){}render()}
@@ -122,10 +125,12 @@ function cardHtml(r,now){
  let status;
  if(run) status='<span class="ag t-ago"><i class="dot" style="background:'+dc+'"></i>active '+ago(act)+'</span>';
  else if(r.status==='retrying') status='<span class="ag">&#8635; retry '+(r.retryDueAt?'in '+ago(r.retryDueAt-now):'soon')+'</span>';
+ else if(r.state==='Done') status='<span class="ag" style="color:#a371f7">&#10004; merged</span>';
  else if(r.state==='Ready to ship') status='<span class="ag">&#10004; awaiting merge</span>';
  else if(r.status==='handoff') status='<span class="ag">&#10004; handed off</span>';
  else status='<span class="ag">&#9203; queued</span>';
- const meta=(run&&r.host?'<span class="host">'+esc(r.host.replace(/\\.exe\\.xyz$/,''))+'</span>':'')+(run?'<span class="t-el clk">'+dur(now-r.startedAt)+'</span>':'')+pr;
+ const tot=r.enteredAt?'<span class="t-tot clk" title="total time in the factory">&#9201; '+ago((r.endedAt||now)-r.enteredAt)+'</span>':'';
+ const meta=(run&&r.host?'<span class="host">'+esc(r.host.replace(/\\.exe\\.xyz$/,''))+'</span>':'')+tot+pr;
  return '<div class="card'+(run?' run':'')+'" data-id="'+r.identifier+'">'+
   '<div class="ctop"><span class="cid">'+r.identifier+'</span><span class="pill" style="color:'+c+';background:'+c+'22">'+esc(r.state)+'</span></div>'+
   '<div class="ctitle">'+esc(r.title)+'</div>'+
@@ -161,13 +166,13 @@ function tickLive(){
  const byId={};(snap.items||[]).forEach(function(r){byId[r.identifier]=r});
  document.querySelectorAll('#board .card[data-id]').forEach(function(card){
   const r=byId[card.getAttribute('data-id')];if(!r)return;
-  const el=card.querySelector('.t-el');if(el)el.textContent=dur(now-r.startedAt);
+  const tt=card.querySelector('.t-tot');if(tt&&r.enteredAt)tt.innerHTML='&#9201; '+ago((r.endedAt||now)-r.enteredAt);
   const ag=card.querySelector('.t-ago');if(ag){const act=now-r.lastActivity,dc=act<30000?'#3fb27f':act<120000?'#d99a2b':'#e0564f';ag.innerHTML='<i class="dot" style="background:'+dc+'"></i>active '+ago(act)}
   const ac=card.querySelector('.t-act');if(ac)ac.innerHTML='turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,72));
  });
 }
 let expandedId=null;
-function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId);const c=it?SC(it.state):'#7c8493';document.getElementById('mtitle').innerHTML=esc(expandedId||'')+(it?' <span class="pill" style="color:'+c+';background:'+c+'22">'+esc(it.state)+'</span>':'')+(it&&it.prUrl?' <a class="pr" href="'+it.prUrl+'" target="_blank" rel="noopener">PR #'+(it.prUrl.split("/pull/")[1]||"")+'</a>':'');}
+function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId);const c=it?SC(it.state):'#7c8493';document.getElementById('mtitle').innerHTML=esc(expandedId||'')+(it?' <span class="pill" style="color:'+c+';background:'+c+'22">'+esc(it.state)+'</span>':'')+(it&&it.enteredAt?' <span class="clk" style="color:var(--mut)" title="total time in the factory">&#9201; '+ago((it.endedAt||Date.now())-it.enteredAt)+'</span>':'')+(it&&it.prUrl?' <a class="pr" href="'+it.prUrl+'" target="_blank" rel="noopener">PR #'+(it.prUrl.split("/pull/")[1]||"")+'</a>':'');}
 function openModal(id){expandedId=id;document.getElementById('modal').style.display='flex';document.getElementById('logbody').innerHTML='<div class="lg" style="color:var(--mut)">loading&hellip;</div>';syncHead();pullLog();}
 function closeModal(){expandedId=null;document.getElementById('modal').style.display='none';}
 board.addEventListener('click',function(e){const c=e.target.closest('[data-id]');if(!c)return;openModal(c.getAttribute('data-id'));});

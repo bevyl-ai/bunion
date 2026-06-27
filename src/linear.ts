@@ -40,13 +40,15 @@ interface RawIssue {
   url: string
   priority: number
   createdAt: string
+  startedAt: string | null
+  completedAt: string | null
   state: { name: string }
   labels: { nodes: { name: string }[] }
   inverseRelations: { nodes: { type: string; issue: { state: { name: string } | null } | null }[] }
   attachments: { nodes: { url: string }[] }
 }
 
-const ISSUE_FIELDS = `id identifier title description url priority createdAt
+const ISSUE_FIELDS = `id identifier title description url priority createdAt startedAt completedAt
   state { name }
   labels { nodes { name } }
   inverseRelations { nodes { type issue { state { name } } } }
@@ -76,11 +78,15 @@ export async function fetchCandidates(cfg: Config): Promise<Issue[]> {
   return d.issues.nodes.map(toIssue)
 }
 
-// The board = every non-terminal labeled ticket (active + handed-off downstream, e.g. QA Requested), so the
-// dashboard can show the whole opt-in set, not just what's actively running. Label filter is server-side here
-// (case-sensitive) for efficiency; the orchestrator re-filters host-side (case-insensitive) for correctness.
+// The board = every labeled ticket that's either active/handed-off OR recently merged (Done in the last day), so the
+// dashboard can show the whole opt-in set plus a "Merged" column, but not the whole completed history. Canceled is
+// excluded. Label filter is server-side (case-sensitive) for efficiency; the orchestrator re-filters host-side.
 export async function fetchBoard(cfg: Config): Promise<Issue[]> {
-  const filter: Record<string, unknown> = { state: { type: { nin: ['completed', 'canceled'] } } }
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const filter: Record<string, unknown> = {
+    state: { type: { neq: 'canceled' } },
+    or: [{ completedAt: { null: true } }, { completedAt: { gt: cutoff } }],
+  }
   if (cfg.tracker.team) filter.team = { key: { eq: cfg.tracker.team } }
   if (cfg.tracker.projectSlug) filter.project = { slugId: { eq: cfg.tracker.projectSlug } }
   if (cfg.tracker.requiredLabels.length) filter.labels = { name: { in: cfg.tracker.requiredLabels } }
@@ -111,6 +117,8 @@ function toIssue(r: RawIssue): Issue {
     state: r.state.name,
     priority: typeof r.priority === 'number' ? r.priority : 0,
     createdAt: r.createdAt,
+    startedAt: r.startedAt,
+    completedAt: r.completedAt,
     labels: r.labels.nodes.map((n) => n.name),
     blockers: r.inverseRelations.nodes.filter((n) => n.type === 'blocks').map((n) => ({ state: n.issue?.state?.name ?? null })),
     prUrl: r.attachments?.nodes.map((a) => a.url).find((u) => /github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(u)) ?? null,

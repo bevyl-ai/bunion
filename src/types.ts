@@ -8,6 +8,8 @@ export interface Issue {
   state: string
   priority: number // 0=none, 1=urgent … 4=low
   createdAt: string // ISO
+  startedAt: string | null // ISO — first moved to a started state (the factory-entry clock for total elapsed)
+  completedAt: string | null // ISO — when it reached Done
   labels: string[]
   blockers: { state: string | null }[]
   prUrl: string | null // the GitHub PR attached to the issue, if any

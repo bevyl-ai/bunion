@@ -7,7 +7,7 @@ import { AppServerSession } from './codex/app-server'
 import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
 import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment, recentAuthFailures } from './linear'
-import { log, warn } from './log'
+import { log, recentLogs, warn } from './log'
 import { readJson, throttledWriter, writeJson } from './persist'
 import { remoteHome } from './ssh'
 import { backfillThreads } from './thread-backfill'
@@ -577,6 +577,29 @@ export async function start(workflowPath?: string): Promise<void> {
     const hs = hosts()
     return hs.length ? (hs[i % hs.length] ?? null) : null
   }
+  // The brain's live operational state, rendered into a pool role's prompt — a worker VM can't see any of this (the
+  // daemon log, token burns, what's stuck), so the mechanic especially gets it first-class instead of guessing.
+  const brainDigest = (): string => {
+    const lc = (s: string): string => s.trim().toLowerCase()
+    const needs = lastBoard.filter((i) => lc(i.state) === 'needs human').map((i) => i.identifier)
+    const blocked = lastBoard.filter((i) => lc(i.state) === 'qa blocked').map((i) => i.identifier)
+    const tok = (n: number): string => (n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${Math.round(n / 1e6)}M` : `${Math.round(n / 1e3)}k`)
+    const burns = Object.keys(tokens)
+      .filter((id) => /^[A-Z][A-Z0-9]*-\d+$/.test(id))
+      .map((id) => [id, grandTotal(tokens, id)] as const)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+    const warnings = recentLogs().filter((l) => /WARN|deadlock|timed out|not authenticated|unauthorized|✗|429|rate.?limit|auth/i.test(l)).slice(-12)
+    return [
+      `## Factory state — live from the brain (you run on a worker and cannot see any of this otherwise)`,
+      `- Status: ${paused ? 'PAUSED' : 'running'}`,
+      `- Stuck now: ${needs.length} Needs human${needs.length ? ` (${needs.join(', ')})` : ''}; ${blocked.length} QA blocked${blocked.length ? ` (${blocked.join(', ')})` : ''}`,
+      `- Top token burns: ${burns.length ? burns.map(([id, n]) => `${id} ${tok(n)}`).join(', ') : 'none tracked'}`,
+      `- Recent brain warnings / errors / deadlocks (daemon.log tail):`,
+      ...(warnings.length ? warnings.map((l) => `    ${l}`) : ['    (none recently — factory healthy)']),
+      ``,
+    ].join('\n')
+  }
   const dispatchRole = (role: Role, i: number, force = false): void => {
     if (paused) return // operator panic switch — no role runs while paused
     if (roleRunning.has(role.name)) return // last cadence's run still going — skip this tick
@@ -617,6 +640,7 @@ export async function start(workflowPath?: string): Promise<void> {
       },
       threadRecs.get(`role:${role.name}`)?.threadId ?? null,
       quota,
+      brainDigest(),
     )
     void entry.handle.done.then((o) => {
       roleRunning.delete(role.name)

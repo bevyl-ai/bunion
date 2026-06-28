@@ -13,7 +13,7 @@ export interface RoleHandle {
 // thread — resuming the role's prior thread so it remembers what it filed last time. The role drives Linear (file/tag
 // tickets) through the same dynamic tool the pipeline uses; the resume falls back to a fresh thread if it fails so a
 // role is never wedged. The orchestrator schedules the next run on the role's cadence.
-export function startRole(cfg: Config, role: Role, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null, quota: RoleQuota): RoleHandle {
+export function startRole(cfg: Config, role: Role, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null, quota: RoleQuota, brainState: string): RoleHandle {
   let session: AppServerSession | null = null
   let stopped = false
   const wsKey = `role-${role.name}`
@@ -53,7 +53,7 @@ export function startRole(cfg: Config, role: Role, host: string | null, onEvent:
       onEvent({ threadId })
       if (stopped) return { ok: false, error: 'terminated' }
       onEvent({ log: '\n── run ──' })
-      await session.runTurn(threadId, dir, budgetNote(quota) + role.prompt, `role:${role.name}`, undefined, role.model)
+      await session.runTurn(threadId, dir, budgetNote(quota) + brainState + role.prompt, `role:${role.name}`, undefined, role.model)
       return { ok: true }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }

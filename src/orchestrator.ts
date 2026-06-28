@@ -8,7 +8,8 @@ import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
 import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment } from './linear'
 import { log, warn } from './log'
-import { removeWorkspace, workspaceDir } from './workspace'
+import { remoteHome } from './ssh'
+import { removeWorkspace } from './workspace'
 import type { Config, Issue, TokenCounts } from './types'
 
 interface RunningEntry {
@@ -454,7 +455,10 @@ export async function start(workflowPath?: string): Promise<void> {
     const rec = threadRecs.get(issue.id)
     if (!rec?.threadId) return { ok: false, msg: 'no thread yet — this ticket has not run' }
     const host = placement.get(issue.id) ?? rec.host
-    const dir = workspaceDir(cfg, identifier, host)
+    // Resume runs in the worker's HOME, not the ticket workspace — handed-off workspaces get pruned, and codex
+    // thread/resume loads the thread's full context regardless of cwd. (Dispatches re-create the workspace; chat doesn't.)
+    const cwd = host ? remoteHome(host) : homedir()
+    if (host && !cwd) return { ok: false, msg: 'cannot resolve the worker home' }
     let lg = logs.get(identifier)
     if (!lg) {
       lg = []
@@ -467,9 +471,9 @@ export async function start(workflowPath?: string): Promise<void> {
       if (e.log && e.log.startsWith('● ')) replies.push(e.log.slice(2))
     })
     try {
-      await chat.start(dir, host)
+      await chat.start(cwd, host)
       await chat.resumeThread(rec.threadId)
-      await chat.runTurn(rec.threadId, dir, chatPrompt(msg), `${identifier}: operator chat`, { type: 'readOnly' })
+      await chat.runTurn(rec.threadId, cwd, chatPrompt(msg), `${identifier}: operator chat`, { type: 'readOnly' })
     } catch (e) {
       chat.stop()
       const m = e instanceof Error ? e.message : String(e)

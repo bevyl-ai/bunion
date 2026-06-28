@@ -125,7 +125,7 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 .ctr{display:inline-flex;align-items:center;gap:6px;flex:none}
 .kebab{background:none;border:none;color:var(--mut2);font-size:15px;line-height:1;cursor:pointer;padding:1px 5px;border-radius:6px}
 .kebab:hover{background:var(--surf2);color:var(--fg)}
-#actmenu{position:fixed;z-index:60;background:var(--surf2);border:1px solid var(--line2);border-radius:9px;padding:5px;box-shadow:0 14px 36px rgba(0,0,0,.55);display:none;flex-direction:column;gap:2px;min-width:144px}
+#actmenu{position:fixed;z-index:999;background:var(--surf2);border:1px solid var(--line2);border-radius:9px;padding:5px;box-shadow:0 14px 36px rgba(0,0,0,.55);display:none;flex-direction:column;gap:2px;min-width:144px}
 .actitem{display:block;width:100%;text-align:left;background:none;border:none;color:var(--fg);font:600 12.5px/1 inherit;padding:8px 11px;border-radius:6px;cursor:pointer;white-space:nowrap}
 .actitem:hover{background:#2a2f3a}
 .actitem.go{color:#9ec1ff}.actitem.danger{color:#eaa6a0}
@@ -231,6 +231,7 @@ const COLS=[
  {name:'Ready',c:'#3fb27f',states:['Ready to ship']},
  {name:'Merged',c:'#a371f7',states:['Done']}];
 function colIdx(st){for(var i=0;i<COLS.length;i++)if(COLS[i].states.indexOf(st)>=0)return i;return -1;}
+function moveItems(it){if(!it)return [];var cur=colIdx(it.state);return COLS.map(function(col,i){return i===cur?null:{a:'move:'+col.states[0],l:'\\u2192 '+col.name,c:'',t:'Move this ticket to '+col.name};}).filter(Boolean);}
 let snap={items:[],cap:0,scope:''};
 async function pull(){try{snap=await (await fetch('/state.json',{cache:'no-store'})).json()}catch(e){}render()}
 function cardHtml(r,now){
@@ -311,7 +312,7 @@ function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId)
  const tk=document.getElementById('mtokens');
  if(it&&it.tokens){var tcached=0,tinput=0,toutput=0;it.tokens.phases.forEach(function(p){tcached+=p.cached;tinput+=p.input;toutput+=p.output});var mc=estCost(tinput,toutput,tcached);tk.style.display='flex';tk.innerHTML='<span class="tklab">tokens</span>'+it.tokens.phases.map(function(p){return '<span class="tkph" title="input '+fmtTok(p.input)+' \\u00b7 output '+fmtTok(p.output)+' \\u00b7 cached '+fmtTok(p.cached)+' \\u00b7 ~'+fmtCost(estCost(p.input,p.output,p.cached))+' API-equiv"><b>'+esc(p.phase)+'</b> '+fmtTok(p.total)+'</span>';}).join('')+'<span class="tktot">&Sigma; '+fmtTok(it.tokens.total)+(tinput?' &middot; <b style="color:#3fb27f">'+fmtTok(tcached)+' cached</b>':'')+' &middot; <span title="at GPT-5.5 API rates vs the same compute on your $'+PLAN_MONTHLY+'/mo plan (~1/'+Math.round(PLAN_API_VALUE/PLAN_MONTHLY)+'th of API)">~'+fmtCost(mc)+' api &middot; ~'+fmtCost(planCost(tinput,toutput,tcached))+' on plan</span></span>';}
  else{tk.style.display='none';}
- const ma=document.getElementById('mactions');var ah=it?actionList(it).map(function(d){return abtn(it.identifier,d)}).join(''):'';if(ah){ma.style.display='flex';ma.innerHTML=ah;}else{ma.style.display='none';ma.innerHTML='';}}
+ const ma=document.getElementById('mactions');if(it){ma.style.display='flex';ma.innerHTML=actionList(it).map(function(d){return abtn(it.identifier,d)}).join('')+'<button class="mbtn mmore" data-id="'+it.identifier+'" onclick="colMenu(this,event)" title="move this ticket to any column">&#8943;</button>';}else{ma.style.display='none';ma.innerHTML='';}}
 function openModal(id){expandedId=id;document.getElementById('modal').style.display='flex';document.getElementById('logbody').innerHTML='<div class="lg" style="color:var(--mut)">loading&hellip;</div>';syncHead();pullLog();}
 function closeModal(){expandedId=null;document.getElementById('modal').style.display='none';}
 async function postAction(btn,id,action,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
@@ -321,18 +322,14 @@ async function postAction(btn,id,action,ev){if(ev){ev.stopPropagation();ev.preve
 function showToast(msg,isErr){var t=document.getElementById('toast');t.innerHTML=(isErr?'&#10007; ':'&#10003; ')+msg;t.className=(isErr?'err':'ok')+' show';clearTimeout(window._tt);window._tt=setTimeout(function(){t.className=isErr?'err':'ok'},3400);}
 function modalAct(id,action,ev){postAction(null,id,action,ev);}
 let menuFor=null;
-function toggleMenu(btn,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
- var id=btn.getAttribute('data-id');
- if(menuFor===id){closeMenu();return;}
- var it=(snap.items||[]).find(function(x){return x.identifier===id});
- var acts=actionList(it);if(!acts.length){closeMenu();return;}
- var m=document.getElementById('actmenu');
- m.innerHTML=acts.map(function(d){return '<button class="actitem '+(d.c||'')+'" title="'+(d.t||'')+'" onclick="menuAction(\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>'}).join('');
+function showMenu(btn,id,items){if(!items.length){closeMenu();return;}var m=document.getElementById('actmenu');
+ m.innerHTML=items.map(function(d){return '<button class="actitem '+(d.c||'')+'" title="'+(d.t||'')+'" onclick="menuAction(\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>'}).join('');
  m.style.display='flex';m.style.visibility='hidden';
  var r=btn.getBoundingClientRect(),mw=m.offsetWidth,mh=m.offsetHeight;
  var left=Math.max(8,r.right-mw),top=r.bottom+5;if(top+mh>window.innerHeight-8)top=Math.max(8,r.top-mh-5);
- m.style.left=left+'px';m.style.top=top+'px';m.style.visibility='visible';
- menuFor=id;}
+ m.style.left=left+'px';m.style.top=top+'px';m.style.visibility='visible';menuFor=id;}
+function toggleMenu(btn,ev){if(ev){ev.stopPropagation();ev.preventDefault();}var id=btn.getAttribute('data-id');if(menuFor===id){closeMenu();return;}var it=(snap.items||[]).find(function(x){return x.identifier===id});showMenu(btn,id,actionList(it).concat(moveItems(it)));}
+function colMenu(btn,ev){if(ev){ev.stopPropagation();ev.preventDefault();}var id=btn.getAttribute('data-id');if(menuFor===id){closeMenu();return;}var it=(snap.items||[]).find(function(x){return x.identifier===id});showMenu(btn,id,moveItems(it));}
 function menuAction(id,action,ev){if(ev){ev.stopPropagation();ev.preventDefault();}closeMenu();postAction(null,id,action);}
 function closeMenu(){var m=document.getElementById('actmenu');m.style.display='none';m.innerHTML='';menuFor=null;}
 document.addEventListener('click',function(e){if(!e.target.closest('#actmenu')&&!e.target.closest('.kebab'))closeMenu();});

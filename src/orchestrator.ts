@@ -517,6 +517,16 @@ export async function start(workflowPath?: string): Promise<void> {
         log(`action: ${identifier} → ${target} (operator)`)
         return { ok: true, msg: `moved to ${target}` }
       }
+      if (action.startsWith('move:')) {
+        const target = action.slice('move:'.length)
+        stopRun(issue.id) // stop any current turn; keep pin + workspace + thread
+        await moveIssue(cfg, issue.id, target)
+        notesFetched.delete(issue.id)
+        summaries.delete(issue.identifier)
+        scheduleRetry(issue.id, issue.identifier, 1, true) // re-dispatch (resume) if the target is active; the poll idles/cleans up otherwise
+        log(`action: ${identifier} → ${target} (operator move)`)
+        return { ok: true, msg: `moved to ${target}` }
+      }
       return { ok: false, msg: `unknown action: ${action}` }
     } catch (e) {
       return { ok: false, msg: e instanceof Error ? e.message : String(e) }

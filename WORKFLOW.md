@@ -4,7 +4,7 @@ tracker:
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project
   api_key: $LINEAR_API_KEY
   required_labels: [dark-factory]    # opt-in: only tickets carrying this label enter the factory
-  active_states: [Triage, Backlog, Todo, In Progress, QA Requested, QA Verify, QA blocked]   # entry is the label; Ready to ship + Needs human are NOT active (humans handle them)
+  active_states: [Triage, Backlog, Todo, In Progress, QA Requested, QA Verify, QA blocked, Verifying in prod]   # Ready to ship + "Merged: In Staging" + Needs human are NOT active (humans / the release train move those)
   terminal_states: [Done, Canceled, Cancelled, Duplicate, Needs human]   # Needs human = the factory stops + a person must decide
 polling:
   interval_ms: 10000
@@ -14,6 +14,7 @@ phases:                              # a worker hands off to a FRESH agent when 
   qa: [QA Requested]                 # QA CHECK: independent verification + screenshot proof
   verify: [QA Verify]                # VERIFY QA: a 2nd, adversarial agent — did QA test the REAL scenario? is it proven safe?
   unblock: [QA blocked]              # UNBLOCK: triage a stuck ticket — clear the meta-problem or escalate to a human
+  verify_prod: [Verifying in prod]   # VERIFY:PROD: the train shipped it to prod — confirm it's live + healthy, then Done
 roles:                               # the pool — ambient agents on a clock, BESIDE the per-ticket pipeline. Each runs
                                      # on its cadence with a persistent thread + its own model, FILING tickets (never
                                      # fixing). Add a row to add a role; the engine is generic — nothing else changes.
@@ -190,6 +191,21 @@ A QA or verify agent got stuck and parked this here. You are the **unblocker**: 
 3. Record your `Verdict:` line and route:
    - **UNBLOCKED** — you cleared the meta-problem → move back to `QA Requested` so QA can now verify (or to `In Progress` if you proved it genuinely needs a code change, with a precise `[codex]` note of what). `Verdict: UNBLOCKED — <what you cleared and how>`.
    - **NEEDS HUMAN** — it truly requires a person → move to `Needs human`. `Verdict: NEEDS HUMAN — <the single concrete decision or action a person must take>`. Make the ask self-contained.
+
+## VERIFY:PROD — status `Verifying in prod`
+
+The release train just fast-forwarded `prod` to include this ticket's change — it is now **live in production**. You are a **lightweight prod-health check**, not a re-QA (the fix was already verified pre-merge). Your one question: **is the change actually live in prod, and is the surface it touches healthy?** **Do NOT change product code and do NOT open PRs.**
+
+1. Read the workpad — acceptance criteria, the QA verdict, and what shipped (the PR diff + merge SHA). Pick the one concrete thing to confirm in prod.
+2. **Confirm it's live**, by the most direct signal you can get:
+   - A UI-visible change → drive production (`www.bevyl.ai`) with `browser.mjs`, hit the real route, assert the fixed behaviour, and `screenshot` it as proof (note the path in the workpad).
+   - A backend-only change → exercise the touched surface with a `bevops` smoke/eval, or a prod read where your access allows.
+   - Either way, a quick scan of prod error tracking (Sentry / PostHog) for a NEW error spike on the affected surface is always worth doing.
+   - If confirming genuinely needs access you don't have, say so — never infer prod health from a staging result.
+3. Record your **`Verdict:`** line, then route:
+   - **SHIPPED** — confirmed live, no new errors on the touched surface → move to `Done`.
+   - **REGRESSION** — live but it broke something in prod (you reproduced it or saw a clear new error spike) → move to `In Progress` with the exact prod symptom + repro, flagged as a prod regression.
+   - **CANNOT VERIFY** — you genuinely lack the access/observability to confirm → move to `Needs human` with the exact check a person must run.
 
 ## Ready to ship / Needs human / Done / Canceled / Duplicate
 

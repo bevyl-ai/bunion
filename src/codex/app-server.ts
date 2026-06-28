@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { shq } from '../ssh'
+import { commandString, hasShellControl, parseTrustedCodexCommand } from '../security'
+import { shq, sshOptions } from '../ssh'
 import type { AgentEvent, Config, DynamicTool } from '../types'
 
 type Json = Record<string, unknown>
@@ -31,12 +32,14 @@ export class AppServerSession {
   }
 
   async start(workspace: string, host: string | null = null): Promise<void> {
-    // Local: bash `-lc` sources the login profile so codex is on PATH with its auth env. Remote: ssh into the worker
-    // VM and run the same app-server in the VM's workspace — the JSON-RPC stream rides the ssh stdio pipe unchanged,
-    // and a login shell (`exec $SHELL -lc`) puts codex on PATH there too.
+    const [cmd, ...args] = parseTrustedCodexCommand(this.cfg.codex.command)
+    if (!cmd) throw new Error('codex.command is required')
+    const remoteCommand = `exec ${[cmd, ...args].map(shq).join(' ')}`
+    // Local runs the trusted argv directly. Remote still enters a login shell for PATH/auth setup, but only with the
+    // hardcoded trusted command rendered as individually quoted argv.
     const proc = host
-      ? spawn('ssh', ['-o', 'ConnectTimeout=20', '-o', 'ServerAliveInterval=15', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', host, `cd ${shq(workspace)} && exec "$SHELL" -lc ${shq(this.cfg.codex.command)}`], { stdio: ['pipe', 'pipe', 'pipe'] })
-      : spawn('bash', ['-lc', this.cfg.codex.command], { cwd: workspace, stdio: ['pipe', 'pipe', 'pipe'] })
+      ? spawn('ssh', [...sshOptions({ connectTimeoutSeconds: 20, serverAliveIntervalSeconds: 15 }), host, `cd ${shq(workspace)} && exec "$SHELL" -lc ${shq(remoteCommand)}`], { stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawn(cmd, args, { cwd: workspace, stdio: ['pipe', 'pipe', 'pipe'] })
     this.proc = proc
     proc.stdout?.on('data', (d: Buffer) => this.onData(d))
     proc.stderr?.on('data', (d: Buffer) => this.onData(d)) // stderr merged; skip non-JSON lines
@@ -200,7 +203,7 @@ export class AppServerSession {
       await this.handleToolCall(id, params)
       return
     }
-    const decision = autoApprove(method)
+    const decision = approvalDecision(method, params, this.cfg)
     if (decision) {
       this.reply(id, { decision })
       return
@@ -307,11 +310,19 @@ function cmdLabel(item: Json): string {
   return `run: ${s.length > 64 ? `${s.slice(0, 61)}…` : s}`
 }
 
+export { parseTrustedCodexCommand }
+
 // Newer item/* approvals want `acceptForSession`; legacy exec/applyPatch approvals want `approved_for_session`.
-function autoApprove(method: string): string | null {
-  if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') return 'acceptForSession'
-  if (method === 'execCommandApproval' || method === 'applyPatchApproval') return 'approved_for_session'
+export function approvalDecision(method: string, params: Json, cfg: Config): string | null {
+  if (method === 'item/commandExecution/requestApproval') return commandApproval(params, cfg, 'acceptForSession')
+  if (method === 'execCommandApproval') return commandApproval(params, cfg, 'approved_for_session')
   return null
+}
+
+function commandApproval(params: Json, cfg: Config, decision: string): string | null {
+  const command = commandString(params.command ?? params.item ?? params)
+  if (!command || hasShellControl(command)) return null
+  return cfg.codex.approvedCommands.includes(command) ? decision : null
 }
 
 function answerUserInput(params: Json): Json {
@@ -331,8 +342,5 @@ function answerUserInput(params: Json): Json {
 }
 
 function defaultTurnPolicy(_workspace: string): Json {
-  // The agent runs its own git (fetch/commit/push) + gh. codex's workspace-write write-protects .git regardless of
-  // writableRoots, which breaks those, so the agent needs full access to drive git itself. Safe to the extent the
-  // host is trusted — the proper containment is running bunion in a disposable VM (the exedev path).
-  return { type: 'dangerFullAccess' }
+  return { type: 'workspace-write', network_access: true }
 }

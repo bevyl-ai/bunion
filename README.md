@@ -12,7 +12,7 @@ The **host** does three things:
 
 - polls Linear for issues in the configured `active_states`,
 - spawns one `codex app-server` session per issue in an isolated workspace, running turns on a single thread until the ticket leaves the active states, **crosses into a new phase**, or hits `max_turns` (bounded concurrency, continuation/backoff retries, reconcile),
-- answers the agent's `linear_graphql` tool-calls and auto-approves its actions so an unattended run never stalls.
+- answers the agent's `linear_graphql` tool-calls while keeping command/file approvals behind explicit host-side allowlists.
 
 The **agent**, driven by `WORKFLOW.md` and the bundled skills, does everything else. The pipeline is **staged**: the ticket's status decides which phase the agent runs, and when it crosses a phase boundary the worker hands off to a *fresh* agent — so each stage is independent (QA isn't graded by the author). The single state-aware prompt is the state machine; the host just re-dispatches at the boundaries.
 
@@ -63,6 +63,10 @@ The host reads Linear (to poll) and spawns codex; the agent performs all writes.
 export LINEAR_API_KEY=lin_api_xxx
 export LINEAR_TEAM=BEV            # team key; or LINEAR_PROJECT_SLUG to scope to one project
 export REPO=owner/name           # used by the after_create clone hook
+export BUNION_TRUST_WORKFLOW_SHELL=1       # required when WORKFLOW.md defines shell hooks
+# export BUNION_CODEX_DANGER_FULL_ACCESS=1 # only when you deliberately allow danger-full Codex sandboxing
+# export BUNION_SSH_TRUST_ON_FIRST_USE=1   # only for first contact with newly provisioned worker hosts
+# export BUNION_CODEX_APPROVED_COMMANDS=$'git status --short' # optional exact command approvals, newline or ;; separated
 
 bun install
 bunion doctor                    # tools + env + WORKFLOW.md load
@@ -83,7 +87,7 @@ Phases are config (`phases:` in `WORKFLOW.md`) mapping each phase to its Linear 
 
 There is **no automerge**. `Ready to ship` is deliberately not an active state — the agent stops there and a human performs the merge. The `land` skill is still shipped for repos that want agent-driven merging, but this pipeline does not invoke it. For a hard wall around sensitive paths, use GitHub branch protection / CODEOWNERS.
 
-The agent has network access plus `gh` and `linear_graphql`, and Codex runs with `approval_policy: never` (the host auto-approves its command/file/tool requests). Suitable for trusted repos with team-authored tickets.
+The agent has network access plus `gh` and `linear_graphql`. Workflow shell hooks, danger-full Codex sandboxing, SSH trust-on-first-use, and app-server command approvals are all host-side env opt-ins, so editing `WORKFLOW.md` alone cannot grant those controls.
 
 ## Scaling across VMs
 

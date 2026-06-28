@@ -34,10 +34,12 @@ export interface HooksConfig {
   afterRun: string | null
   beforeRemove: string | null
   timeoutMs: number
+  allowShell: boolean
 }
 
 export interface CodexConfig {
   command: string
+  approvedCommands: string[]
   approvalPolicy: string // "never" → auto-approve; passed through to the app-server
   threadSandbox: string // thread/start.params.sandbox (a STRING)
   turnSandboxPolicy: Record<string, unknown> | null // turn/start.params.sandboxPolicy (an OBJECT)

@@ -19,6 +19,7 @@ server:
 workspace:
   root: ~/.bunion/workspaces
 hooks:
+  # Shell hooks are a host-side trust decision: set BUNION_TRUST_WORKFLOW_SHELL=1 before starting bunion.
   # Per-ticket workspace. If the VM has a pre-built template ($HOME/.bunion/repo = full clone + installed deps),
   # make this a cheap git WORKTREE off it (full history, shares git objects), then `bun install` IN the worktree:
   # ~5s on the template's warm cache, hardlinks from it (≈0 extra disk), and — crucially — wires the monorepo's own
@@ -53,7 +54,7 @@ worker:
 codex:
   command: codex --config shell_environment_policy.inherit=all app-server
   approval_policy: never
-  thread_sandbox: danger-full-access     # the agent runs its own git; workspace-write protects .git and breaks it
+  thread_sandbox: danger-full-access     # requires BUNION_CODEX_DANGER_FULL_ACCESS=1; the agent runs its own git
   read_timeout_ms: 15000                 # initialize/handshake; 5s default is too tight when the shared-CPU VM is under load
 deadlock:                                # a ticket looping without progress is auto-moved to `QA blocked` (the unblocker triages it)
   tokens: 20000000                       # 20M tokens spent with no NEW pipeline state reached (once stalled ≥ stall_ms) → blocked

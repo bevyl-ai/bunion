@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { startAgent, type AgentHandle } from './agent-runner'
@@ -8,7 +8,7 @@ import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
 import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment } from './linear'
 import { log, warn } from './log'
-import { remoteHome } from './ssh'
+import { remoteHome, sshOptions } from './ssh'
 import { removeWorkspace } from './workspace'
 import type { Config, Issue, TokenCounts } from './types'
 
@@ -58,8 +58,7 @@ function loadTokens(): TokenTally {
 }
 function saveTokens(t: TokenTally): void {
   try {
-    mkdirSync(dirname(TOKENS_FILE), { recursive: true })
-    writeFileSync(TOKENS_FILE, JSON.stringify(t))
+    privateJsonWrite(TOKENS_FILE, t)
   } catch {
     // best effort; tracking is non-critical
   }
@@ -79,8 +78,7 @@ function loadLogs(): Map<string, string[]> {
 }
 function saveLogs(logs: Map<string, string[]>): void {
   try {
-    mkdirSync(dirname(LOGS_FILE), { recursive: true })
-    writeFileSync(LOGS_FILE, JSON.stringify(Object.fromEntries(logs)))
+    privateJsonWrite(LOGS_FILE, Object.fromEntries(logs))
   } catch {
     // best effort
   }
@@ -104,11 +102,21 @@ function loadThreads(): Map<string, ThreadRec> {
 }
 function saveThreads(m: Map<string, ThreadRec>): void {
   try {
-    mkdirSync(dirname(THREADS_FILE), { recursive: true })
-    writeFileSync(THREADS_FILE, JSON.stringify(Object.fromEntries(m)))
+    privateJsonWrite(THREADS_FILE, Object.fromEntries(m))
   } catch {
     // best effort
   }
+}
+
+export function privateJsonWrite(path: string, value: unknown): void {
+  const dir = dirname(path)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  chmodSync(dir, 0o700)
+  const tmp = join(dir, `.${Date.now()}.${process.pid}.tmp`)
+  writeFileSync(tmp, JSON.stringify(value), { mode: 0o600 })
+  chmodSync(tmp, 0o600)
+  renameSync(tmp, path)
+  chmodSync(path, 0o600)
 }
 
 // Recover threads bunion has no record of (tickets that ran before thread-persistence shipped, or a lost threads.json)
@@ -129,7 +137,7 @@ print(json.dumps(out))
 const BACKFILL_CMD = `echo ${Buffer.from(BACKFILL_PY).toString('base64')} | base64 -d | python3`
 function sshCapture(host: string, cmd: string): Promise<string> {
   return new Promise((resolve) => {
-    const p = spawn('ssh', ['-o', 'ConnectTimeout=15', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', host, cmd], { stdio: ['ignore', 'pipe', 'ignore'] })
+    const p = spawn('ssh', [...sshOptions({ connectTimeoutSeconds: 15 }), host, cmd], { stdio: ['ignore', 'pipe', 'ignore'] })
     let out = ''
     p.stdout?.on('data', (d: Buffer) => {
       out += d.toString()
@@ -588,7 +596,7 @@ export async function start(workflowPath?: string): Promise<void> {
     for (const host of hosts) {
       const list = `${(keepByHost.get(host) ?? []).join(' ')} SMOKE CLONETEST`
       const cmd = `for d in ~/.bunion/workspaces/*/; do [ -d "$d" ] || continue; id=$(basename "$d"); case " ${list} " in *" $id "*) continue;; esac; [ -z "$(find "$d" -maxdepth 0 -mmin -20 2>/dev/null)" ] && rm -rf "$d"; done`
-      spawn('ssh', ['-o', 'ConnectTimeout=15', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', host, cmd], { stdio: 'ignore' }).on('error', () => {})
+      spawn('ssh', [...sshOptions({ connectTimeoutSeconds: 15 }), host, cmd], { stdio: 'ignore' }).on('error', () => {})
     }
     log(`workspace prune swept ${hosts.length} VM(s)`)
   }

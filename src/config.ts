@@ -1,5 +1,6 @@
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { parseTrustedCodexCommand } from './security'
 import { parseWorkflow } from './workflow'
 import type { Config, TrackerConfig } from './types'
 
@@ -14,6 +15,9 @@ function num(v: unknown, dflt: number): number {
 }
 function arr(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+}
+function envArr(name: string): string[] {
+  return (process.env[name] ?? '').split(/\r?\n|;;/).map((s) => s.trim()).filter(Boolean)
 }
 
 // `$VAR` → env; literal otherwise. Missing/empty env → fall back to canonical env, then null.
@@ -82,6 +86,7 @@ export function loadConfig(path?: string): Config {
       afterRun: str(hk.after_run),
       beforeRemove: str(hk.before_remove),
       timeoutMs: num(hk.timeout_ms, 60_000),
+      allowShell: process.env.BUNION_TRUST_WORKFLOW_SHELL === '1',
     },
     agent: {
       maxConcurrentAgents: num(ag.max_concurrent_agents, 10),
@@ -95,6 +100,7 @@ export function loadConfig(path?: string): Config {
     },
     codex: {
       command: str(cx.command) ?? 'codex app-server',
+      approvedCommands: envArr('BUNION_CODEX_APPROVED_COMMANDS'),
       approvalPolicy: str(cx.approval_policy) ?? 'never',
       threadSandbox: str(cx.thread_sandbox) ?? 'workspace-write',
       turnSandboxPolicy: cx.turn_sandbox_policy && typeof cx.turn_sandbox_policy === 'object' && !Array.isArray(cx.turn_sandbox_policy) ? (cx.turn_sandbox_policy as Record<string, unknown>) : null,
@@ -127,7 +133,32 @@ export function phaseOf(cfg: Config, state: string): string {
 export function validateConfig(cfg: Config): void {
   if (!cfg.tracker.kind) throw new Error('tracker.kind is required')
   if (cfg.tracker.kind !== 'linear') throw new Error(`unsupported tracker.kind: ${cfg.tracker.kind}`)
+  validateTrackerEndpoint(cfg.tracker.endpoint)
   if (!cfg.tracker.apiKey) throw new Error('tracker.api_key missing — set LINEAR_API_KEY')
   if (!cfg.tracker.team && !cfg.tracker.projectSlug) throw new Error('scope missing — set tracker.team (LINEAR_TEAM) or tracker.project_slug (LINEAR_PROJECT_SLUG)')
-  if (!cfg.codex.command) throw new Error('codex.command is required')
+  parseTrustedCodexCommand(cfg.codex.command)
+  if (usesDangerFullAccess(cfg.codex) && process.env.BUNION_CODEX_DANGER_FULL_ACCESS !== '1') {
+    throw new Error('danger-full-access requires BUNION_CODEX_DANGER_FULL_ACCESS=1')
+  }
+  if (!cfg.hooks.allowShell && [cfg.hooks.afterCreate, cfg.hooks.beforeRun, cfg.hooks.afterRun, cfg.hooks.beforeRemove].some(Boolean)) {
+    throw new Error('hooks require BUNION_TRUST_WORKFLOW_SHELL=1 because workflow hook bodies run in a shell')
+  }
+}
+
+function usesDangerFullAccess(codex: Config['codex']): boolean {
+  if (codex.threadSandbox === 'danger-full-access') return true
+  const policyType = codex.turnSandboxPolicy?.type
+  return policyType === 'dangerFullAccess' || policyType === 'danger-full-access'
+}
+
+function validateTrackerEndpoint(endpoint: string): void {
+  let url: URL
+  try {
+    url = new URL(endpoint)
+  } catch {
+    throw new Error('tracker.endpoint must be https://api.linear.app/graphql')
+  }
+  if (url.protocol !== 'https:' || url.hostname !== 'api.linear.app' || url.pathname !== '/graphql') {
+    throw new Error('tracker.endpoint must be https://api.linear.app/graphql')
+  }
 }

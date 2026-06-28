@@ -35,8 +35,10 @@ export interface Snapshot {
 
 // A tiny status server: GET /state.json is the live orchestrator snapshot; GET / is a self-contained page that
 // polls it and renders the board (kanban by pipeline stage) + a per-run log modal.
-export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string) => Promise<{ ok: boolean; msg?: string }>, onChat?: (id: string, text: string) => Promise<{ ok: boolean; reply?: string; msg?: string }>): void {
-  Bun.serve({
+export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string) => Promise<{ ok: boolean; msg?: string }>, onChat?: (id: string, text: string) => Promise<{ ok: boolean; reply?: string; msg?: string }>): ReturnType<typeof Bun.serve> {
+  const csrfToken = crypto.randomUUID()
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
     port,
     async fetch(req) {
       const url = new URL(req.url)
@@ -45,6 +47,8 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
       if (url.pathname.startsWith('/transcript/')) return Response.json({ log: getLog(decodeURIComponent(url.pathname.slice('/transcript/'.length))) }, noStore)
       if (url.pathname === '/action' && req.method === 'POST') {
         if (!onAction) return Response.json({ ok: false, msg: 'actions disabled' })
+        const auth = authorizeDashboardMutation(req, csrfToken)
+        if (!auth.ok) return Response.json(auth, { status: 403, headers: noStore.headers })
         let body: { id?: string; action?: string }
         try {
           body = (await req.json()) as { id?: string; action?: string }
@@ -56,6 +60,8 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
       }
       if (url.pathname === '/chat' && req.method === 'POST') {
         if (!onChat) return Response.json({ ok: false, msg: 'chat disabled' })
+        const auth = authorizeDashboardMutation(req, csrfToken)
+        if (!auth.ok) return Response.json(auth, { status: 403, headers: noStore.headers })
         let body: { id?: string; text?: string }
         try {
           body = (await req.json()) as { id?: string; text?: string }
@@ -65,10 +71,40 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
         if (!body.id || !body.text) return Response.json({ ok: false, msg: 'missing id/text' })
         return Response.json(await onChat(body.id, body.text))
       }
-      return new Response(HTML, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
+      return new Response(HTML.replace('__BUNION_CSRF__', csrfToken), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
     },
   })
   log(`dashboard on http://localhost:${port}`)
+  return server
+}
+
+export function authorizeDashboardMutation(req: Request, csrfToken: string): { ok: true } | { ok: false; msg: string } {
+  if (!contentType(req).includes('application/json')) return { ok: false, msg: 'json required' }
+  if (req.headers.get('x-bunion-csrf') !== csrfToken) return { ok: false, msg: 'forbidden' }
+
+  const host = req.headers.get('host') ?? new URL(req.url).host
+  if (!isLocalHost(host)) return { ok: false, msg: 'local host required' }
+
+  const origin = req.headers.get('origin')
+  if (origin) {
+    let originUrl: URL
+    try {
+      originUrl = new URL(origin)
+    } catch {
+      return { ok: false, msg: 'bad origin' }
+    }
+    if (originUrl.host !== host || !isLocalHost(originUrl.host)) return { ok: false, msg: 'bad origin' }
+  }
+  return { ok: true }
+}
+
+function contentType(req: Request): string {
+  return (req.headers.get('content-type') ?? '').toLowerCase()
+}
+
+function isLocalHost(hostPort: string): boolean {
+  const host = hostPort.replace(/:\d+$/, '').replace(/^\[(.*)\]$/, '$1').toLowerCase()
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1'
 }
 
 const HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>bunion</title>
@@ -202,6 +238,7 @@ header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:
 <div id="actmenu"></div>
 <div id="toast"></div>
 <script>
+const BUNION_CSRF='__BUNION_CSRF__';
 const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Requested':'#d99a2b','QA Verify':'#c79a3a','QA blocked':'#e0564f','Needs human':'#d9568c','Ready to ship':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
 const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=Math.floor(s/60);if(m<60)return m+'m '+(s%60)+'s';return Math.floor(m/60)+'h '+(m%60)+'m'};
 const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
@@ -322,7 +359,7 @@ function openModal(id){expandedId=id;chatPending=false;document.getElementById('
 function closeModal(){expandedId=null;document.getElementById('modal').style.display='none';}
 async function postAction(btn,id,action,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
  var box=btn&&btn.parentNode;if(box)box.querySelectorAll('button').forEach(function(x){x.classList.add('busy')});
- try{var r=await (await fetch('/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:id,action:action})})).json();showToast((r&&r.ok)?(id+' &mdash; '+(r.msg||'done')):('Failed: '+((r&&r.msg)||'error')),!(r&&r.ok));}catch(e){showToast('Action failed',true);}
+ try{var r=await (await fetch('/action',{method:'POST',headers:{'content-type':'application/json','x-bunion-csrf':BUNION_CSRF},body:JSON.stringify({id:id,action:action})})).json();showToast((r&&r.ok)?(id+' &mdash; '+(r.msg||'done')):('Failed: '+((r&&r.msg)||'error')),!(r&&r.ok));}catch(e){showToast('Action failed',true);}
  setTimeout(pull,400);setTimeout(pull,1600);}
 function showToast(msg,isErr){var t=document.getElementById('toast');t.innerHTML=(isErr?'&#10007; ':'&#10003; ')+msg;t.className=(isErr?'err':'ok')+' show';clearTimeout(window._tt);window._tt=setTimeout(function(){t.className=isErr?'err':'ok'},3400);}
 function modalAct(id,action,ev){postAction(null,id,action,ev);}
@@ -354,6 +391,6 @@ function logHtml(line){var t=(line||'').replace(/^\\n+/,'');
 var chatPending=false;
 function dotsHtml(label){return '<div class="lg lg-typing"><span class="tdots"><i class="tdot"></i><i class="tdot"></i><i class="tdot"></i></span>'+label+'</div>';}
 async function pullLog(){if(!expandedId)return;var b=document.getElementById('logbody');try{const res=await fetch('/transcript/'+encodeURIComponent(expandedId),{cache:'no-store'});if(!res.ok){b.innerHTML='<div class="lg" style="color:#e0564f">transcript fetch failed ('+res.status+') &mdash; try reloading the page</div>';return;}if((res.headers.get('content-type')||'').indexOf('json')<0){b.innerHTML='<div class="lg" style="color:#e0564f">got a non-JSON response (session/proxy) &mdash; hard-reload the page</div>';return;}const j=await res.json();const atEnd=b.scrollTop+b.clientHeight>=b.scrollHeight-60;b.innerHTML=((j.log&&j.log.length)?j.log.map(logHtml).join(''):(chatPending?'':'<div class="lg" style="color:var(--mut)">(no log yet)</div>'))+(chatPending?dotsHtml('agent is responding&hellip;'):'');if(atEnd||chatPending)b.scrollTop=b.scrollHeight;}catch(e){b.innerHTML='<div class="lg" style="color:#e0564f">couldn\\'t load transcript: '+esc(String((e&&e.message)||e))+'</div>';}}
-async function sendChat(){if(!expandedId)return;var box=document.getElementById('mmsg'),btn=document.getElementById('msend');var text=box.value.trim();if(!text)return;box.value='';box.disabled=true;btn.disabled=true;btn.textContent='\\u2026';chatPending=true;pullLog();try{var r=await (await fetch('/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:expandedId,text:text})})).json();if(!(r&&r.ok))showToast('Chat: '+((r&&r.msg)||'failed'),true);}catch(e){showToast('Chat failed',true);}chatPending=false;box.disabled=false;btn.disabled=false;btn.textContent='Send';pullLog();box.focus();}
+async function sendChat(){if(!expandedId)return;var box=document.getElementById('mmsg'),btn=document.getElementById('msend');var text=box.value.trim();if(!text)return;box.value='';box.disabled=true;btn.disabled=true;btn.textContent='\\u2026';chatPending=true;pullLog();try{var r=await (await fetch('/chat',{method:'POST',headers:{'content-type':'application/json','x-bunion-csrf':BUNION_CSRF},body:JSON.stringify({id:expandedId,text:text})})).json();if(!(r&&r.ok))showToast('Chat: '+((r&&r.msg)||'failed'),true);}catch(e){showToast('Chat failed',true);}chatPending=false;box.disabled=false;btn.disabled=false;btn.textContent='Send';pullLog();box.focus();}
 setInterval(pull,1000);setInterval(tickLive,1000);setInterval(function(){if(expandedId){pullLog();syncHead();}},1000);pull();
 </script></body></html>`

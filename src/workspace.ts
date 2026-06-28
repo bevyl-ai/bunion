@@ -58,7 +58,7 @@ export function removeWorkspace(cfg: Config, identifier: string, host: Host): vo
     return
   }
   if (host) {
-    if (cfg.hooks.beforeRemove) sshExec(host, `cd ${shq(dir)} 2>/dev/null && sh -lc ${shq(cfg.hooks.beforeRemove)}`) // failure ignored
+    if (cfg.hooks.beforeRemove) runHook(cfg, dir, 'before_remove', cfg.hooks.beforeRemove, host) // failure ignored
     sshExec(host, `rm -rf ${shq(dir)}`)
     return
   }
@@ -67,6 +67,7 @@ export function removeWorkspace(cfg: Config, identifier: string, host: Host): vo
 }
 
 export function runHook(cfg: Config, dir: string, name: string, script: string, host: Host): HookResult {
+  if (!cfg.hooks.allowShell) return { ok: false, error: `${name} hook blocked; set BUNION_TRUST_WORKFLOW_SHELL=1 to run workflow shell hooks` }
   if (host) {
     const r = sshExec(host, `cd ${shq(dir)} && sh -lc ${shq(script)}`, cfg.hooks.timeoutMs)
     return r.ok ? { ok: true } : { ok: false, error: `${name} hook failed on ${host}:\n${r.out.trim().slice(-800)}` }

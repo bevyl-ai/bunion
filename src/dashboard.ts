@@ -176,6 +176,11 @@ header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:
 .lg-cmd b{color:#5b8def;font-weight:700;margin-right:3px}
 .lg-tool{color:#d99a2b;font:11.5px/1.45 ui-monospace,Menlo,monospace;padding:2px 0 2px 13px;opacity:.9}
 .lg-edit{color:#b88cd9;font:11.5px/1.45 ui-monospace,Menlo,monospace;padding:2px 0 2px 13px}
+.lg-typing{display:flex;align-items:center;gap:9px;color:var(--mut);font-size:12.5px;margin:10px 0;padding:10px 13px;border-left:2px solid #3a9168;background:var(--surf2);border-radius:8px}
+.tdots{display:inline-flex;gap:4px}
+.tdot{width:6px;height:6px;border-radius:50%;background:#3a9168;animation:tbounce 1.25s infinite ease-in-out}
+.tdot:nth-child(2){animation-delay:.16s}.tdot:nth-child(3){animation-delay:.32s}
+@keyframes tbounce{0%,65%,100%{opacity:.3;transform:translateY(0)}30%{opacity:1;transform:translateY(-4px)}}
 .live{width:7px;height:7px;border-radius:50%;background:#3fb27f;flex:none;animation:pulse 1.5s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 </style></head><body>
@@ -201,7 +206,7 @@ const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progre
 const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=Math.floor(s/60);if(m<60)return m+'m '+(s%60)+'s';return Math.floor(m/60)+'h '+(m%60)+'m'};
 const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
-const fmtTok=n=>{n=n||0;return n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e4?Math.round(n/1e3)+'k':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)};
+const fmtTok=n=>{n=n||0;return n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(n>=1e8?0:1)+'M':n>=1e4?Math.round(n/1e3)+'k':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)};
 // API-equivalent $ at ~GPT-5 rates ($ per 1M tokens). Actual spend is the flat $200/mo Pro plan — this is the would-be cost / value extracted, not what you pay. Tweak the rates if the model differs.
 var COST_IN=5,COST_CACHED=0.5,COST_OUT=30,PLAN_MONTHLY=200;
 function estCost(input,output,cached){var unc=Math.max(0,(input||0)-(cached||0));return (unc*COST_IN+(cached||0)*COST_CACHED+(output||0)*COST_OUT)/1e6;}
@@ -313,7 +318,7 @@ function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId)
  if(it&&it.tokens){var tcached=0,tinput=0,toutput=0;it.tokens.phases.forEach(function(p){tcached+=p.cached;tinput+=p.input;toutput+=p.output});var mc=estCost(tinput,toutput,tcached);tk.style.display='flex';tk.innerHTML='<span class="tklab">tokens</span>'+it.tokens.phases.map(function(p){return '<span class="tkph" title="input '+fmtTok(p.input)+' \\u00b7 output '+fmtTok(p.output)+' \\u00b7 cached '+fmtTok(p.cached)+' \\u00b7 ~'+fmtCost(estCost(p.input,p.output,p.cached))+' API-equiv"><b>'+esc(p.phase)+'</b> '+fmtTok(p.total)+'</span>';}).join('')+'<span class="tktot">&Sigma; '+fmtTok(it.tokens.total)+(tinput?' &middot; <b style="color:#3fb27f">'+fmtTok(tcached)+' cached</b>':'')+' &middot; <span title="at GPT-5.5 API rates vs the same compute on your $'+PLAN_MONTHLY+'/mo plan (~1/'+Math.round(PLAN_API_VALUE/PLAN_MONTHLY)+'th of API)">~'+fmtCost(mc)+' api &middot; ~'+fmtCost(planCost(tinput,toutput,tcached))+' on plan</span></span>';}
  else{tk.style.display='none';}
  const ma=document.getElementById('mactions');if(it){ma.style.display='flex';ma.innerHTML=actionList(it).map(function(d){return abtn(it.identifier,d)}).join('')+'<button class="mbtn mmore" data-id="'+it.identifier+'" onclick="colMenu(this,event)" title="move this ticket to any column">&#8943;</button>';}else{ma.style.display='none';ma.innerHTML='';}}
-function openModal(id){expandedId=id;document.getElementById('modal').style.display='flex';document.getElementById('logbody').innerHTML='<div class="lg" style="color:var(--mut)">loading&hellip;</div>';syncHead();pullLog();}
+function openModal(id){expandedId=id;chatPending=false;document.getElementById('modal').style.display='flex';document.getElementById('logbody').innerHTML=dotsHtml('loading transcript&hellip;');syncHead();pullLog();}
 function closeModal(){expandedId=null;document.getElementById('modal').style.display='none';}
 async function postAction(btn,id,action,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
  var box=btn&&btn.parentNode;if(box)box.querySelectorAll('button').forEach(function(x){x.classList.add('busy')});
@@ -346,7 +351,9 @@ function logHtml(line){var t=(line||'').replace(/^\\n+/,'');
  if(t.indexOf('\\u2699')===0)return '<div class="lg lg-tool">'+esc(t)+'</div>';
  if(t.indexOf('\\u270e')===0)return '<div class="lg lg-edit">'+esc(t)+'</div>';
  return '<div class="lg lg-cmd">'+esc(t)+'</div>';}
-async function pullLog(){if(!expandedId)return;var b=document.getElementById('logbody');try{const res=await fetch('/transcript/'+encodeURIComponent(expandedId),{cache:'no-store'});if(!res.ok){b.innerHTML='<div class="lg" style="color:#e0564f">transcript fetch failed ('+res.status+') &mdash; try reloading the page</div>';return;}if((res.headers.get('content-type')||'').indexOf('json')<0){b.innerHTML='<div class="lg" style="color:#e0564f">got a non-JSON response (session/proxy) &mdash; hard-reload the page</div>';return;}const j=await res.json();const atEnd=b.scrollTop+b.clientHeight>=b.scrollHeight-60;b.innerHTML=(j.log&&j.log.length)?j.log.map(logHtml).join(''):'<div class="lg" style="color:var(--mut)">(no log yet)</div>';if(atEnd)b.scrollTop=b.scrollHeight;}catch(e){b.innerHTML='<div class="lg" style="color:#e0564f">couldn\\'t load transcript: '+esc(String((e&&e.message)||e))+'</div>';}}
-async function sendChat(){if(!expandedId)return;var box=document.getElementById('mmsg'),btn=document.getElementById('msend');var text=box.value.trim();if(!text)return;box.value='';box.disabled=true;btn.disabled=true;btn.textContent='\\u2026';pullLog();try{var r=await (await fetch('/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:expandedId,text:text})})).json();if(!(r&&r.ok))showToast('Chat: '+((r&&r.msg)||'failed'),true);}catch(e){showToast('Chat failed',true);}box.disabled=false;btn.disabled=false;btn.textContent='Send';pullLog();box.focus();}
+var chatPending=false;
+function dotsHtml(label){return '<div class="lg lg-typing"><span class="tdots"><i class="tdot"></i><i class="tdot"></i><i class="tdot"></i></span>'+label+'</div>';}
+async function pullLog(){if(!expandedId)return;var b=document.getElementById('logbody');try{const res=await fetch('/transcript/'+encodeURIComponent(expandedId),{cache:'no-store'});if(!res.ok){b.innerHTML='<div class="lg" style="color:#e0564f">transcript fetch failed ('+res.status+') &mdash; try reloading the page</div>';return;}if((res.headers.get('content-type')||'').indexOf('json')<0){b.innerHTML='<div class="lg" style="color:#e0564f">got a non-JSON response (session/proxy) &mdash; hard-reload the page</div>';return;}const j=await res.json();const atEnd=b.scrollTop+b.clientHeight>=b.scrollHeight-60;b.innerHTML=((j.log&&j.log.length)?j.log.map(logHtml).join(''):(chatPending?'':'<div class="lg" style="color:var(--mut)">(no log yet)</div>'))+(chatPending?dotsHtml('agent is responding&hellip;'):'');if(atEnd||chatPending)b.scrollTop=b.scrollHeight;}catch(e){b.innerHTML='<div class="lg" style="color:#e0564f">couldn\\'t load transcript: '+esc(String((e&&e.message)||e))+'</div>';}}
+async function sendChat(){if(!expandedId)return;var box=document.getElementById('mmsg'),btn=document.getElementById('msend');var text=box.value.trim();if(!text)return;box.value='';box.disabled=true;btn.disabled=true;btn.textContent='\\u2026';chatPending=true;pullLog();try{var r=await (await fetch('/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:expandedId,text:text})})).json();if(!(r&&r.ok))showToast('Chat: '+((r&&r.msg)||'failed'),true);}catch(e){showToast('Chat failed',true);}chatPending=false;box.disabled=false;btn.disabled=false;btn.textContent='Send';pullLog();box.focus();}
 setInterval(pull,1000);setInterval(tickLive,1000);setInterval(function(){if(expandedId){pullLog();syncHead();}},1000);pull();
 </script></body></html>`

@@ -20,17 +20,22 @@ workspace:
   root: ~/.bunion/workspaces
 hooks:
   # Per-ticket workspace. If the VM has a pre-built template ($HOME/.bunion/repo = full clone + installed deps),
-  # make this a cheap git WORKTREE off it (full history, shares git objects) with the template's node_modules
-  # SYMLINKED (one shared 4.9G install, not re-cloned/re-installed per ticket — this kills the install/merge friction).
-  # No template yet → fall back to a clone with enough history for merges. Idempotent + degrades gracefully.
+  # make this a cheap git WORKTREE off it (full history, shares git objects), then `bun install` IN the worktree:
+  # ~5s on the template's warm cache, hardlinks from it (≈0 extra disk), and — crucially — wires the monorepo's own
+  # @kit/* packages to resolve to THIS branch. (Symlinking node_modules from the template pointed @kit/* at main, so
+  # any ticket touching a workspace package silently saw stale types.) No template yet → clone. Degrades gracefully.
   after_create: |
     T="$HOME/.bunion/repo"; W="$PWD"; ok=0
     if [ -f "$T/.template-ready" ]; then
       ( cd "$T" && git fetch --quiet origin 2>/dev/null; git worktree prune 2>/dev/null ) || true
       rm -rf "$W"
       if ( cd "$T" && { git worktree add --force --detach "$W" origin/main 2>/dev/null || git worktree add --force --detach "$W" HEAD 2>/dev/null; } ); then
-        ( cd "$T" && find . -maxdepth 4 -type d -name node_modules -prune 2>/dev/null | while IFS= read -r nm; do r="${nm#./}"; mkdir -p "$W/$(dirname "$r")" 2>/dev/null; ln -sfn "$T/$r" "$W/$r"; done )
-        ok=1; echo "workspace = worktree from template @ $(git -C "$T" rev-parse --short HEAD 2>/dev/null)"
+        ok=1
+        if ( cd "$W" && "$HOME/.bun/bin/bun" install >/dev/null 2>&1 ); then
+          echo "workspace = worktree from template @ $(git -C "$T" rev-parse --short HEAD 2>/dev/null) + bun install"
+        else
+          echo "workspace = worktree @ $(git -C "$T" rev-parse --short HEAD 2>/dev/null) (bun install deferred to agent)"
+        fi
       fi
     fi
     if [ "$ok" != 1 ]; then mkdir -p "$W"; cd "$W"; git clone --depth 100 "https://github.com/$REPO.git" . 2>/dev/null || gh repo clone "$REPO" . -- --depth 100; fi

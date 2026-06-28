@@ -11,7 +11,7 @@ import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIss
 import { log, warn } from './log'
 import { remoteHome } from './ssh'
 import { removeWorkspace } from './workspace'
-import type { Config, Issue, Role, TokenCounts } from './types'
+import type { Config, Issue, Role, RoleQuota, TokenCounts } from './types'
 
 interface RunningEntry {
   issue: Issue
@@ -120,6 +120,34 @@ function saveThreads(m: Map<string, ThreadRec>): void {
   }
 }
 
+// Per-role daily ticket-filing counters, persisted so the cap survives daemon restarts (we redeploy often). Keyed by
+// role name → { day, count }; the day is a UTC date string, so the count resets at UTC midnight.
+const QUOTA_FILE = join(homedir(), '.bunion', 'role-quota.json')
+interface QuotaRec {
+  day: string
+  count: number
+}
+function loadQuota(): Map<string, QuotaRec> {
+  try {
+    const v = JSON.parse(readFileSync(QUOTA_FILE, 'utf8'))
+    if (v && typeof v === 'object') return new Map(Object.entries(v) as [string, QuotaRec][])
+  } catch {
+    // none yet
+  }
+  return new Map()
+}
+function saveQuota(m: Map<string, QuotaRec>): void {
+  try {
+    mkdirSync(dirname(QUOTA_FILE), { recursive: true })
+    writeFileSync(QUOTA_FILE, JSON.stringify(Object.fromEntries(m)))
+  } catch {
+    // best effort
+  }
+}
+function utcDay(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
 // Recover threads bunion has no record of (tickets that ran before thread-persistence shipped, or a lost threads.json)
 // by reading codex's own threads DB on each worker, keyed by the ticket's workspace cwd. Read-only + best-effort.
 const BACKFILL_PY = `
@@ -170,6 +198,24 @@ export async function start(workflowPath?: string): Promise<void> {
   let backfilled = false // one-shot: recover unknown threads from worker rollouts on the first board
   const roleRunning = new Map<string, RoleEntry>() // role name → its current run (the pool — ambient agents)
   const roleLast = new Map<string, number>() // role name → last completed run (ms)
+  const roleQuota = loadQuota() // role name → today's filed-ticket count, persisted (survives restarts)
+  const countToday = (name: string): number => {
+    const r = roleQuota.get(name)
+    return r && r.day === utcDay() ? r.count : 0
+  }
+  // A role's live daily budget — the tool calls remaining()/record() during a run, so the cap holds within a run, across
+  // runs, and across restarts. limit null (no max_per_day) = unlimited, no enforcement.
+  const makeQuota = (role: Role): RoleQuota => ({
+    limit: role.maxPerDay,
+    remaining: () => (role.maxPerDay == null ? Infinity : Math.max(0, role.maxPerDay - countToday(role.name))),
+    record: () => {
+      const day = utcDay()
+      const r = roleQuota.get(role.name)
+      if (r && r.day === day) r.count++
+      else roleQuota.set(role.name, { day, count: 1 })
+      saveQuota(roleQuota)
+    },
+  })
   const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
   const summaries = new Map<string, string>() // last agent message per ticket — survives the log buffer, surfaces the human action
   const tokens = loadTokens() // identifier → phase → cumulative token counts; persisted across restarts
@@ -555,6 +601,11 @@ export async function start(workflowPath?: string): Promise<void> {
   }
   const dispatchRole = (role: Role, i: number): void => {
     if (roleRunning.has(role.name)) return // last cadence's run still going — skip this tick
+    const quota = makeQuota(role)
+    if (quota.remaining() <= 0) {
+      log(`◆ role ${role.name} skip — daily quota reached (${role.maxPerDay}/${role.maxPerDay}); resumes at UTC midnight`)
+      return
+    }
     const host = roleHostFor(role, i)
     if (!logs.has(role.name)) logs.set(role.name, [])
     const acc = ((tokens[role.name] ??= {}).pool ??= zeroCounts())
@@ -595,6 +646,7 @@ export async function start(workflowPath?: string): Promise<void> {
         }
       },
       threadRecs.get(`role:${role.name}`)?.threadId ?? null,
+      quota,
     )
     void entry.handle.done.then((o) => {
       roleRunning.delete(role.name)
@@ -616,6 +668,8 @@ export async function start(workflowPath?: string): Promise<void> {
       startedAt: e?.startedAt ?? 0,
       lastActivity: e?.lastActivity ?? 0,
       lastRunAt: roleLast.get(role.name) ?? null,
+      filedToday: countToday(role.name),
+      maxPerDay: role.maxPerDay,
     }
   }
 

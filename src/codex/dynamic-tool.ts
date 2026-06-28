@@ -1,5 +1,5 @@
 import { graphql } from '../linear'
-import type { Config, DynamicTool } from '../types'
+import type { Config, DynamicTool, RoleQuota } from '../types'
 
 const DESCRIPTION =
   'Execute a single raw GraphQL query or mutation against Linear, reusing the configured tracker auth. ' +
@@ -19,7 +19,7 @@ const INPUT_SCHEMA = {
 // body. This is how the agent drives Linear (state, the workpad, links). When an OAuth app token is configured, the
 // agent acts AS the app ("Bevyl Factory") and each phase's comments are stamped with its own name via createAsUser
 // ("bunion-<phase> (via Bevyl Factory)"). `phase` is the worker's current pipeline phase.
-export function linearGraphqlTool(cfg: Config, phase?: string | null): DynamicTool {
+export function linearGraphqlTool(cfg: Config, phase?: string | null, quota?: RoleQuota): DynamicTool {
   const appToken = cfg.tracker.appToken
   const actorName = phase ? `bunion-${phase}` : null
   return {
@@ -30,6 +30,12 @@ export function linearGraphqlTool(cfg: Config, phase?: string | null): DynamicTo
       const token = appToken ?? cfg.tracker.apiKey
       if (!token) return fail('missing_linear_api_token')
       let { query, variables } = norm
+      // Daily ticket-filing cap (pool roles): refuse an issueCreate over the role's budget. The orchestrator persists
+      // the count, so the cap holds live within a run, across runs, and across daemon restarts.
+      const isCreate = quota?.limit != null && /\bissueCreate\b/.test(query)
+      if (isCreate && quota && quota.remaining() <= 0) {
+        return fail(`daily_ticket_quota_reached: today's limit of ${quota.limit} new tickets for this role is reached — do not create more issues today; stop filing.`)
+      }
       // Stamp the phase name onto new comments (only when acting as the app, and only if the agent didn't set one).
       if (appToken && actorName && /\bcommentCreate\b/.test(query) && !hasCreateAsUser(query, variables)) {
         ;({ query, variables } = injectCreateAsUser(query, variables, actorName))
@@ -38,6 +44,10 @@ export function linearGraphqlTool(cfg: Config, phase?: string | null): DynamicTo
         const r = await graphql(cfg, query, variables, token)
         const errs = (r.body as { errors?: unknown }).errors
         const success = r.httpOk && !(Array.isArray(errs) && errs.length > 0)
+        if (isCreate && quota && success) {
+          const ic = (r.body as { data?: { issueCreate?: { success?: boolean } } }).data?.issueCreate
+          if (!ic || ic.success !== false) quota.record() // count the filed ticket toward today's total
+        }
         return { success, output: JSON.stringify(r.body, null, 2) }
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e))

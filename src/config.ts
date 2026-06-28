@@ -100,7 +100,7 @@ export function loadConfig(path?: string): Config {
     phases: Object.fromEntries(Object.entries(obj(fm.phases)).map(([k, v]) => [k, arr(v)])),
     roles: (Array.isArray(fm.roles) ? fm.roles : [])
       .map(obj)
-      .map((r) => ({ name: (str(r.name) ?? '').trim(), cadenceMs: parseCadence(r.cadence), prompt: str(r.prompt) ?? '', model: str(r.model) }))
+      .map((r) => ({ name: (str(r.name) ?? '').trim(), cadenceMs: parseCadence(r.cadence), prompt: str(r.prompt) ?? '', model: str(r.model), maxPerDay: typeof r.max_per_day === 'number' && Number.isFinite(r.max_per_day) ? r.max_per_day : null }))
       .filter((r) => r.name && r.prompt && r.cadenceMs > 0),
     worker: {
       sshHosts: arr(wk.ssh_hosts).length ? arr(wk.ssh_hosts) : envHosts,

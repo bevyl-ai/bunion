@@ -33,6 +33,8 @@ export interface RoleItem {
   startedAt: number
   lastActivity: number
   lastRunAt: number | null
+  filedToday: number
+  maxPerDay: number | null
 }
 
 export interface Snapshot {
@@ -329,13 +331,15 @@ function tickLive(){
 }
 function roleColor(n){n=(n||'').toLowerCase();return n==='mechanic'?'#d99a2b':n==='dreamer'?'#b88cd9':'#5b8def';}
 function roleCard(r){var live=r.status==='running',col=roleColor(r.name),dc=live?'#3fb27f':'var(--mut2)';
- var stat=live?'working':(r.lastRunAt?'last run '+ago(Date.now()-r.lastRunAt)+' ago':'idle');
- var act=live?esc((r.activity||'working\\u2026').slice(0,120)):'<span style="color:var(--mut2)">waiting for next run</span>';
- return '<div class="rcard" data-role="'+esc(r.name)+'" style="border-left-color:'+col+'"><div class="rtop"><span class="rname" style="color:'+col+'">'+esc(r.name)+'</span>'+(r.model?'<span class="rmodel">'+esc(r.model)+'</span>':'')+'<span class="rstat"><i class="dot" style="background:'+dc+'"></i>'+stat+'</span></div><div class="ract">'+act+'</div><div class="rfoot">&#8635; every '+ago(r.cadenceMs)+(r.tokens?' &middot; &#931; '+fmtTok(r.tokens)+' tok':'')+(r.host?' &middot; '+esc(r.host.replace(/\\.exe\\.xyz$/,'')):'')+'</div></div>';}
+ var capped=r.maxPerDay!=null&&r.filedToday>=r.maxPerDay;
+ var stat=live?'working':(capped?'capped today':(r.lastRunAt?'last run '+ago(Date.now()-r.lastRunAt)+' ago':'idle'));
+ var act=live?esc((r.activity||'working\\u2026').slice(0,120)):'<span style="color:var(--mut2)">'+(capped?'daily cap reached &middot; resumes at UTC midnight':'waiting for next run')+'</span>';
+ return '<div class="rcard" data-role="'+esc(r.name)+'" style="border-left-color:'+col+'"><div class="rtop"><span class="rname" style="color:'+col+'">'+esc(r.name)+'</span>'+(r.model?'<span class="rmodel">'+esc(r.model)+'</span>':'')+'<span class="rstat"><i class="dot" style="background:'+dc+'"></i>'+stat+'</span></div><div class="ract">'+act+'</div><div class="rfoot">&#8635; every '+ago(r.cadenceMs)+(r.maxPerDay!=null?' &middot; <span style="color:'+(capped?'#d99a2b':'var(--mut2)')+'">'+r.filedToday+'/'+r.maxPerDay+' today</span>':'')+(r.tokens?' &middot; &#931; '+fmtTok(r.tokens)+' tok':'')+(r.host?' &middot; '+esc(r.host.replace(/\\.exe\\.xyz$/,'')):'')+'</div></div>';}
 function renderDock(){var d=document.getElementById('dock');var roles=(snap.roles||[]);if(!roles.length){d.style.display='none';d.innerHTML='';return;}d.style.display='block';d.innerHTML='<div class="docklab">&#9670; the pool &middot; always-on</div><div class="dockrow">'+roles.map(roleCard).join('')+'</div>';}
 function renderRoleHead(r){var live=r.status==='running';
  document.getElementById('mtitle').innerHTML='<span style="text-transform:capitalize;color:'+roleColor(r.name)+'">'+esc(r.name)+'</span> <span class="pill" style="color:var(--mut);background:#8b929e1a">pool role</span>'+(r.model?' <span class="pill" style="color:var(--mut2);background:#8b929e14;font-family:ui-monospace,Menlo,monospace">'+esc(r.model)+'</span>':'');
  var meta=['<span class="m">'+(live?'<i class="dot" style="background:#3fb27f"></i>working':'<i class="dot" style="background:var(--mut2)"></i>idle')+'</span>','<span class="m">&#8635; every '+ago(r.cadenceMs)+'</span>'];
+ if(r.maxPerDay!=null)meta.push('<span class="m">'+r.filedToday+'/'+r.maxPerDay+' filed today</span>');
  if(r.lastRunAt)meta.push('<span class="m">last run '+ago(Date.now()-r.lastRunAt)+' ago</span>');
  if(r.tokens)meta.push('<span class="m">&#931; '+fmtTok(r.tokens)+' tok</span>');
  if(r.host)meta.push('<span class="m">&#9709; '+esc(r.host.replace(/\\.exe\\.xyz$/,''))+'</span>');

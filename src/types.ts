@@ -54,6 +54,15 @@ export interface Role {
   cadenceMs: number // how often this role runs
   prompt: string // the standing mission, sent as the turn each run
   model: string | null // codex model for this role's turns; null = the worker default
+  maxPerDay: number | null // max tickets this role may file per UTC day; null = unlimited
+}
+
+// A role's daily ticket-filing budget. The orchestrator owns the persisted per-day counter; the linear_graphql tool
+// enforces it live (refuses an issueCreate over the cap) and records each filed ticket toward the day's total.
+export interface RoleQuota {
+  limit: number | null // tickets/day; null = unlimited (no enforcement)
+  remaining(): number // how many the role may still file today (Infinity if unlimited)
+  record(): void // count one filed ticket toward today's total (persists)
 }
 
 export interface Config {

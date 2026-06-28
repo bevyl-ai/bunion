@@ -2,7 +2,7 @@ import { AppServerSession } from './codex/app-server'
 import { linearGraphqlTool } from './codex/dynamic-tool'
 import { log } from './log'
 import { ensureWorkspace, installSkills, removeWorkspace, runHook } from './workspace'
-import type { AgentEvent, Config, Role } from './types'
+import type { AgentEvent, Config, Role, RoleQuota } from './types'
 
 export interface RoleHandle {
   done: Promise<{ ok: boolean; error?: string }>
@@ -13,7 +13,7 @@ export interface RoleHandle {
 // thread — resuming the role's prior thread so it remembers what it filed last time. The role drives Linear (file/tag
 // tickets) through the same dynamic tool the pipeline uses; the resume falls back to a fresh thread if it fails so a
 // role is never wedged. The orchestrator schedules the next run on the role's cadence.
-export function startRole(cfg: Config, role: Role, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null): RoleHandle {
+export function startRole(cfg: Config, role: Role, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null, quota: RoleQuota): RoleHandle {
   let session: AppServerSession | null = null
   let stopped = false
   const wsKey = `role-${role.name}`
@@ -39,7 +39,7 @@ export function startRole(cfg: Config, role: Role, host: string | null, onEvent:
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
 
-    session = new AppServerSession(cfg, [linearGraphqlTool(cfg, role.name)], onEvent)
+    session = new AppServerSession(cfg, [linearGraphqlTool(cfg, role.name, quota)], onEvent)
     try {
       await session.start(dir, host)
       let threadId: string
@@ -53,7 +53,7 @@ export function startRole(cfg: Config, role: Role, host: string | null, onEvent:
       onEvent({ threadId })
       if (stopped) return { ok: false, error: 'terminated' }
       onEvent({ log: '\n── run ──' })
-      await session.runTurn(threadId, dir, role.prompt, `role:${role.name}`, undefined, role.model)
+      await session.runTurn(threadId, dir, budgetNote(role, quota) + role.prompt, `role:${role.name}`, undefined, role.model)
       return { ok: true }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -73,4 +73,14 @@ export function startRole(cfg: Config, role: Role, host: string | null, onEvent:
       session?.stop()
     },
   }
+}
+
+// A per-run preface telling the role its remaining daily ticket budget, so it self-limits gracefully (the tool also
+// enforces it hard). Empty when the role has no cap.
+function budgetNote(role: Role, quota: RoleQuota): string {
+  if (quota.limit == null) return ''
+  const rem = quota.remaining()
+  return rem <= 0
+    ? `Daily ticket budget: you have hit today's limit of ${quota.limit} new tickets — file NOTHING this run. Briefly report what you found, then stop.\n\n`
+    : `Daily ticket budget: you may file at most ${rem} new ticket${rem === 1 ? '' : 's'} today (cap ${quota.limit}/day). Spend it on the highest-value items only; if nothing clears that bar, file fewer or none. The host enforces this cap.\n\n`
 }

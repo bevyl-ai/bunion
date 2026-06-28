@@ -33,6 +33,7 @@ roles:                               # the pool — ambient agents on a clock, B
   - name: dreamer
     cadence: 4h
     model: gpt-5.5
+    max_per_day: 10                    # hard cap: at most 10 new tickets/day (UTC), enforced host-side + in the prompt
     prompt: |
       You are the factory's dreamer — find the next thing worth building and FILE it. Each run, look outward: the
       product, the codebase, what shipped recently, the obvious gaps. Propose a few high-leverage improvements —

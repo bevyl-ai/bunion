@@ -78,12 +78,16 @@ export class AppServerSession {
   }
 
   async startThread(workspace: string): Promise<string> {
-    const res = await this.request('thread/start', {
-      approvalPolicy: this.cfg.codex.approvalPolicy,
-      sandbox: this.cfg.codex.threadSandbox,
-      cwd: workspace,
-      dynamicTools: [...this.tools.values()].map((t) => t.spec),
-    })
+    const res = await this.request(
+      'thread/start',
+      {
+        approvalPolicy: this.cfg.codex.approvalPolicy,
+        sandbox: this.cfg.codex.threadSandbox,
+        cwd: workspace,
+        dynamicTools: [...this.tools.values()].map((t) => t.spec),
+      },
+      this.cfg.codex.initTimeoutMs, // thread setup on a cold/loaded VM exceeds the steady-state read timeout
+    )
     const id = (res.thread as Json | undefined)?.id
     if (typeof id !== 'string') throw new CategorizedError('invalid_workspace_cwd', 'thread/start: missing thread id')
     return id
@@ -93,7 +97,7 @@ export class AppServerSession {
   // process continues the same conversation. The rollout must live in this machine's ~/.codex — i.e. resume runs on
   // the worker that originally ran the thread. cwd does not need to match the original.
   async resumeThread(threadId: string): Promise<string> {
-    const res = await this.request('thread/resume', { threadId })
+    const res = await this.request('thread/resume', { threadId }, this.cfg.codex.initTimeoutMs) // resuming a big rollout on a cold VM exceeds the read timeout
     const id = (res.thread as Json | undefined)?.id
     if (typeof id !== 'string') throw new CategorizedError('invalid_workspace_cwd', 'thread/resume: missing thread id')
     return id

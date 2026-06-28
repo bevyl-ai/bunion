@@ -706,6 +706,9 @@ export async function start(workflowPath?: string): Promise<void> {
       const h = placement.get(id)
       if (h) keep(h, r.identifier)
     }
+    // After a restart `running`/`retries` are empty but in-flight tickets still own workspaces on unknown hosts — keep
+    // every active-board ticket on ALL hosts so the sweep can't delete a dir a re-dispatch is about to reuse.
+    for (const i of lastBoard) for (const h of hosts) keep(h, i.identifier)
     for (const host of hosts) {
       const list = `${(keepByHost.get(host) ?? []).join(' ')} SMOKE CLONETEST`
       const cmd = `for d in ~/.bunion/workspaces/*/; do [ -d "$d" ] || continue; id=$(basename "$d"); case " ${list} " in *" $id "*) continue;; esac; [ -z "$(find "$d" -maxdepth 0 -mmin -20 2>/dev/null)" ] && rm -rf "$d"; done`
@@ -715,7 +718,8 @@ export async function start(workflowPath?: string): Promise<void> {
   }
   if (cfg.worker.sshHosts.length) {
     setInterval(pruneWorkspaces, 20 * 60 * 1000)
-    pruneWorkspaces() // §8.6: immediate startup sweep so stale (terminal/abandoned) workspaces don't wait 20min to clear
+    // The first sweep runs from the once-on-first-board block below (after lastBoard is populated), NOT immediately — an
+    // immediate sweep on a fresh restart has empty running/retries + board, so it would delete in-flight dirs and race re-dispatch.
   }
 
   for (;;) {
@@ -750,6 +754,7 @@ export async function start(workflowPath?: string): Promise<void> {
       if (!backfilled) {
         backfilled = true
         void runBackfill(board)
+        pruneWorkspaces() // §8.6: first sweep now that the board is known, so in-flight workspaces are protected
       }
       // Surface WHY a ticket is stuck: pull its workpad Verdict for the blocked + needs-human states (not while an
       // agent is live on it — its own messages fill the note then). Clear a cached note when a ticket changes state

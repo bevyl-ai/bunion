@@ -518,6 +518,16 @@ export async function start(workflowPath?: string): Promise<void> {
       log(`action: granted ${identifier} +${role.maxPerDay} tickets for today (operator)`)
       return { ok: true, msg: `${identifier} +${role.maxPerDay} granted for today` }
     }
+    if (action === 'run') {
+      // Operator manual run: dispatch a pool role NOW, skipping its cadence wait + the daily-cap gate (the
+      // linear_graphql tool still enforces filing limits, so a capped role runs + reports but files nothing).
+      const i = cfg.roles.findIndex((r) => r.name === identifier)
+      if (i < 0) return { ok: false, msg: `unknown role: ${identifier}` }
+      if (paused) return { ok: false, msg: 'factory is paused — resume first' }
+      if (roleRunning.has(identifier)) return { ok: false, msg: `${identifier} is already running` }
+      dispatchRole(cfg.roles[i]!, i, true)
+      return { ok: true, msg: `${identifier} run started` }
+    }
     const issue = lastBoard.find((i) => i.identifier === identifier)
     if (!issue) return { ok: false, msg: 'ticket not on the board' }
     const host = placement.get(issue.id) ?? null
@@ -567,11 +577,11 @@ export async function start(workflowPath?: string): Promise<void> {
     const hs = hosts()
     return hs.length ? (hs[i % hs.length] ?? null) : null
   }
-  const dispatchRole = (role: Role, i: number): void => {
+  const dispatchRole = (role: Role, i: number, force = false): void => {
     if (paused) return // operator panic switch — no role runs while paused
     if (roleRunning.has(role.name)) return // last cadence's run still going — skip this tick
     const quota = makeQuota(role)
-    if (quota.remaining() <= 0) {
+    if (!force && quota.remaining() <= 0) {
       log(`◆ role ${role.name} skip — daily quota reached (${role.maxPerDay}/${role.maxPerDay}); resumes at UTC midnight`)
       return
     }

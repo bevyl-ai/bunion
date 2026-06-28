@@ -76,6 +76,7 @@ export interface AgentEvent {
   label?: string
   log?: string
   tokens?: TokenCounts
+  threadId?: string // emitted once when the agent's codex thread is created or resumed, so the orchestrator persists it
 }
 
 // A host-side dynamic tool offered to the agent over the app-server (e.g. linear_graphql).

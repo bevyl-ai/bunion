@@ -29,7 +29,7 @@ function continuationPrompt(turn: number, maxTurns: number): string {
 // One worker session for an issue: prep workspace → run turns on a single app-server thread up to max_turns,
 // refreshing the issue between turns and continuing while it stays active. The AGENT drives Linear/git/gh/merge.
 // `host` null = run locally; else the workspace, clone, and codex all live on that ssh worker (an exe.dev VM).
-export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, directive: string | null, onEvent: (e: AgentEvent) => void): AgentHandle {
+export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null): AgentHandle {
   let session: AppServerSession | null = null
   let stopped = false
 
@@ -60,12 +60,23 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
     let current = issue
     try {
       await session.start(dir, host)
-      const threadId = await session.startThread(dir)
+      // One thread per ticket: resume the prior phase's / operator-chat's thread so its full context carries into
+      // this phase. Fall back to a fresh thread if resume fails (rollout gone, version skew) so a ticket is never
+      // wedged by a bad resume.
+      let threadId: string
+      try {
+        threadId = existingThreadId ? await session.resumeThread(existingThreadId) : await session.startThread(dir)
+      } catch (e) {
+        if (!existingThreadId) throw e
+        log(`${issue.identifier}: thread resume failed (${e instanceof Error ? e.message : String(e)}); starting fresh`)
+        threadId = await session.startThread(dir)
+      }
+      onEvent({ threadId }) // report the resolved id so the orchestrator persists it for the next phase + chat
       const startPhase = phaseOf(cfg, current.state)
       for (let turn = 1; ; turn++) {
         if (stopped) return { ok: false, error: 'terminated' }
         onEvent({ turn, log: `\n── turn ${turn} ──` })
-        const prompt = turn === 1 ? renderPrompt(cfg.promptTemplate, { attempt, issue: current, directive }) : continuationPrompt(turn, cfg.agent.maxTurns)
+        const prompt = turn === 1 ? renderPrompt(cfg.promptTemplate, { attempt, issue: current }) : continuationPrompt(turn, cfg.agent.maxTurns)
         await session.runTurn(threadId, dir, prompt, `${current.identifier}: ${current.title}`)
         current = await fetchById(cfg, issue.id)
         if (!isActive(cfg, current.state)) break // handed off to a downstream state — this worker is done

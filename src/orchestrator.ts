@@ -3,11 +3,12 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { startAgent, type AgentHandle } from './agent-runner'
+import { AppServerSession } from './codex/app-server'
 import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
 import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment } from './linear'
 import { log, warn } from './log'
-import { removeWorkspace } from './workspace'
+import { removeWorkspace, workspaceDir } from './workspace'
 import type { Config, Issue, TokenCounts } from './types'
 
 interface RunningEntry {
@@ -84,6 +85,31 @@ function saveLogs(logs: Map<string, string[]>): void {
   }
 }
 
+// One codex thread per ticket, persisted (issue.id → thread + the worker holding its rollout) so the next phase and
+// operator chat resume the same conversation — and so a resume lands on the right worker after a daemon restart.
+const THREADS_FILE = join(homedir(), '.bunion', 'threads.json')
+interface ThreadRec {
+  threadId: string
+  host: string | null
+}
+function loadThreads(): Map<string, ThreadRec> {
+  try {
+    const v = JSON.parse(readFileSync(THREADS_FILE, 'utf8'))
+    if (v && typeof v === 'object') return new Map(Object.entries(v) as [string, ThreadRec][])
+  } catch {
+    // none yet
+  }
+  return new Map()
+}
+function saveThreads(m: Map<string, ThreadRec>): void {
+  try {
+    mkdirSync(dirname(THREADS_FILE), { recursive: true })
+    writeFileSync(THREADS_FILE, JSON.stringify(Object.fromEntries(m)))
+  } catch {
+    // best effort
+  }
+}
+
 // The thin harness. Poll the tracker's active states, dispatch a Codex worker per issue (bounded), reconcile
 // running issues against the tracker, and retry. It never touches Linear state or git — the AGENT does, via the
 // workflow prompt + skills. Faithful to Symphony's orchestrator (SSH pool, blocked-state, dashboard omitted).
@@ -101,13 +127,14 @@ export async function start(workflowPath?: string): Promise<void> {
 
   const logs = loadLogs() // per-identifier run log; loaded from disk so handed-off tickets keep their log
   let lastLogSave = 0
+  const threadRecs = loadThreads() // issue.id → { codex threadId, host } — the persistent thread per ticket
+  let lastThreadSave = 0
   const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
   const summaries = new Map<string, string>() // last agent message per ticket — survives the log buffer, surfaces the human action
   const tokens = loadTokens() // identifier → phase → cumulative token counts; persisted across restarts
   let lastTokenSave = 0
   const notesFetched = new Set<string>() // stuck tickets whose verdict comment we've pulled once for display
   const lastState = new Map<string, string>() // last-seen Linear state per ticket — drops a stale note on transition
-  const directives = new Map<string, string>() // operator directive to inject into a ticket's next dispatch (one-shot)
   // Deadlock detection. `progress` is a forward-progress clock per ticket: it resets whenever the ticket reaches a
   // pipeline state it hasn't been in this lifecycle; while it sits in already-seen states it burns down. A ticket
   // that spends tokens/time without resetting is looping → auto-block it. `deadlocked` remembers a first offense so
@@ -133,6 +160,10 @@ export async function start(workflowPath?: string): Promise<void> {
     if (hosts().length === 0) return null
     const pinned = placement.get(id)
     if (pinned && hosts().includes(pinned)) return pinned
+    // Resume lands where the rollout lives: prefer the worker holding this ticket's thread (e.g. after a restart
+    // dropped the in-memory pin), if it has a free slot; else fall back to spreading.
+    const held = threadRecs.get(id)?.host
+    if (held && hosts().includes(held) && (hostCounts.get(held) ?? 0) < cfg.worker.maxPerHost) return held
     // Spread, don't pack: of the hosts with a free slot, take the least-loaded so VMs fill evenly.
     const free = hosts().filter((h) => (hostCounts.get(h) ?? 0) < cfg.worker.maxPerHost)
     if (free.length === 0) return undefined
@@ -161,15 +192,21 @@ export async function start(workflowPath?: string): Promise<void> {
     clearRetry(id)
     freePlacement(id)
   }
-  const terminate = (id: string, cleanup: boolean): void => {
+  // Stop a ticket's running session but KEEP its pin + workspace + thread, so a follow-up dispatch resumes it on the
+  // same worker (the operator-transition path). terminate() additionally releases the pin (and optionally wipes).
+  const stopRun = (id: string): void => {
     const e = running.get(id)
-    const host = placement.get(id) ?? null
     if (e) {
       e.handle.stop()
       running.delete(id)
     }
     claimed.delete(id)
     clearRetry(id)
+  }
+  const terminate = (id: string, cleanup: boolean): void => {
+    const e = running.get(id)
+    const host = placement.get(id) ?? null
+    stopRun(id)
     freePlacement(id)
     if (cleanup && e) removeWorkspace(cfg, e.issue.identifier, host)
   }
@@ -201,12 +238,18 @@ export async function start(workflowPath?: string): Promise<void> {
     const entry: RunningEntry = { issue, handle: undefined as unknown as AgentHandle, retryAttempt: attempt > 0 ? attempt : 0, startedAt: Date.now(), lastActivity: Date.now(), turn: 0, activity: 'starting…', host, phase: phaseOf(cfg, issue.state), tokenBase: zeroCounts() }
     running.set(issue.id, entry)
     log(`→ ${issue.identifier} (${issue.state})${attempt > 0 ? ` retry#${attempt}` : ''}${host ? ` @ ${host}` : ''}`)
-    const directive = directives.get(issue.id) ?? null
-    directives.delete(issue.id) // one-shot: consumed by this dispatch's first turn (the comment is the durable fallback)
-    entry.handle = startAgent(cfg, issue, attempt > 0 ? attempt : null, host, directive, (e) => {
+    entry.handle = startAgent(cfg, issue, attempt > 0 ? attempt : null, host, (e) => {
       entry.lastActivity = Date.now()
       if (e.turn != null) entry.turn = e.turn
       if (e.label != null) entry.activity = e.label
+      if (e.threadId) {
+        threadRecs.set(issue.id, { threadId: e.threadId, host })
+        const tt = Date.now()
+        if (tt - lastThreadSave > 3000) {
+          lastThreadSave = tt
+          saveThreads(threadRecs)
+        }
+      }
       if (e.log != null) {
         const arr = logs.get(issue.identifier)
         if (arr) {
@@ -232,7 +275,7 @@ export async function start(workflowPath?: string): Promise<void> {
           saveTokens(tokens)
         }
       }
-    })
+    }, threadRecs.get(issue.id)?.threadId ?? null)
     void entry.handle.done.then((outcome) => {
       if (running.get(issue.id) !== entry) return // already terminated by reconcile
       running.delete(issue.id)
@@ -371,43 +414,82 @@ export async function start(workflowPath?: string): Promise<void> {
       totalCached,
     }
   }
-  // Operator actions from the dashboard buttons. to-qa / to-build move the Linear state + wipe the workspace (fresh
-  // skills) so the next poll re-dispatches cleanly; restart re-runs in place; all stop any current session first.
-  const onAction = async (identifier: string, action: string, directive?: string): Promise<{ ok: boolean; msg?: string }> => {
+  // Operator chat: reopen the ticket's thread on its worker and run ONE read-only turn with the operator's message,
+  // appending both sides to the ticket's transcript (the log). Idle tickets only — a running agent owns the thread.
+  const onChat = async (identifier: string, text: string): Promise<{ ok: boolean; reply?: string; msg?: string }> => {
+    const msg = text.trim()
+    if (!msg) return { ok: false, msg: 'empty message' }
+    const issue = lastBoard.find((i) => i.identifier === identifier)
+    if (!issue) return { ok: false, msg: 'ticket not on the board' }
+    if (running.has(issue.id)) return { ok: false, msg: 'the agent is mid-run — chat once it hands off / is idle' }
+    const rec = threadRecs.get(issue.id)
+    if (!rec?.threadId) return { ok: false, msg: 'no thread yet — this ticket has not run' }
+    const host = placement.get(issue.id) ?? rec.host
+    const dir = workspaceDir(cfg, identifier, host)
+    let lg = logs.get(identifier)
+    if (!lg) {
+      lg = []
+      logs.set(identifier, lg)
+    }
+    lg.push(`○ ${msg}`) // operator turn — shows in the transcript immediately
+    saveLogs(logs)
+    const replies: string[] = []
+    const chat = new AppServerSession(cfg, [], (e) => {
+      if (e.log && e.log.startsWith('● ')) replies.push(e.log.slice(2))
+    })
+    try {
+      await chat.start(dir, host)
+      await chat.resumeThread(rec.threadId)
+      await chat.runTurn(rec.threadId, dir, chatPrompt(msg), `${identifier}: operator chat`, { type: 'readOnly' })
+    } catch (e) {
+      chat.stop()
+      const m = e instanceof Error ? e.message : String(e)
+      lg.push(`● (couldn't reach the agent: ${m})`)
+      saveLogs(logs)
+      return { ok: false, msg: m }
+    }
+    chat.stop()
+    const reply = replies.join('\n\n').trim() || '(no reply)'
+    lg.push(`● ${reply}`)
+    if (lg.length > 600) lg.splice(0, lg.length - 600)
+    saveLogs(logs)
+    log(`chat: ${identifier} ←→ operator`)
+    return { ok: true, reply }
+  }
+
+  // Operator actions = pure pipeline transitions. The thread carries context (chat + prior phases), so an action just
+  // advances the ticket and the next dispatch resumes the same thread on the same worker. `restart` is the hard reset:
+  // wipe the workspace AND drop the thread so the ticket replans from scratch.
+  const onAction = async (identifier: string, action: string): Promise<{ ok: boolean; msg?: string }> => {
     const issue = lastBoard.find((i) => i.identifier === identifier)
     if (!issue) return { ok: false, msg: 'ticket not on the board' }
     const host = placement.get(issue.id) ?? null
-    const dir = (directive ?? '').trim()
     try {
-      // An operator directive: record it as a comment (durable) AND queue it for injection into the next dispatch.
-      if (dir) {
-        await postComment(cfg, issue.id, `## ⚡ Operator directive\n${dir}`)
-        directives.set(issue.id, dir)
-      }
       if (action === 'restart') {
         terminate(issue.id, false)
         removeWorkspace(cfg, issue.identifier, host)
         release(issue.id)
-        log(`action: ${identifier} restart (operator)${dir ? ' +directive' : ''}`)
-        return { ok: true, msg: dir ? 'restarting with your directive' : 'restarting fresh' }
+        threadRecs.delete(issue.id)
+        saveThreads(threadRecs)
+        log(`action: ${identifier} restart (operator, fresh thread)`)
+        return { ok: true, msg: 'restarting fresh' }
       }
       if (action === 'to-qa' || action === 'to-build') {
         const target = action === 'to-qa' ? 'QA Requested' : 'In Progress'
-        terminate(issue.id, false)
-        removeWorkspace(cfg, issue.identifier, host)
+        stopRun(issue.id) // stop the current turn but keep the pin + workspace + thread → the move resumes it
         await moveIssue(cfg, issue.id, target)
-        release(issue.id)
         notesFetched.delete(issue.id)
         summaries.delete(issue.identifier)
-        log(`action: ${identifier} → ${target} (operator)${dir ? ' +directive' : ''}`)
-        return { ok: true, msg: `moved to ${target}${dir ? ' with your directive' : ''}` }
+        scheduleRetry(issue.id, issue.identifier, 1, true) // continuation: re-dispatch on the pinned worker, resuming
+        log(`action: ${identifier} → ${target} (operator)`)
+        return { ok: true, msg: `moved to ${target}` }
       }
       return { ok: false, msg: `unknown action: ${action}` }
     } catch (e) {
       return { ok: false, msg: e instanceof Error ? e.message : String(e) }
     }
   }
-  if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log, onAction)
+  if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log, onAction, onChat)
 
   // Periodic workspace hygiene: each ticket's checkout is ~5-6G (node_modules + git history), and stale ones pile
   // up as tickets cycle across VMs (every restart re-pins and orphans the old copy). Prune workspaces on each VM
@@ -527,6 +609,11 @@ export function deadlockReason(tokensSinceProgress: number, msSinceProgress: num
   if (tokensSinceProgress >= dl.tokens && msSinceProgress >= dl.stallMs)
     return `burned ${(tokensSinceProgress / 1e6).toFixed(0)}M tokens over ${mins}min with no forward progress`
   return null
+}
+
+// An operator chat turn: read-only, answer from the thread's own context. Terse so it doesn't crowd the history.
+function chatPrompt(msg: string): string {
+  return `The operator is messaging you directly about this ticket — READ-ONLY: do not edit files, push, or change Linear; just answer, using this thread's full context. If they are steering you, acknowledge it; you will act on it when the next phase runs. Operator:\n\n${msg}`
 }
 
 // Symphony dispatch order: priority (urgent→low, none last), then oldest, then identifier.

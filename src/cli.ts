@@ -29,7 +29,7 @@ async function main(): Promise<void> {
       validateConfig(cfg)
       const issue = await fetchById(cfg, arg)
       const host = cfg.worker.sshHosts[0] ?? null // one-shot runs on the first configured worker VM, else local
-      const outcome = await startAgent(cfg, issue, null, host, null, (e) => e.log && console.error(e.log)).done
+      const outcome = await startAgent(cfg, issue, null, host, (e) => e.log && console.error(e.log), null).done
       console.log(JSON.stringify(outcome, null, 2))
       process.exit(outcome.ok ? 0 : 1)
     }

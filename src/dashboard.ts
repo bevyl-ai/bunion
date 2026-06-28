@@ -35,7 +35,7 @@ export interface Snapshot {
 
 // A tiny status server: GET /state.json is the live orchestrator snapshot; GET / is a self-contained page that
 // polls it and renders the board (kanban by pipeline stage) + a per-run log modal.
-export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string, directive?: string) => Promise<{ ok: boolean; msg?: string }>): void {
+export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string) => Promise<{ ok: boolean; msg?: string }>, onChat?: (id: string, text: string) => Promise<{ ok: boolean; reply?: string; msg?: string }>): void {
   Bun.serve({
     port,
     async fetch(req) {
@@ -44,14 +44,25 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
       if (url.pathname === '/log') return Response.json({ log: getLog(url.searchParams.get('id') ?? '') })
       if (url.pathname === '/action' && req.method === 'POST') {
         if (!onAction) return Response.json({ ok: false, msg: 'actions disabled' })
-        let body: { id?: string; action?: string; directive?: string }
+        let body: { id?: string; action?: string }
         try {
-          body = (await req.json()) as { id?: string; action?: string; directive?: string }
+          body = (await req.json()) as { id?: string; action?: string }
         } catch {
           return Response.json({ ok: false, msg: 'bad request' })
         }
         if (!body.id || !body.action) return Response.json({ ok: false, msg: 'missing id/action' })
-        return Response.json(await onAction(body.id, body.action, body.directive))
+        return Response.json(await onAction(body.id, body.action))
+      }
+      if (url.pathname === '/chat' && req.method === 'POST') {
+        if (!onChat) return Response.json({ ok: false, msg: 'chat disabled' })
+        let body: { id?: string; text?: string }
+        try {
+          body = (await req.json()) as { id?: string; text?: string }
+        } catch {
+          return Response.json({ ok: false, msg: 'bad request' })
+        }
+        if (!body.id || !body.text) return Response.json({ ok: false, msg: 'missing id/text' })
+        return Response.json(await onChat(body.id, body.text))
       }
       return new Response(HTML, { headers: { 'content-type': 'text/html; charset=utf-8' } })
     },
@@ -126,10 +137,13 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 .mmeta{display:flex;gap:12px;flex-wrap:wrap;margin-top:7px;color:var(--mut);font-size:11.5px}
 .mmeta .m{display:inline-flex;align-items:center;gap:5px;font-variant-numeric:tabular-nums}
 .mmeta .m .pri{margin-right:0}
-#mdirective{display:block;margin:12px 16px 0;width:calc(100% - 32px);background:var(--surf2);border:1px solid var(--line2);border-radius:8px;color:var(--fg);font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:9px 11px;resize:vertical;min-height:38px;outline:none;box-sizing:border-box}
-#mdirective:focus{border-color:var(--accent)}
-#mdirective::placeholder{color:var(--mut2)}
-#mactions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 16px 0}
+#mchat{display:flex;gap:8px;align-items:flex-end;margin:10px 16px 0}
+#mmsg{flex:1;background:var(--surf2);border:1px solid var(--line2);border-radius:8px;color:var(--fg);font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:9px 11px;resize:vertical;min-height:38px;max-height:160px;outline:none;box-sizing:border-box}
+#mmsg:focus{border-color:var(--accent)}
+#mmsg::placeholder{color:var(--mut2)}
+#msend{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:0 16px;height:38px;font:600 13px/1 -apple-system,BlinkMacSystemFont,sans-serif;cursor:pointer;white-space:nowrap;flex:none}
+#msend:disabled{opacity:.5;cursor:default}
+#mactions{display:flex;gap:8px;flex-wrap:wrap;margin:9px 16px 14px}
 .mbtn{font:600 12px/1 inherit;color:var(--fg);background:var(--surf2);border:1px solid var(--line2);border-radius:8px;padding:8px 13px;cursor:pointer;transition:background .12s,border-color .12s}
 .mbtn:hover{background:#2a2f3a;border-color:#3a4150}
 .mbtn.go{color:#9ec1ff;border-color:#5b8def55}.mbtn.go:hover{background:#5b8def1f}
@@ -155,6 +169,8 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
 .lg{padding:0}
 .lg-turn{margin:18px 0 2px;color:#5b8def;font:700 10.5px/1 ui-monospace,Menlo,monospace;border-top:1px solid var(--line);padding-top:13px;letter-spacing:1.5px;text-transform:uppercase}
 .lg-msg{color:var(--fg);font-size:13px;line-height:1.55;margin:9px 0;padding-left:13px;border-left:2px solid #2f6f4f}
+.lg-op{color:var(--fg);font-size:13px;line-height:1.55;margin:11px 0;padding:7px 11px;border-left:2px solid var(--accent);background:var(--surf2);border-radius:6px}
+.lg-op b{color:var(--accent);font-weight:700;margin-right:6px;text-transform:uppercase;font-size:9.5px;letter-spacing:.6px}
 .lg-cmd{color:var(--mut2);font:11.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2.5px 0 2.5px 13px}
 .lg-cmd b{color:#5b8def;font-weight:700;margin-right:3px}
 .lg-tool{color:#d99a2b;font:11.5px/1.45 ui-monospace,Menlo,monospace;padding:2px 0 2px 13px;opacity:.9}
@@ -173,9 +189,9 @@ header{display:flex;align-items:center;gap:14px;padding:13px 20px;border-bottom:
  <div id="msub"></div>
  <div id="mbanner" style="display:none"></div>
  <div id="mtokens" style="display:none"></div>
- <textarea id="mdirective" placeholder="Optional directive for the agent (sent with the action below) — e.g. &quot;also handle the empty-state&quot;"></textarea>
- <div id="mactions"></div>
  <div id="logbody"></div>
+ <div id="mchat"><textarea id="mmsg" rows="1" placeholder="Message the agent — it answers with this ticket's full thread as context" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea><button id="msend" onclick="sendChat()">Send</button></div>
+ <div id="mactions"></div>
 </div></div>
 <div id="actmenu"></div>
 <div id="toast"></div>
@@ -297,12 +313,12 @@ function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId)
  const ma=document.getElementById('mactions');var ah=it?actionList(it).map(function(d){return abtn(it.identifier,d)}).join(''):'';if(ah){ma.style.display='flex';ma.innerHTML=ah;}else{ma.style.display='none';ma.innerHTML='';}}
 function openModal(id){expandedId=id;document.getElementById('modal').style.display='flex';document.getElementById('logbody').innerHTML='<div class="lg" style="color:var(--mut)">loading&hellip;</div>';syncHead();pullLog();}
 function closeModal(){expandedId=null;document.getElementById('modal').style.display='none';}
-async function postAction(btn,id,action,ev,directive){if(ev){ev.stopPropagation();ev.preventDefault();}
+async function postAction(btn,id,action,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
  var box=btn&&btn.parentNode;if(box)box.querySelectorAll('button').forEach(function(x){x.classList.add('busy')});
- try{var r=await (await fetch('/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:id,action:action,directive:directive||''})})).json();showToast((r&&r.ok)?(id+' &mdash; '+(r.msg||'done')):('Failed: '+((r&&r.msg)||'error')),!(r&&r.ok));}catch(e){showToast('Action failed',true);}
+ try{var r=await (await fetch('/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:id,action:action})})).json();showToast((r&&r.ok)?(id+' &mdash; '+(r.msg||'done')):('Failed: '+((r&&r.msg)||'error')),!(r&&r.ok));}catch(e){showToast('Action failed',true);}
  setTimeout(pull,400);setTimeout(pull,1600);}
 function showToast(msg,isErr){var t=document.getElementById('toast');t.innerHTML=(isErr?'&#10007; ':'&#10003; ')+msg;t.className=(isErr?'err':'ok')+' show';clearTimeout(window._tt);window._tt=setTimeout(function(){t.className=isErr?'err':'ok'},3400);}
-function modalAct(id,action,ev){var d=document.getElementById('mdirective');var dir=d?d.value.trim():'';if(d)d.value='';closeModal();postAction(null,id,action,ev,dir);}
+function modalAct(id,action,ev){postAction(null,id,action,ev);}
 let menuFor=null;
 function toggleMenu(btn,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
  var id=btn.getAttribute('data-id');
@@ -326,11 +342,13 @@ document.getElementById('modal').addEventListener('click',function(e){if(e.targe
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal();});
 function logHtml(line){var t=(line||'').replace(/^\\n+/,'');
  if(t.indexOf('\\u2500\\u2500')===0)return '<div class="lg lg-turn">'+esc(t.replace(/\\u2500/g,'').trim())+'</div>';
+ if(t.indexOf('\\u25cb ')===0)return '<div class="lg lg-op"><b>you</b>'+esc(t.slice(2))+'</div>';
  if(t.indexOf('\\u25cf ')===0)return '<div class="lg lg-msg">'+esc(t.slice(2))+'</div>';
  if(t.indexOf('$ ')===0){var c=esc(t.slice(2));return '<div class="lg lg-cmd" title="'+c.replace(/"/g,'&quot;')+'"><b>$</b>'+c+'</div>';}
  if(t.indexOf('\\u2699')===0)return '<div class="lg lg-tool">'+esc(t)+'</div>';
  if(t.indexOf('\\u270e')===0)return '<div class="lg lg-edit">'+esc(t)+'</div>';
  return '<div class="lg lg-cmd">'+esc(t)+'</div>';}
 async function pullLog(){if(!expandedId)return;try{const j=await (await fetch('/log?id='+encodeURIComponent(expandedId))).json();const b=document.getElementById('logbody');const atEnd=b.scrollTop+b.clientHeight>=b.scrollHeight-60;b.innerHTML=(j.log&&j.log.length)?j.log.map(logHtml).join(''):'<div class="lg" style="color:var(--mut)">(no log yet)</div>';if(atEnd)b.scrollTop=b.scrollHeight;}catch(e){}}
+async function sendChat(){if(!expandedId)return;var box=document.getElementById('mmsg'),btn=document.getElementById('msend');var text=box.value.trim();if(!text)return;box.value='';box.disabled=true;btn.disabled=true;btn.textContent='\\u2026';pullLog();try{var r=await (await fetch('/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:expandedId,text:text})})).json();if(!(r&&r.ok))showToast('Chat: '+((r&&r.msg)||'failed'),true);}catch(e){showToast('Chat failed',true);}box.disabled=false;btn.disabled=false;btn.textContent='Send';pullLog();box.focus();}
 setInterval(pull,1000);setInterval(tickLive,1000);setInterval(function(){if(expandedId){pullLog();syncHead();}},1000);pull();
 </script></body></html>`

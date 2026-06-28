@@ -62,9 +62,19 @@ export class AppServerSession {
     return id
   }
 
+  // Reopen an existing thread by id, loading its full prior history (reasoning + tool calls), so a fresh app-server
+  // process continues the same conversation. The rollout must live in this machine's ~/.codex — i.e. resume runs on
+  // the worker that originally ran the thread. cwd does not need to match the original.
+  async resumeThread(threadId: string): Promise<string> {
+    const res = await this.request('thread/resume', { threadId })
+    const id = (res.thread as Json | undefined)?.id
+    if (typeof id !== 'string') throw new Error('thread/resume: missing thread id')
+    return id
+  }
+
   // Send one turn and resolve when it terminates (turn/completed). Rejects on turn/failed|cancelled, timeout, or
-  // a dead subprocess.
-  async runTurn(threadId: string, workspace: string, prompt: string, title: string): Promise<void> {
+  // a dead subprocess. `sandbox` overrides the turn's sandbox policy (e.g. read-only for an operator chat turn).
+  async runTurn(threadId: string, workspace: string, prompt: string, title: string, sandbox?: Json): Promise<void> {
     if (this.fatal) throw this.fatal
     // Arm the turn waiter BEFORE sending turn/start: a fast turn can stream turn/completed in the same stdout chunk
     // as the turn/start response, so the terminal event needs somewhere to land or it is lost and the turn hangs.
@@ -96,7 +106,7 @@ export class AppServerSession {
           cwd: workspace,
           title,
           approvalPolicy: this.cfg.codex.approvalPolicy,
-          sandboxPolicy: this.cfg.codex.turnSandboxPolicy ?? defaultTurnPolicy(workspace),
+          sandboxPolicy: sandbox ?? this.cfg.codex.turnSandboxPolicy ?? defaultTurnPolicy(workspace),
         },
         this.cfg.codex.turnTimeoutMs,
       )

@@ -19,7 +19,7 @@ const key = (identifier: string): string => (identifier || 'issue').replace(/[^A
 
 // Local: <root>/<key>, validated to live strictly under the root. Remote: <vm-home>/.bunion/workspaces/<key>
 // (a fixed root on the VM; workspace.root in config governs the LOCAL path only).
-export function workspaceDir(cfg: Config, identifier: string, host: Host): string {
+function workspaceDir(cfg: Config, identifier: string, host: Host): string {
   if (host) {
     const home = remoteHome(host)
     if (!home) throw new Error(`cannot resolve $HOME on ${host} (is it reachable over ssh?)`)

@@ -1,3 +1,5 @@
+import type { TokenBreakdown } from './tokens'
+
 // One ticket on the board. `status`: running (an agent is on it now), retrying (waiting out a backoff/continuation),
 // or queued (an eligible candidate with no free slot/VM yet). The run-specific fields are 0/empty unless running.
 export interface BoardItem {
@@ -18,7 +20,7 @@ export interface BoardItem {
   lastActivity: number
   retryAttempt: number
   retryDueAt: number | null
-  tokens: { total: number; phases: Array<{ phase: string; total: number; input: number; output: number; cached: number; reasoning: number }> } | null // cumulative token use, per pipeline stage
+  tokens: TokenBreakdown | null // cumulative token use, per pipeline stage
 }
 
 // One pool role in the bottom dock — an always-on ambient agent (mechanic, dreamer, …) on a cadence.
@@ -30,8 +32,6 @@ export interface RoleItem {
   host: string | null
   tokens: number
   cadenceMs: number
-  startedAt: number
-  lastActivity: number
   lastRunAt: number | null
   filedToday: number
   maxPerDay: number | null
@@ -40,8 +40,6 @@ export interface RoleItem {
 export interface Snapshot {
   scope: string
   cap: number
-  pollMs: number
-  now: number
   items: BoardItem[] // the WHOLE board (every active+labeled ticket), not just the running ones
   totalTokens: number // all-time tokens across every tracked ticket (bunion runs on one account: chatgpt-4)
   totalInput: number

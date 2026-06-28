@@ -15,7 +15,7 @@ const FRICTION =
 const get = async (path) => (await (await fetch(BASE + path)).json())
 const logOf = async (id) => {
   try {
-    return (await get('/log?id=' + encodeURIComponent(id))).log || []
+    return (await get('/transcript/' + encodeURIComponent(id))).log || []
   } catch {
     return []
   }

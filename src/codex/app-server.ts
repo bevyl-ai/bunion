@@ -106,7 +106,7 @@ export class AppServerSession {
           cwd: workspace,
           title,
           approvalPolicy: this.cfg.codex.approvalPolicy,
-          sandboxPolicy: sandbox ?? this.cfg.codex.turnSandboxPolicy ?? defaultTurnPolicy(workspace),
+          sandboxPolicy: sandbox ?? this.cfg.codex.turnSandboxPolicy ?? DEFAULT_TURN_POLICY,
           ...(model ? { model } : {}),
         },
         this.cfg.codex.turnTimeoutMs,
@@ -331,9 +331,7 @@ function answerUserInput(params: Json): Json {
   return answers
 }
 
-function defaultTurnPolicy(_workspace: string): Json {
-  // The agent runs its own git (fetch/commit/push) + gh. codex's workspace-write write-protects .git regardless of
-  // writableRoots, which breaks those, so the agent needs full access to drive git itself. Safe to the extent the
-  // host is trusted — the proper containment is running bunion in a disposable VM (the exedev path).
-  return { type: 'dangerFullAccess' }
-}
+// The agent runs its own git (fetch/commit/push) + gh. codex's workspace-write write-protects .git regardless of
+// writableRoots, which breaks those, so turns default to full access to let the agent drive git itself. Safe to the
+// extent the host is trusted — the proper containment is running bunion in a disposable VM (the exedev path).
+const DEFAULT_TURN_POLICY: Json = { type: 'dangerFullAccess' }

@@ -53,7 +53,7 @@ export function startRole(cfg: Config, role: Role, host: string | null, onEvent:
       onEvent({ threadId })
       if (stopped) return { ok: false, error: 'terminated' }
       onEvent({ log: '\n── run ──' })
-      await session.runTurn(threadId, dir, budgetNote(role, quota) + role.prompt, `role:${role.name}`, undefined, role.model)
+      await session.runTurn(threadId, dir, budgetNote(quota) + role.prompt, `role:${role.name}`, undefined, role.model)
       return { ok: true }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -77,7 +77,7 @@ export function startRole(cfg: Config, role: Role, host: string | null, onEvent:
 
 // A per-run preface telling the role its remaining daily ticket budget, so it self-limits gracefully (the tool also
 // enforces it hard). Empty when the role has no cap.
-function budgetNote(role: Role, quota: RoleQuota): string {
+function budgetNote(quota: RoleQuota): string {
   if (quota.limit == null) return ''
   const rem = quota.remaining()
   return rem <= 0

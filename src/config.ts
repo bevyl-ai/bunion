@@ -141,6 +141,7 @@ export function loadConfig(path?: string): Config {
       turnSandboxPolicy: cx.turn_sandbox_policy && typeof cx.turn_sandbox_policy === 'object' && !Array.isArray(cx.turn_sandbox_policy) ? (cx.turn_sandbox_policy as Record<string, unknown>) : null,
       turnTimeoutMs: num(cx.turn_timeout_ms, 3_600_000),
       readTimeoutMs: num(cx.read_timeout_ms, 5_000),
+      initTimeoutMs: num(cx.init_timeout_ms, 60_000), // cold codex boot on a fresh/loaded VM far exceeds a steady-state read
       stallTimeoutMs: num(cx.stall_timeout_ms, 300_000),
     },
     deadlock: {

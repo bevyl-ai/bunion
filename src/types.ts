@@ -70,6 +70,7 @@ export interface CodexConfig {
   turnSandboxPolicy: Record<string, unknown> | null // turn/start.params.sandboxPolicy (an OBJECT)
   turnTimeoutMs: number
   readTimeoutMs: number
+  initTimeoutMs: number // separate, generous timeout for the cold codex-boot `initialize` handshake (vs steady-state reads)
   stallTimeoutMs: number
 }
 

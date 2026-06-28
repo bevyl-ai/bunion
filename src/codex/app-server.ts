@@ -59,10 +59,14 @@ export class AppServerSession {
     })
 
     try {
-      await this.request('initialize', {
-        capabilities: { experimentalApi: true },
-        clientInfo: { name: 'bunion', title: 'bunion', version: '0.2.0' },
-      })
+      await this.request(
+        'initialize',
+        {
+          capabilities: { experimentalApi: true },
+          clientInfo: { name: 'bunion', title: 'bunion', version: '0.2.0' },
+        },
+        this.cfg.codex.initTimeoutMs, // cold codex boot on a fresh/loaded VM exceeds the steady-state read timeout — give the handshake room
+      )
     } catch (e) {
       // §10.6: handshake timeout → response_timeout.
       const msg = e instanceof Error ? e.message : String(e)

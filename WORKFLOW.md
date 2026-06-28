@@ -107,7 +107,9 @@ codex:
   command: codex --config shell_environment_policy.inherit=all app-server
   approval_policy: never
   thread_sandbox: danger-full-access     # the agent runs its own git; workspace-write protects .git and breaks it
-  read_timeout_ms: 15000                 # initialize/handshake; 5s default is too tight when the shared-CPU VM is under load
+  read_timeout_ms: 15000                 # steady-state sync request/response timeout
+  init_timeout_ms: 60000                 # codex cold-boot handshake — separate + generous; under shared-CPU load on a fresh
+                                         # VM the initialize can exceed 15s, so a tight read timeout caused restart retry-storms
 deadlock:                                # a ticket looping without progress is auto-moved to `QA blocked` (the blocked phase triages it)
   tokens: 20000000                       # 20M tokens spent with no NEW pipeline state reached (once stalled ≥ stall_ms) → blocked
   stall_ms: 1800000                      # 30min — min time with no forward progress before the token rule trips

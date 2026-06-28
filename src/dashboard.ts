@@ -186,7 +186,7 @@ const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return S
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 const fmtTok=n=>{n=n||0;return n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e4?Math.round(n/1e3)+'k':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)};
 // API-equivalent $ at ~GPT-5 rates ($ per 1M tokens). Actual spend is the flat $200/mo Pro plan — this is the would-be cost / value extracted, not what you pay. Tweak the rates if the model differs.
-var COST_IN=1.25,COST_CACHED=0.125,COST_OUT=10;
+var COST_IN=1.25,COST_CACHED=0.125,COST_OUT=10,PLAN_MONTHLY=200;
 function estCost(input,output,cached){var unc=Math.max(0,(input||0)-(cached||0));return (unc*COST_IN+(cached||0)*COST_CACHED+(output||0)*COST_OUT)/1e6;}
 function fmtCost(d){return d>=100?'$'+Math.round(d):d>=1?'$'+d.toFixed(1):'$'+d.toFixed(2);}
 const PRI={1:'Urgent',2:'High',3:'Medium',4:'Low'};
@@ -244,7 +244,7 @@ function render(){
  const run=items.filter(r=>r.status==='running').length,q=items.filter(r=>r.status==='queued').length,rt=items.filter(r=>r.status==='retrying').length;
  scope.textContent=snap.scope||'';
  const chip=(col,n,lab)=>'<span class="chip"><i style="background:'+col+'"></i>'+n+' '+lab+'</span>';
- stats.innerHTML=chip('#3fb27f',run,'running')+(q?chip('#7c8493',q,'queued'):'')+(rt?chip('#d99a2b',rt,'retrying'):'')+'<span class="cap">'+(snap.cap||0)+' slots</span>'+(snap.totalTokens?'<span class="cap" title="~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' at GPT-5 API rates &mdash; but actual spend is the flat $200/mo Pro plan, so this is the value extracted, not what you pay ('+fmtTok(snap.totalCached||0)+' of '+fmtTok(snap.totalInput||0)+' input cached)">&#931; '+fmtTok(snap.totalTokens)+' tok'+(snap.totalInput?' &middot; <b style="color:#3fb27f">'+Math.round(snap.totalCached/snap.totalInput*100)+'% cached</b>':'')+' &middot; <span title="API-equivalent; you actually pay $200/mo flat">~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+'</span></span>':'');
+ stats.innerHTML=chip('#3fb27f',run,'running')+(q?chip('#7c8493',q,'queued'):'')+(rt?chip('#d99a2b',rt,'retrying'):'')+'<span class="cap">'+(snap.cap||0)+' slots</span>'+(snap.totalTokens?'<span class="cap" title="~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' at GPT-5 API rates &mdash; but actual spend is the flat $200/mo Pro plan, so this is the value extracted, not what you pay ('+fmtTok(snap.totalCached||0)+' of '+fmtTok(snap.totalInput||0)+' input cached)">&#931; '+fmtTok(snap.totalTokens)+' tok'+(snap.totalInput?' &middot; <b style="color:#3fb27f">'+Math.round(snap.totalCached/snap.totalInput*100)+'% cached</b>':'')+' &middot; <span title="What you pay: a flat $'+PLAN_MONTHLY+'/mo on the codex Pro plan. At GPT-5 API rates this volume would cost ~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' &mdash; the value the plan extracts, not what you pay."><b>$'+PLAN_MONTHLY+'/mo</b> plan &middot; ~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' API</span></span>':'');
  // Rebuild the board ONLY when structure changes (membership / state / status / pr); live fields tick in place.
  const sig=JSON.stringify(items.map(r=>[r.identifier,r.state,r.status,r.host,r.prUrl,r.retryAttempt,r.state==='QA blocked'?(r.note||''):'']));
  if(sig!==lastSig){

@@ -50,6 +50,10 @@ codex:
   approval_policy: never
   thread_sandbox: danger-full-access     # the agent runs its own git; workspace-write protects .git and breaks it
   read_timeout_ms: 15000                 # initialize/handshake; 5s default is too tight when the shared-CPU VM is under load
+deadlock:                                # a ticket looping without progress is auto-moved to `QA blocked` (the unblocker triages it)
+  tokens: 20000000                       # 20M tokens spent with no NEW pipeline state reached (once stalled ≥ stall_ms) → blocked
+  stall_ms: 1800000                      # 30min — min time with no forward progress before the token rule trips
+  hard_stall_ms: 5400000                 # 90min with no forward progress → blocked regardless of token spend. 2nd deadlock → `Needs human`
 ---
 
 You are one worker in a **staged pipeline** for Linear ticket `{{ issue.identifier }}`, running unattended. You run exactly ONE phase, then hand off — a fresh agent runs the next phase. Your phase is decided by the ticket's current status (`{{ issue.state }}`). Do your phase to its bar and stop; never ask a human for follow-up; never stop early except for a true blocker (missing required auth/permissions/secrets).

@@ -64,6 +64,7 @@ export function loadConfig(path?: string): Config {
   const ag = obj(fm.agent)
   const wk = obj(fm.worker)
   const cx = obj(fm.codex)
+  const dl = obj(fm.deadlock)
   const envHosts = (process.env.BUNION_SSH_HOSTS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
   const srv = obj(fm.server)
   const portRaw = process.env.BUNION_PORT ?? (typeof srv.port === 'number' ? String(srv.port) : null)
@@ -100,6 +101,11 @@ export function loadConfig(path?: string): Config {
       turnTimeoutMs: num(cx.turn_timeout_ms, 3_600_000),
       readTimeoutMs: num(cx.read_timeout_ms, 5_000),
       stallTimeoutMs: num(cx.stall_timeout_ms, 300_000),
+    },
+    deadlock: {
+      tokens: num(dl.tokens, 20_000_000), // tokens burned with no new pipeline state (within stallMs) → blocked
+      stallMs: num(dl.stall_ms, 30 * 60_000), // ...with no forward progress for at least this long
+      hardStallMs: num(dl.hard_stall_ms, 90 * 60_000), // OR this long with no progress, regardless of token spend
     },
     dashboardPort: portRaw && Number.isFinite(Number(portRaw)) ? Number(portRaw) : null,
     promptTemplate: prompt,

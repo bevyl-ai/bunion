@@ -8,7 +8,7 @@ import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
 import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment } from './linear'
 import { log, warn } from './log'
 import { removeWorkspace } from './workspace'
-import type { Issue, TokenCounts } from './types'
+import type { Config, Issue, TokenCounts } from './types'
 
 interface RunningEntry {
   issue: Issue
@@ -86,6 +86,13 @@ export async function start(workflowPath?: string): Promise<void> {
   const notesFetched = new Set<string>() // stuck tickets whose verdict comment we've pulled once for display
   const lastState = new Map<string, string>() // last-seen Linear state per ticket — drops a stale note on transition
   const directives = new Map<string, string>() // operator directive to inject into a ticket's next dispatch (one-shot)
+  // Deadlock detection. `progress` is a forward-progress clock per ticket: it resets whenever the ticket reaches a
+  // pipeline state it hasn't been in this lifecycle; while it sits in already-seen states it burns down. A ticket
+  // that spends tokens/time without resetting is looping → auto-block it. `deadlocked` remembers a first offense so
+  // a second one escalates past the unblocker straight to a human.
+  const progress = new Map<string, { since: number; tokensAtProgress: number; seen: Set<string> }>()
+  const deadlocked = new Set<string>()
+  const grandTotal = (identifier: string): number => Object.values(tokens[identifier] ?? {}).reduce((s, c) => s + (c?.total ?? 0), 0)
 
   // Worker placement. An issue is PINNED to one host for its whole life (continuation turns reuse the same VM so the
   // cloned workspace + workpad survive). hostCounts = pinned issues per host; the pin is held until the issue is
@@ -425,16 +432,47 @@ export async function start(workflowPath?: string): Promise<void> {
       // Surface WHY a ticket is stuck: pull its workpad Verdict for the unblock + needs-human states (not while an
       // agent is live on it — its own messages fill the note then). Clear a cached note when a ticket changes state
       // so a qa-blocked verdict doesn't linger after the unblocker escalates it to Needs human.
+      const now = Date.now()
+      const stuck: { issue: Issue; target: string; reason: string }[] = []
       for (const i of board) {
         if (lastState.get(i.id) !== i.state) {
           lastState.set(i.id, i.state)
           summaries.delete(i.identifier)
           notesFetched.delete(i.id)
         }
+        // Forward-progress clock: reaching a not-yet-seen state resets it; sitting in seen states burns it down.
+        const pr = progress.get(i.id) ?? { since: now, tokensAtProgress: grandTotal(i.identifier), seen: new Set<string>() }
+        if (!pr.seen.has(norm(i.state))) {
+          pr.seen.add(norm(i.state))
+          pr.since = now
+          pr.tokensAtProgress = grandTotal(i.identifier)
+        }
+        progress.set(i.id, pr)
+        if (isActive(i.state) && !isTerminal(i.state) && norm(i.state) !== 'qa blocked') {
+          const reason = deadlockReason(grandTotal(i.identifier) - pr.tokensAtProgress, now - pr.since, cfg.deadlock)
+          if (reason) stuck.push({ issue: i, target: deadlocked.has(i.id) ? 'Needs human' : 'QA blocked', reason })
+        }
         const s = norm(i.state)
         if ((s === 'qa blocked' || s === 'needs human') && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
           notesFetched.add(i.id)
           void fetchLatestNote(cfg, i.id).then((n) => n && summaries.set(i.identifier, n)).catch(() => {})
+        }
+      }
+      for (const id of [...progress.keys()]) if (!board.some((i) => i.id === id)) { progress.delete(id); deadlocked.delete(id) }
+      // Deadlock sweep: no forward progress + resource burn → move to the blocked state (the unblocker triages it),
+      // or to Needs human if it already deadlocked once. Await the move so it isn't re-dispatched below this poll.
+      for (const { issue, target, reason } of stuck) {
+        deadlocked.add(issue.id)
+        terminate(issue.id, false)
+        progress.delete(issue.id)
+        lastState.set(issue.id, target)
+        issue.state = target
+        log(`deadlock: ${issue.identifier} ${reason} → ${target}`)
+        try {
+          await moveIssue(cfg, issue.id, target)
+          await postComment(cfg, issue.id, `## 🔁 Auto-blocked — deadlock\nThe factory ${reason} on this ticket, so I moved it to \`${target}\` instead of looping further.${target === 'QA blocked' ? '\n\n**Unblocker:** if there is no concrete, fixable meta-problem here, escalate to `Needs human` — do not just send it back to loop again.' : ''}`)
+        } catch (e) {
+          warn(`deadlock move ${issue.identifier}: ${e instanceof Error ? e.message : String(e)}`)
         }
       }
       if (slots() > 0) {
@@ -451,6 +489,17 @@ export async function start(workflowPath?: string): Promise<void> {
     }
     await sleep(cfg.pollIntervalMs)
   }
+}
+
+// A ticket is deadlocked when it keeps spending tokens/time without advancing to a pipeline state it hasn't
+// reached this lifecycle (e.g. oscillating In Progress ↔ QA Requested, or a fix that never lands). Returns a
+// human-readable reason or null. Pure so it's unit-testable.
+export function deadlockReason(tokensSinceProgress: number, msSinceProgress: number, dl: Config['deadlock']): string | null {
+  const mins = Math.round(msSinceProgress / 60_000)
+  if (msSinceProgress >= dl.hardStallMs) return `stuck ${mins}min with no forward progress`
+  if (tokensSinceProgress >= dl.tokens && msSinceProgress >= dl.stallMs)
+    return `burned ${(tokensSinceProgress / 1e6).toFixed(0)}M tokens over ${mins}min with no forward progress`
+  return null
 }
 
 // Symphony dispatch order: priority (urgent→low, none last), then oldest, then identifier.

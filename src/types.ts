@@ -55,6 +55,7 @@ export interface Config {
   phases: Record<string, string[]> // phase name → its states; a worker hands off to a FRESH agent when the ticket crosses phases
   worker: { sshHosts: string[]; maxPerHost: number } // [] = run agents locally; else fan out across these hosts
   codex: CodexConfig
+  deadlock: { tokens: number; stallMs: number; hardStallMs: number } // auto-block a ticket burning resources with no forward progress
   dashboardPort: number | null // status dashboard HTTP port (server.port / BUNION_PORT); null = off
   promptTemplate: string
   workflowPath: string

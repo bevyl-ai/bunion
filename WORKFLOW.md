@@ -46,6 +46,19 @@ roles:                               # the pool — ambient agents on a clock, B
       ideas over a long thin list.
 server:
   port: 4319                       # live status dashboard at http://localhost:4319 (or set BUNION_PORT)
+board:                               # dashboard lanes (name + colour + the states each holds), left→right. Hot-reloaded
+                                     # with the config each poll, so renaming a lane here needs NO restart (unlike code).
+  columns:
+    - { name: Planning,       color: '#8b93a1', states: [Triage, Backlog, Todo] }
+    - { name: In Progress,    color: '#5b8def', states: [In Progress] }
+    - { name: QA check,       color: '#d99a2b', states: [QA Requested] }
+    - { name: Verify QA,      color: '#c79a3a', states: [QA Verify] }
+    - { name: Blocked,        color: '#e0564f', states: [QA blocked] }
+    - { name: Needs human,    color: '#d9568c', states: [Needs human] }
+    - { name: Ready,          color: '#3fb27f', states: [Ready to ship] }
+    - { name: In Staging,     color: '#e3b341', states: ['Merged: In Staging'] }
+    - { name: Verifying prod, color: '#4a9eda', states: [Verifying in Prod] }
+    - { name: Done,           color: '#6b7280', states: [Done] }
 workspace:
   root: ~/.bunion/workspaces
 hooks:

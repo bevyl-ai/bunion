@@ -1,7 +1,7 @@
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { parseWorkflow } from './workflow'
-import type { Config, TrackerConfig } from './types'
+import type { BoardColumn, Config, TrackerConfig } from './types'
 
 function obj(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
@@ -55,6 +55,25 @@ function parseCadence(v: unknown): number {
   if (!m) return 0
   const mult: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }
   return Math.round(parseFloat(m[1]!) * (mult[(m[2] ?? 'm').toLowerCase()] ?? 60_000))
+}
+
+// Dashboard lanes, left→right. The default; WORKFLOW.md `board.columns` overrides it and is hot-reloaded each poll,
+// so renaming a lane needs no restart.
+const DEFAULT_COLUMNS: BoardColumn[] = [
+  { name: 'Planning', color: '#8b93a1', states: ['Triage', 'Backlog', 'Todo'] },
+  { name: 'In Progress', color: '#5b8def', states: ['In Progress'] },
+  { name: 'QA check', color: '#d99a2b', states: ['QA Requested'] },
+  { name: 'Verify QA', color: '#c79a3a', states: ['QA Verify'] },
+  { name: 'Blocked', color: '#e0564f', states: ['QA blocked'] },
+  { name: 'Needs human', color: '#d9568c', states: ['Needs human'] },
+  { name: 'Ready', color: '#3fb27f', states: ['Ready to ship'] },
+  { name: 'In Staging', color: '#e3b341', states: ['Merged: In Staging'] },
+  { name: 'Verifying prod', color: '#4a9eda', states: ['Verifying in Prod'] },
+  { name: 'Done', color: '#6b7280', states: ['Done'] },
+]
+function parseColumns(v: unknown): BoardColumn[] {
+  const cols = (Array.isArray(v) ? v : []).map(obj).map((c) => ({ name: str(c.name) ?? '', color: str(c.color) ?? '#6b7280', states: arr(c.states) })).filter((c) => c.name && c.states.length > 0)
+  return cols.length ? cols : DEFAULT_COLUMNS
 }
 
 export function loadConfig(path?: string): Config {
@@ -130,6 +149,7 @@ export function loadConfig(path?: string): Config {
       hardStallMs: num(dl.hard_stall_ms, 90 * 60_000), // OR this long with no progress, regardless of token spend
     },
     dashboardPort: portRaw && Number.isFinite(Number(portRaw)) ? Number(portRaw) : null,
+    boardColumns: parseColumns(obj(fm.board).columns),
     promptTemplate: prompt,
     workflowPath,
   }

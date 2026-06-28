@@ -92,6 +92,12 @@ export interface RoleQuota {
   record(): void // count one filed ticket toward today's total (persists)
 }
 
+export interface BoardColumn {
+  name: string
+  color: string
+  states: string[]
+}
+
 export interface Config {
   tracker: TrackerConfig
   pollIntervalMs: number
@@ -104,6 +110,7 @@ export interface Config {
   codex: CodexConfig
   deadlock: { tokens: number; stallMs: number; hardStallMs: number } // auto-block a ticket burning resources with no forward progress
   dashboardPort: number | null // status dashboard HTTP port (server.port / BUNION_PORT); null = off
+  boardColumns: BoardColumn[] // dashboard lanes (name + colour + states), from WORKFLOW.md board.columns; hot-reloaded
   promptTemplate: string
   workflowPath: string
 }

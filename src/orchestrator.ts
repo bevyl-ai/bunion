@@ -431,6 +431,7 @@ export async function start(workflowPath?: string): Promise<void> {
       rateLimits: lastRateLimits,
       secondsRunning: Math.round((endedRuntimeMs + [...running.values()].reduce((s, e) => s + (Date.now() - e.startedAt), 0)) / 1000),
       roles: cfg.roles.map(roleItem),
+      columns: cfg.boardColumns.map((c) => ({ name: c.name, c: c.color, states: c.states })),
     }
   }
   // One read-only chat turn against a persisted thread (a ticket OR a pool role): resume it on its worker, run the

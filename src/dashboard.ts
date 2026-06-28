@@ -50,6 +50,7 @@ export interface Snapshot {
   rateLimits: RateLimits | null // latest coding-agent rate-limit snapshot (Symphony §13.3), null until codex reports one
   secondsRunning: number // aggregate runtime seconds across all sessions incl. active ones (§13.3)
   roles: RoleItem[] // the pool — ambient roles rendered in the bottom dock
+  columns: { name: string; c: string; states: string[] }[] // dashboard lanes from config (hot-reloaded); see WORKFLOW.md board.columns
 }
 
 // §13.7.2: JSON error envelope for /api/v1/* responses.
@@ -343,7 +344,7 @@ function actionList(it){if(!it||it.state==='Done')return [];
  return [{a:'to-qa',l:'Run QA on it',c:'go',t:'Move to QA Requested and verify with a fresh QA agent'},A_REWORK];}
 function abtn(id,d){return '<button class="mbtn '+(d.c||'')+'" title="'+(d.t||'')+'" onclick="modalAct(\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>';}
 function kebab(it){return actionList(it).length?'<button class="kebab" data-id="'+it.identifier+'" onclick="toggleMenu(this,event)" title="actions">&#8943;</button>':'';}
-const COLS=[
+let COLS=[
  {name:'Planning',c:'#8b93a1',states:['Triage','Backlog','Todo']},
  {name:'In Progress',c:'#5b8def',states:['In Progress']},
  {name:'QA check',c:'#d99a2b',states:['QA Requested']},
@@ -357,7 +358,7 @@ const COLS=[
 function colIdx(st){var l=(st||'').trim().toLowerCase();for(var i=0;i<COLS.length;i++)for(var j=0;j<COLS[i].states.length;j++)if(COLS[i].states[j].toLowerCase()===l)return i;return -1;}
 function moveItems(it){if(!it)return [];var cur=colIdx(it.state);return COLS.map(function(col,i){return i===cur?null:{a:'move:'+col.states[0],l:'\\u2192 '+col.name,c:'',t:'Move this ticket to '+col.name};}).filter(Boolean);}
 let snap={items:[],cap:0,scope:''};
-async function pull(){try{snap=await (await fetch('/state.json',{cache:'no-store'})).json()}catch(e){}render()}
+async function pull(){try{snap=await (await fetch('/state.json',{cache:'no-store'})).json();if(snap.columns&&snap.columns.length)COLS=snap.columns;}catch(e){}render()}
 function cardHtml(r,now){
  const run=r.status==='running';
  const act=now-r.lastActivity,dc=act<30000?'#3fb27f':act<120000?'#d99a2b':'#e0564f';

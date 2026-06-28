@@ -25,7 +25,7 @@ roles:                               # the pool — ambient agents on a clock, B
       work, never fixing it yourself. Each run:
       1. Find what's broken: red CI on `main` (gh run list --branch main --limit 15), tickets stuck in `Needs human`
          or `QA blocked` on the board, flaky/failing tests, stale or vulnerable dependencies, bunion's own errors.
-      2. For each concrete, fixable problem, file ONE `dark-factory`-labeled Linear ticket (team BEV) through the
+      2. For each concrete, fixable problem, file ONE Linear ticket (team BEV), labeled BOTH `dark-factory` and `mechanic`, through the
          linear_graphql tool — clear title, acceptance criteria, sensible priority. DEDUPE first: search open issues;
          never file a duplicate or re-file something already queued.
       3. Never open a PR, push, merge, or change code yourself — the pipeline does the fixing. You only find + frame.
@@ -37,8 +37,8 @@ roles:                               # the pool — ambient agents on a clock, B
     prompt: |
       You are the factory's dreamer — find the next thing worth building and FILE it. Each run, look outward: the
       product, the codebase, what shipped recently, the obvious gaps. Propose a few high-leverage improvements —
-      features, refactors, tech-debt paydown, UX polish, missing tests — and file each as a `dark-factory`-labeled
-      Linear ticket (team BEV) through linear_graphql, with a crisp title + acceptance criteria + priority. DEDUPE
+      features, refactors, tech-debt paydown, UX polish, missing tests — and file each as a Linear ticket
+      (team BEV) labeled BOTH `dark-factory` and `dreamer`, through linear_graphql, with a crisp title + acceptance criteria + priority. DEDUPE
       against open issues; don't repeat work already queued. You only file — the pipeline builds. Favor a few strong
       ideas over a long thin list.
 server:
@@ -173,10 +173,11 @@ A QA agent already verified this and moved it here. You are a **second, independ
 2. Be adversarial about the proof — the common failure is QA verifying a convenient substitute, not the bug:
    - Did QA exercise the **real reported scenario**, or a stand-in? (synthetic data instead of the reported data, the wrong route/workspace, a happy path that sidesteps the actual bug, *a* screenshot that isn't the fixed behaviour.)
    - **Re-verify it yourself** with `browser.mjs` (see `.codex/skills/qa/SKILL.md`): reproduce the ORIGINAL bug's *exact* conditions, confirm the fix holds there, and probe the obvious edge/regression cases the change could break. Screenshot your own proof.
-3. Record your **`Verdict:`** line in the workpad (with how you verified — `QA INADEQUATE`/`DEFECT` must state the concrete reason), then route:
+3. **Code-review gate — honor stupify's latest word.** A fix can reach you with an unaddressed code-review objection: the build gate can carry a stale `✅` forward over a "trivial"-looking commit that stupify actually re-reviewed and objected to. Read `gh api repos/$REPO/pulls/<N>/reviews` and find stupify's MOST RECENT review (from `exe-dev-github-integration[bot]`, tagged `<!-- stupify:<sha> -->`). **Latest review contains `✅` → gate met. Latest review describes problems with no `✅` (e.g. `oof…`, `one small drift trap 👇`) → that is an UNADDRESSED changes-request: route `DEFECT` below, no matter how clean the QA proof looks.** (Stupify never reviewed the latest code — absent/flaked — is not a block here; QA + the human merge remain gates.)
+4. Record your **`Verdict:`** line in the workpad (with how you verified — `QA INADEQUATE`/`DEFECT` must state the concrete reason), then route:
    - **VERIFIED** — the real scenario is proven fixed and you found no regression → move to `Ready to ship`. **Do NOT merge.**
    - **QA INADEQUATE** — the fix may be fine but QA proved the wrong thing / the proof doesn't hold → move back to `QA Requested` with a precise `[codex]` comment of what QA must actually test.
-   - **DEFECT** — you reproduced a real failure or regression → move back to `In Progress` with exact repro steps for the build agent.
+   - **DEFECT** — you reproduced a real failure or regression, OR stupify's latest review is an unaddressed changes-request (step 3) → move back to `In Progress` with the exact repro steps / the stupify objection for the build agent.
 
 ## UNBLOCK — status `QA blocked` (the unblocker)
 

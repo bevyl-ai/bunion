@@ -231,7 +231,7 @@ const COLS=[
  {name:'Merged',c:'#a371f7',states:['Done']}];
 function colIdx(st){for(var i=0;i<COLS.length;i++)if(COLS[i].states.indexOf(st)>=0)return i;return -1;}
 let snap={items:[],cap:0,scope:''};
-async function pull(){try{snap=await (await fetch('/state.json')).json()}catch(e){}render()}
+async function pull(){try{snap=await (await fetch('/state.json',{cache:'no-store'})).json()}catch(e){}render()}
 function cardHtml(r,now){
  const run=r.status==='running';
  const act=now-r.lastActivity,dc=act<30000?'#3fb27f':act<120000?'#d99a2b':'#e0564f';
@@ -348,7 +348,7 @@ function logHtml(line){var t=(line||'').replace(/^\\n+/,'');
  if(t.indexOf('\\u2699')===0)return '<div class="lg lg-tool">'+esc(t)+'</div>';
  if(t.indexOf('\\u270e')===0)return '<div class="lg lg-edit">'+esc(t)+'</div>';
  return '<div class="lg lg-cmd">'+esc(t)+'</div>';}
-async function pullLog(){if(!expandedId)return;try{const j=await (await fetch('/log?id='+encodeURIComponent(expandedId))).json();const b=document.getElementById('logbody');const atEnd=b.scrollTop+b.clientHeight>=b.scrollHeight-60;b.innerHTML=(j.log&&j.log.length)?j.log.map(logHtml).join(''):'<div class="lg" style="color:var(--mut)">(no log yet)</div>';if(atEnd)b.scrollTop=b.scrollHeight;}catch(e){}}
+async function pullLog(){if(!expandedId)return;var b=document.getElementById('logbody');try{const res=await fetch('/log?id='+encodeURIComponent(expandedId),{cache:'no-store'});if(!res.ok){b.innerHTML='<div class="lg" style="color:#e0564f">transcript fetch failed ('+res.status+') &mdash; try reloading the page</div>';return;}if((res.headers.get('content-type')||'').indexOf('json')<0){b.innerHTML='<div class="lg" style="color:#e0564f">got a non-JSON response (session/proxy) &mdash; hard-reload the page</div>';return;}const j=await res.json();const atEnd=b.scrollTop+b.clientHeight>=b.scrollHeight-60;b.innerHTML=(j.log&&j.log.length)?j.log.map(logHtml).join(''):'<div class="lg" style="color:var(--mut)">(no log yet)</div>';if(atEnd)b.scrollTop=b.scrollHeight;}catch(e){b.innerHTML='<div class="lg" style="color:#e0564f">couldn\\'t load transcript: '+esc(String((e&&e.message)||e))+'</div>';}}
 async function sendChat(){if(!expandedId)return;var box=document.getElementById('mmsg'),btn=document.getElementById('msend');var text=box.value.trim();if(!text)return;box.value='';box.disabled=true;btn.disabled=true;btn.textContent='\\u2026';pullLog();try{var r=await (await fetch('/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:expandedId,text:text})})).json();if(!(r&&r.ok))showToast('Chat: '+((r&&r.msg)||'failed'),true);}catch(e){showToast('Chat failed',true);}box.disabled=false;btn.disabled=false;btn.textContent='Send';pullLog();box.focus();}
 setInterval(pull,1000);setInterval(tickLive,1000);setInterval(function(){if(expandedId){pullLog();syncHead();}},1000);pull();
 </script></body></html>`

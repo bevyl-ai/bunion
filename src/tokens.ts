@@ -58,3 +58,15 @@ export function totals(tally: TokenTally): { total: number; input: number; outpu
     }
   return sum
 }
+
+// API-equivalent $ at ~GPT-5.5 rates ($ per 1M tokens) — uncached input + output are the cost, cached input is cheap.
+// Actual spend is the flat $200/mo ChatGPT Pro plan, so apiCost is the value extracted (not what's paid); planCost
+// prices the same compute at the plan's effective rate (~$200 per ~$14k of API-equivalent the plan is worth if fully
+// used). The dashboard's client JS mirrors these constants — keep them in sync.
+export const RATES = { input: 5, cached: 0.5, output: 30, planMonthly: 200, planApiValue: 14000 }
+export function apiCost(c: { input: number; output: number; cached: number }): number {
+  return (Math.max(0, c.input - c.cached) * RATES.input + c.cached * RATES.cached + c.output * RATES.output) / 1e6
+}
+export function planCost(c: { input: number; output: number; cached: number }): number {
+  return (apiCost(c) * RATES.planMonthly) / RATES.planApiValue
+}

@@ -42,6 +42,7 @@ export function linearGraphqlTool(cfg: Config, phase?: string | null, quota?: Ro
       }
       try {
         const r = await graphql(cfg, query, variables, token)
+        if (r.status === 401) return fail('linear_auth_failed: the configured Linear token is invalid/expired (HTTP 401). STOP — do NOT retry this tool, it will keep failing. Report this as a blocker; an operator must restore Linear auth.')
         const errs = (r.body as { errors?: unknown }).errors
         const success = r.httpOk && !(Array.isArray(errs) && errs.length > 0)
         if (isCreate && quota && success) {

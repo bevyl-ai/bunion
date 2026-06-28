@@ -6,10 +6,34 @@ export interface GraphqlResult {
   status: number
 }
 
+// Global Linear request pacing + backpressure. EVERY request — the orchestrator's reads AND the agents' linear_graphql
+// tool — funnels through graphql(), so one shared gate bounds our TOTAL request rate (min_request_gap_ms between
+// requests), backs off HARD on a 429 rate-limit, and tracks 401s so the daemon can auto-pause before hammering a
+// dead/blocked token into a revocation (exactly what got the OAuth app banned).
+let nextSlot = 0
+let cooldownUntil = 0
+const authFailures: number[] = [] // ms timestamps of recent 401s
+const sleepMs = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+async function rateGate(minGapMs: number): Promise<void> {
+  const gap = minGapMs > 0 ? minGapMs : 0
+  const now = Date.now()
+  const at = Math.max(now, nextSlot, cooldownUntil) // next free slot, honoring the min gap + any 429 cooldown
+  nextSlot = at + gap
+  if (at > now) await sleepMs(at - now)
+}
+// 401s in the last `windowMs` — the orchestrator polls this to AUTO-PAUSE when Linear auth keeps failing, so a dead
+// token can't drive thousands of failed-auth retries (the pattern that gets an app revoked).
+export function recentAuthFailures(windowMs = 60_000): number {
+  const cut = Date.now() - windowMs
+  while (authFailures.length > 0 && authFailures[0]! < cut) authFailures.shift()
+  return authFailures.length
+}
+
 // Raw single-operation GraphQL against the configured Linear endpoint with the tracker auth. Used by the
 // linear_graphql host tool AND by the orchestrator's reads below.
 // §11.2: 30s network timeout so a hung Linear call never freezes the poll loop.
 export async function graphql(cfg: Config, query: string, variables: Record<string, unknown>, token?: string | null): Promise<GraphqlResult> {
+  await rateGate(cfg.tracker.minRequestGapMs) // global pacing — never hammer Linear
   let res: Response
   try {
     res = await fetch(cfg.tracker.endpoint, {
@@ -22,6 +46,12 @@ export async function graphql(cfg: Config, query: string, variables: Record<stri
     // §11.4: transport failure or timeout → linear_api_request
     const msg = err instanceof Error ? err.message : String(err)
     throw new CategorizedError('linear_api_request', `linear: request failed — ${msg}`)
+  }
+  if (res.status === 429) {
+    const ra = Number(res.headers.get('retry-after'))
+    cooldownUntil = Date.now() + (Number.isFinite(ra) && ra > 0 ? ra * 1000 : 60_000) // 429 → back off hard before the next request
+  } else if (res.status === 401) {
+    authFailures.push(Date.now()) // feed the auto-pause breaker
   }
   let body: unknown
   try {

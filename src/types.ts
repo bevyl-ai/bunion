@@ -52,6 +52,7 @@ export interface TrackerConfig {
   requiredLabels: string[] // normalized: trim + lowercase + dedupe; matched host-side (AND)
   activeStates: string[]
   terminalStates: string[]
+  minRequestGapMs: number // global min gap (ms) between Linear API requests — paces ALL traffic so we never hammer the API
 }
 
 export interface HooksConfig {

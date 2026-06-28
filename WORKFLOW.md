@@ -7,7 +7,9 @@ tracker:
   active_states: [Triage, Backlog, Todo, In Progress, QA Requested, QA Verify, QA blocked, Verifying in prod]   # Ready to ship + "Merged: In Staging" + Needs human are NOT active (humans / the release train move those)
   terminal_states: [Done, Canceled, Cancelled, Duplicate, Needs human]   # Needs human = the factory stops + a person must decide
 polling:
-  interval_ms: 10000
+  interval_ms: 30000              # poll every 30s (was 10s): 3x fewer Linear reads; the dashboard stays plenty fresh
+  # tracker.min_request_gap_ms (default 250) paces EVERY Linear request — orchestrator reads + the agents' linear_graphql
+  # tool all funnel through one gate, so we never hammer Linear into a rate-limit/abuse revocation again.
 phases:                              # a worker hands off to a FRESH agent when a ticket crosses phases (independence)
   plan: [Triage, Backlog, Todo]      # PLAN (clerk pass): any labeled ticket enters here — Todo isn't special
   build: [In Progress]               # BUILD: implement + PR + stupify review loop

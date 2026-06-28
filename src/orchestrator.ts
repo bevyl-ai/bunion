@@ -6,7 +6,7 @@ import { startRole, type RoleHandle } from './role-runner'
 import { AppServerSession } from './codex/app-server'
 import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
-import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment } from './linear'
+import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment, recentAuthFailures } from './linear'
 import { log, warn } from './log'
 import { readJson, throttledWriter, writeJson } from './persist'
 import { remoteHome } from './ssh'
@@ -674,6 +674,12 @@ export async function start(workflowPath?: string): Promise<void> {
         cfg = next
       } catch (e) {
         warn(`config: ${e instanceof Error ? e.message : e} (keeping last good)`)
+      }
+      // Linear auth-failure circuit breaker: if the agents are hammering a dead/blocked token (repeated 401s), AUTO-PAUSE
+      // so we stop before Linear revokes us (again). Resume after restoring the token.
+      if (!paused && recentAuthFailures(60_000) >= 12) {
+        setPaused(true)
+        warn('Linear auth failing repeatedly (likely a dead/blocked token) — AUTO-PAUSED to stop hammering; fix the token, then resume')
       }
       await reconcile()
       let board: Issue[]

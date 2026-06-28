@@ -72,6 +72,7 @@ export function loadConfig(path?: string): Config {
     requiredLabels: [...new Set(arr(tk.required_labels).map((l) => l.trim().toLowerCase()).filter(Boolean))],
     activeStates: arr(tk.active_states).length ? arr(tk.active_states) : ['Todo', 'In Progress'],
     terminalStates: arr(tk.terminal_states).length ? arr(tk.terminal_states) : ['Closed', 'Cancelled', 'Canceled', 'Duplicate', 'Done'],
+    minRequestGapMs: num(tk.min_request_gap_ms, 250), // global min gap between Linear requests — pace all traffic (orchestrator + agents)
   }
 
   const poll = obj(fm.polling)

@@ -41,7 +41,7 @@ hooks:
     if [ "$ok" != 1 ]; then mkdir -p "$W"; cd "$W"; git clone --depth 100 "https://github.com/$REPO.git" . 2>/dev/null || gh repo clone "$REPO" . -- --depth 100; fi
   timeout_ms: 180000
 agent:
-  max_concurrent_agents: 8
+  max_concurrent_agents: 24
   max_turns: 20
 worker:
   # Empty → agents run locally (workspace + clone + codex on this machine; max_concurrent_agents is the only cap).

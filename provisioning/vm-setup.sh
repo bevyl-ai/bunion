@@ -22,12 +22,12 @@ EOF
 # 2. Route github clones through the integration proxy (which carries the gh credential helper).
 git config --global url."https://bevyl-web.int.exe.xyz/".insteadOf "https://github.com/"
 
-# 2b. Do NOT set GH_HOST in the profile. It makes gh authenticate as the bevyl-web GitHub APP
-#     (exe-dev-github-integration[bot]) — the SAME identity the stupify reviewer runs as — so stupify
-#     can't review factory PRs: GitHub forbids an app reviewing its own PR, and stupify's auto-scope
-#     skips [bot] authors anyway. Without GH_HOST the codex agent's gh authors PRs as the human operator
-#     (Octember), which stupify CAN review. (Added in 8b8866b; reverted — it silently deadlocked the
-#     review gate, every PR from #6499 on.) Reads that need the proxy can prefix GH_HOST per-command.
+# 2b. gh has no github.com creds on the VM — only the bevyl-web integration proxy — so point gh at it
+#     so `gh pr` just works. This authors PRs as the bevyl-web app (exe-dev-github-integration[bot]),
+#     which is fine: the bevyl stupify reviewer is configured to review the factory's app-authored PRs
+#     (its inScope gates on the `bunion` label, and it posts COMMENT reviews — which GitHub allows even
+#     app-on-its-own-PR). See stupify-octember-stupify / stupify-bevyl-ai-bevyl-ai ~/.stupify/review-sweep.ts.
+grep -q 'GH_HOST=' "$HOME/.profile" 2>/dev/null || echo 'export GH_HOST=bevyl-web.int.exe.xyz' >> "$HOME/.profile"
 
 # 3. The repo's toolchain. The base image ships codex + gh + python3 but NO bun/node, and the
 #    bevyl repo is bun-based — without this the build/QA agents can't run tests/typecheck.

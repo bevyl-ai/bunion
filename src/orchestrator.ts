@@ -63,6 +63,26 @@ function saveTokens(t: TokenTally): void {
   }
 }
 
+// When the token tally started accumulating — stamped once, persisted across restarts. Lets the dashboard price
+// tokens at the flat plan's effective rate ($PLAN/mo ÷ the monthly token volume = total / months elapsed).
+const SINCE_FILE = join(homedir(), '.bunion', 'since')
+function loadSince(): number {
+  try {
+    const v = Number(readFileSync(SINCE_FILE, 'utf8').trim())
+    if (Number.isFinite(v) && v > 0) return v
+  } catch {
+    // not stamped yet
+  }
+  const now = Date.now()
+  try {
+    mkdirSync(dirname(SINCE_FILE), { recursive: true })
+    writeFileSync(SINCE_FILE, String(now))
+  } catch {
+    // best effort
+  }
+  return now
+}
+
 // The thin harness. Poll the tracker's active states, dispatch a Codex worker per issue (bounded), reconcile
 // running issues against the tracker, and retry. It never touches Linear state or git — the AGENT does, via the
 // workflow prompt + skills. Faithful to Symphony's orchestrator (SSH pool, blocked-state, dashboard omitted).
@@ -82,6 +102,7 @@ export async function start(workflowPath?: string): Promise<void> {
   const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
   const summaries = new Map<string, string>() // last agent message per ticket — survives the log buffer, surfaces the human action
   const tokens = loadTokens() // identifier → phase → cumulative token counts; persisted across restarts
+  const tallySince = loadSince() // when the token tally started — for the plan-rate $ on the dashboard
   let lastTokenSave = 0
   const notesFetched = new Set<string>() // stuck tickets whose verdict comment we've pulled once for display
   const lastState = new Map<string, string>() // last-seen Linear state per ticket — drops a stale note on transition
@@ -337,6 +358,7 @@ export async function start(workflowPath?: string): Promise<void> {
       cap: displayCap(),
       pollMs: cfg.pollIntervalMs,
       now: Date.now(),
+      since: tallySince,
       items,
       totalTokens,
       totalInput,

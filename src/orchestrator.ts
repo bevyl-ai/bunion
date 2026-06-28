@@ -63,6 +63,27 @@ function saveTokens(t: TokenTally): void {
   }
 }
 
+// Per-ticket activity logs, persisted so a handed-off ticket keeps its log across daemon restarts + eviction
+// (they're in-memory otherwise, so a restart blanks every non-running ticket's log).
+const LOGS_FILE = join(homedir(), '.bunion', 'logs.json')
+function loadLogs(): Map<string, string[]> {
+  try {
+    const v = JSON.parse(readFileSync(LOGS_FILE, 'utf8'))
+    if (v && typeof v === 'object') return new Map(Object.entries(v).filter(([, a]) => Array.isArray(a)) as [string, string[]][])
+  } catch {
+    // none yet
+  }
+  return new Map()
+}
+function saveLogs(logs: Map<string, string[]>): void {
+  try {
+    mkdirSync(dirname(LOGS_FILE), { recursive: true })
+    writeFileSync(LOGS_FILE, JSON.stringify(Object.fromEntries(logs)))
+  } catch {
+    // best effort
+  }
+}
+
 // The thin harness. Poll the tracker's active states, dispatch a Codex worker per issue (bounded), reconcile
 // running issues against the tracker, and retry. It never touches Linear state or git — the AGENT does, via the
 // workflow prompt + skills. Faithful to Symphony's orchestrator (SSH pool, blocked-state, dashboard omitted).
@@ -78,7 +99,8 @@ export async function start(workflowPath?: string): Promise<void> {
   let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
   let tokenSeq = 0
 
-  const logs = new Map<string, string[]>() // per-identifier run log (rolling), kept for the last ~16 runs
+  const logs = loadLogs() // per-identifier run log; loaded from disk so handed-off tickets keep their log
+  let lastLogSave = 0
   const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
   const summaries = new Map<string, string>() // last agent message per ticket — survives the log buffer, surfaces the human action
   const tokens = loadTokens() // identifier → phase → cumulative token counts; persisted across restarts
@@ -172,7 +194,7 @@ export async function start(workflowPath?: string): Promise<void> {
     }
     logs.delete(issue.identifier)
     logs.set(issue.identifier, []) // fresh log at the newest position
-    if (logs.size > 16) {
+    if (logs.size > 60) {
       const oldest = logs.keys().next().value
       if (oldest && oldest !== issue.identifier) logs.delete(oldest)
     }
@@ -190,6 +212,11 @@ export async function start(workflowPath?: string): Promise<void> {
         if (arr) {
           arr.push(e.log)
           if (arr.length > 600) arr.splice(0, arr.length - 600)
+          const tl = Date.now()
+          if (tl - lastLogSave > 3000) {
+            lastLogSave = tl
+            saveLogs(logs)
+          }
         }
         if (e.log.startsWith('● ')) summaries.set(issue.identifier, e.log.slice(2, 400)) // keep the latest agent message
       }

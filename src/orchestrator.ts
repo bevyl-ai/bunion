@@ -110,6 +110,34 @@ function saveThreads(m: Map<string, ThreadRec>): void {
   }
 }
 
+// Recover threads bunion has no record of (tickets that ran before thread-persistence shipped, or a lost threads.json)
+// by reading codex's own threads DB on each worker, keyed by the ticket's workspace cwd. Read-only + best-effort.
+const BACKFILL_PY = `
+import sqlite3, glob, os, json
+dbs = sorted(glob.glob(os.path.expanduser('~/.codex/state_*.sqlite')))
+out = {}
+if dbs:
+    try:
+        con = sqlite3.connect('file:' + dbs[-1] + '?mode=ro', uri=True)
+        for cwd, tid, upd in con.execute("SELECT cwd, id, updated_at FROM threads WHERE cwd LIKE '%/.bunion/workspaces/%' AND archived = 0 ORDER BY updated_at ASC"):
+            out[os.path.basename(str(cwd).rstrip('/'))] = [tid, str(upd)]
+    except Exception:
+        pass
+print(json.dumps(out))
+`
+const BACKFILL_CMD = `echo ${Buffer.from(BACKFILL_PY).toString('base64')} | base64 -d | python3`
+function sshCapture(host: string, cmd: string): Promise<string> {
+  return new Promise((resolve) => {
+    const p = spawn('ssh', ['-o', 'ConnectTimeout=15', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', host, cmd], { stdio: ['ignore', 'pipe', 'ignore'] })
+    let out = ''
+    p.stdout?.on('data', (d: Buffer) => {
+      out += d.toString()
+    })
+    p.on('close', () => resolve(out))
+    p.on('error', () => resolve(''))
+  })
+}
+
 // The thin harness. Poll the tracker's active states, dispatch a Codex worker per issue (bounded), reconcile
 // running issues against the tracker, and retry. It never touches Linear state or git — the AGENT does, via the
 // workflow prompt + skills. Faithful to Symphony's orchestrator (SSH pool, blocked-state, dashboard omitted).
@@ -129,6 +157,7 @@ export async function start(workflowPath?: string): Promise<void> {
   let lastLogSave = 0
   const threadRecs = loadThreads() // issue.id → { codex threadId, host } — the persistent thread per ticket
   let lastThreadSave = 0
+  let backfilled = false // one-shot: recover unknown threads from worker rollouts on the first board
   const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
   const summaries = new Map<string, string>() // last agent message per ticket — survives the log buffer, surfaces the human action
   const tokens = loadTokens() // identifier → phase → cumulative token counts; persisted across restarts
@@ -489,6 +518,42 @@ export async function start(workflowPath?: string): Promise<void> {
       return { ok: false, msg: e instanceof Error ? e.message : String(e) }
     }
   }
+  // Ask each worker's codex DB for the thread keyed to a board ticket's workspace, for tickets bunion has no record
+  // of, and seed threadRecs with the newest match. Runs once on the first board; makes pre-persistence handoffs
+  // chattable. Best-effort — a worker that's down or has no match is simply skipped.
+  const backfillThreads = async (board: Issue[]): Promise<void> => {
+    const missing = board.filter((i) => !threadRecs.has(i.id))
+    if (missing.length === 0 || hosts().length === 0) return
+    const want = new Map(missing.map((i) => [i.identifier, i.id])) // identifier → linear id
+    const found = new Map<string, { threadId: string; host: string; upd: string }>()
+    await Promise.all(
+      hosts().map(async (host) => {
+        let obj: Record<string, [string, string]>
+        try {
+          obj = JSON.parse((await sshCapture(host, BACKFILL_CMD)).trim() || '{}')
+        } catch {
+          return
+        }
+        for (const [ident, v] of Object.entries(obj)) {
+          if (!want.has(ident) || !Array.isArray(v)) continue
+          const [tid, upd] = v
+          const prev = found.get(ident)
+          if (typeof tid === 'string' && (!prev || String(upd) > prev.upd)) found.set(ident, { threadId: tid, host, upd: String(upd) })
+        }
+      }),
+    )
+    let n = 0
+    for (const [ident, rec] of found) {
+      const id = want.get(ident)
+      if (!id || threadRecs.has(id)) continue
+      threadRecs.set(id, { threadId: rec.threadId, host: rec.host })
+      n++
+    }
+    if (n > 0) {
+      saveThreads(threadRecs)
+      log(`backfilled ${n} ticket thread(s) from worker rollouts`)
+    }
+  }
   if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log, onAction, onChat)
 
   // Periodic workspace hygiene: each ticket's checkout is ~5-6G (node_modules + git history), and stale ones pile
@@ -538,6 +603,10 @@ export async function start(workflowPath?: string): Promise<void> {
         continue
       }
       lastBoard = board
+      if (!backfilled) {
+        backfilled = true
+        void backfillThreads(board)
+      }
       // Surface WHY a ticket is stuck: pull its workpad Verdict for the unblock + needs-human states (not while an
       // agent is live on it — its own messages fill the note then). Clear a cached note when a ticket changes state
       // so a qa-blocked verdict doesn't linger after the unblocker escalates it to Needs human.

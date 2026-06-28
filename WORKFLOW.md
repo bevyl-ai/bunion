@@ -182,16 +182,17 @@ You are an **independent verifier**. You did NOT write this code; approach it sk
 
 ## VERIFY QA — status `QA Verify` (the adversarial check)
 
-A QA agent already verified this and moved it here. You are a **second, independent reviewer of the QA itself** — assume the QA pass may have proven the wrong thing. Your one question: **is this feature actually proven safe to ship?** You did NOT write the code and you did NOT run the original QA. **Do NOT change product code.**
+A QA agent already verified this and moved it here. You are a **second, independent reviewer of the QA itself** — assume the QA pass may have proven the wrong thing. Your one question: **did QA produce sufficient, on-target proof that this change works for the real scenario?** You **audit QA's evidence — you do NOT re-run QA or reproduce the bug yourself.** If the proof is inadequate, that's a QA failure to send back, not work for you to do. You did NOT write the code and you did NOT run the original QA. **Do NOT change product code.**
 
 1. Read the workpad: acceptance criteria, the QA verdict, and exactly what QA claims it verified (steps + screenshot). Open the PR (diff + checks); run the `pull` skill for the PR branch.
-2. Be adversarial about the proof — the common failure is QA verifying a convenient substitute, not the bug:
+2. Be adversarial about QA's PROOF — judge whether its evidence is sufficient and on-target. Assess what QA recorded; do NOT re-run the test yourself:
    - Did QA exercise the **real reported scenario**, or a stand-in? (synthetic data instead of the reported data, the wrong route/workspace, a happy path that sidesteps the actual bug, *a* screenshot that isn't the fixed behaviour.)
-   - **Re-verify it yourself** with `browser.mjs` (see `.codex/skills/qa/SKILL.md`): reproduce the ORIGINAL bug's *exact* conditions, confirm the fix holds there, and probe the obvious edge/regression cases the change could break. Screenshot your own proof.
+   - Is the proof **tied to THIS change** (the PR diff) and complete enough to convince a skeptic — the right before/after, the actual bug condition exercised, and the obvious edge/regression cases the change could break addressed? Or are there gaps?
+   - Your evidence is QA's recorded steps + screenshot, the PR diff, and the checks — read them critically. If the proof is thin, off-target, or missing, that is a QA failure to send back; it is NOT something you reproduce yourself.
 3. **Code-review gate — honor stupify's latest word.** A fix can reach you with an unaddressed code-review objection: the build gate can carry a stale `✅` forward over a "trivial"-looking commit that stupify actually re-reviewed and objected to. Read `gh api repos/$REPO/pulls/<N>/reviews` and find stupify's MOST RECENT review (from `exe-dev-github-integration[bot]`, tagged `<!-- stupify:<sha> -->`). **Latest review contains `✅` → gate met. Latest review describes problems with no `✅` (e.g. `oof…`, `one small drift trap 👇`) → that is an UNADDRESSED changes-request: route `DEFECT` below, no matter how clean the QA proof looks.** (Stupify never reviewed the latest code — absent/flaked — is not a block here; QA + the human merge remain gates.)
 4. Record your **`Verdict:`** line in the workpad (with how you verified — `QA INADEQUATE`/`DEFECT` must state the concrete reason), then route:
-   - **VERIFIED** — the real scenario is proven fixed and you found no regression → move to `Ready to ship`. **Do NOT merge.**
-   - **QA INADEQUATE** — the fix may be fine but QA proved the wrong thing / the proof doesn't hold → move back to `QA Requested` with a precise `[codex]` comment of what QA must actually test.
+   - **VERIFIED** — QA's proof sufficiently shows the real scenario fixed, with the obvious edge/regression cases covered → move to `Ready to ship`. **Do NOT merge.**
+   - **QA INADEQUATE** — the fix may be fine but QA's proof is insufficient, off-target, or proves the wrong thing → move back to `QA Requested` with a precise `[codex]` comment of exactly what proof QA must produce.
    - **DEFECT** — you reproduced a real failure or regression, OR stupify's latest review is an unaddressed changes-request (step 3) → move back to `In Progress` with the exact repro steps / the stupify objection for the build agent.
 
 ## UNBLOCK — status `QA blocked` (the unblocker)

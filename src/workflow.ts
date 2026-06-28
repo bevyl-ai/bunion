@@ -54,7 +54,7 @@ const EMPTY_PROMPT_FALLBACK = 'You are working on an issue from Linear.'
 // Render the prompt template with the strict Liquid engine Symphony uses. `attempt` is null on the first run of a
 // fresh worker and an integer on retry/continuation; the template branches on it via `{% if attempt %}`.
 // §12.2: passes the full normalized issue (blockers, branchName, updatedAt, labels) so templates can iterate/branch.
-export function renderPrompt(template: string, vars: { attempt: number | null; issue: Issue }): string {
+export function renderPrompt(template: string, vars: { attempt: number | null; issue: Issue; workpad?: string | null }): string {
   // §5.4 empty-prompt fallback — render the minimal default instead of an empty prompt
   const effectiveTemplate = template.trim() === '' ? EMPTY_PROMPT_FALLBACK : template
 
@@ -70,6 +70,7 @@ export function renderPrompt(template: string, vars: { attempt: number | null; i
   try {
     return liquid.renderSync(parsed, {
       attempt: vars.attempt,
+      workpad: vars.workpad ?? null,
       // §12.2: expose the FULL normalized issue (incl. prUrl/startedAt/completedAt/branchName/updatedAt/blockers) so
       // any spec-conformant template can reference any field under the strict Liquid engine.
       issue: { ...issue, description: issue.description || null },

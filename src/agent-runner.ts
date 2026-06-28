@@ -1,7 +1,7 @@
 import { AppServerSession } from './codex/app-server'
 import { phaseOf } from './config'
-import { linearGraphqlTool } from './codex/dynamic-tool'
-import { fetchById } from './linear'
+import { linearGraphqlTool, linearReadTool } from './codex/dynamic-tool'
+import { fetchById, fetchWorkpad } from './linear'
 import { log } from './log'
 import { ensureWorkspace, installSkills, removeWorkspace, runHook } from './workspace'
 import { renderPrompt } from './workflow'
@@ -32,7 +32,7 @@ function continuationPrompt(turn: number, maxTurns: number): string {
 // One worker session for an issue: prep workspace → run turns on a single app-server thread up to max_turns,
 // refreshing the issue between turns and continuing while it stays active. The AGENT drives Linear/git/gh/merge.
 // `host` null = run locally; else the workspace, clone, and codex all live on that ssh worker (an exe.dev VM).
-export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null): AgentHandle {
+export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null, getCachedIssue: (id: string) => Issue | null): AgentHandle {
   let session: AppServerSession | null = null
   let stopped = false
 
@@ -59,7 +59,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
       return { ok: false, error: e instanceof Error ? e.message : String(e), code: e instanceof CategorizedError ? e.code : undefined }
     }
 
-    session = new AppServerSession(cfg, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state))], onEvent)
+    session = new AppServerSession(cfg, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state)), linearReadTool(getCachedIssue)], onEvent)
     let current = issue
     try {
       await session.start(dir, host)
@@ -76,10 +76,13 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
       }
       onEvent({ threadId }) // report the resolved id so the orchestrator persists it for the next phase + chat
       const startPhase = phaseOf(cfg, current.state)
+      // Fetch the prior workpad ONCE and fold it into the dispatch prompt, so the agent starts with its notes instead
+      // of spending turns + Linear reads pulling them back.
+      const workpad = await fetchWorkpad(cfg, issue.id).catch(() => null)
       for (let turn = 1; ; turn++) {
         if (stopped) return { ok: false, error: 'terminated' }
         onEvent({ turn, log: `\n── turn ${turn} ──` })
-        const prompt = turn === 1 ? renderPrompt(cfg.promptTemplate, { attempt, issue: current }) : continuationPrompt(turn, cfg.agent.maxTurns)
+        const prompt = turn === 1 ? renderPrompt(cfg.promptTemplate, { attempt, issue: current, workpad }) : continuationPrompt(turn, cfg.agent.maxTurns)
         await session.runTurn(threadId, dir, prompt, `${current.identifier}: ${current.title}`)
         current = await fetchById(cfg, issue.id)
         if (!isActive(cfg, current.state)) break // handed off to a downstream state — this worker is done

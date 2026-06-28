@@ -1,5 +1,25 @@
 import { graphql } from '../linear'
-import type { Config, DynamicTool, RoleQuota } from '../types'
+import type { Config, DynamicTool, Issue, RoleQuota } from '../types'
+
+// A cached, zero-API read of a ticket's CURRENT state from the orchestrator's last poll (lastBoard). The agent uses
+// this to re-check status/labels without a Linear API call; writes + uncached reads still go through linear_graphql.
+export function linearReadTool(getCachedIssue: (id: string) => Issue | null): DynamicTool {
+  return {
+    spec: {
+      name: 'linear_read',
+      description: "Read a ticket's CURRENT cached state (status, labels, priority, blockers, PR url) from the orchestrator — NO API cost. Input: { identifier }. Use this to re-check state; use linear_graphql only for writes + anything not returned here.",
+      inputSchema: { type: 'object', additionalProperties: false, required: ['identifier'], properties: { identifier: { type: 'string', description: 'Ticket identifier, e.g. BEV-123.' } } },
+    },
+    async run(args: unknown): Promise<{ success: boolean; output: string }> {
+      const a = args && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : {}
+      const id = (typeof a.identifier === 'string' ? a.identifier : typeof args === 'string' ? args : '').trim()
+      if (!id) return fail('missing_identifier')
+      const issue = getCachedIssue(id)
+      if (!issue) return fail(`not_cached: ${id} is not in the current board cache — use linear_graphql for a fresh read.`)
+      return { success: true, output: JSON.stringify({ identifier: issue.identifier, state: issue.state, title: issue.title, labels: issue.labels, priority: issue.priority, blockers: issue.blockers, prUrl: issue.prUrl, url: issue.url }, null, 2) }
+    },
+  }
+}
 
 const DESCRIPTION =
   'Execute a single raw GraphQL query or mutation against Linear, reusing the configured tracker auth. ' +

@@ -286,7 +286,7 @@ export async function start(workflowPath?: string): Promise<void> {
         saveTokens()
       }
       if (e.rateLimits) lastRateLimits = e.rateLimits // newest coding-agent rate-limit snapshot for the dashboard
-    }, threadRecs.get(issue.id)?.threadId ?? null)
+    }, threadRecs.get(issue.id)?.threadId ?? null, (id) => lastBoard.find((i) => i.id === id || i.identifier === id) ?? null)
     void entry.handle.done.then(async (outcome) => {
       if (running.get(issue.id) !== entry) return // already terminated by reconcile
       running.delete(issue.id)

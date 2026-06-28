@@ -289,6 +289,18 @@ export async function fetchLatestNote(cfg: Config, issueId: string): Promise<str
   return workpad ? workpadReason(workpad) : null
 }
 
+// The agent's persistent `## Codex Workpad` comment (full body) — folded into the dispatch prompt so a fresh phase
+// starts with its prior notes WITHOUT the agent spending turns + Linear reads pulling them back.
+export async function fetchWorkpad(cfg: Config, issueId: string): Promise<string | null> {
+  const d = await query<{ issue: { comments: { nodes: { body: string }[] } } | null }>(
+    cfg,
+    `query Workpad($id: String!) { issue(id: $id) { comments(last: 10) { nodes { body } } } }`,
+    { id: issueId },
+  )
+  const bodies = (d.issue?.comments.nodes ?? []).map((n) => n.body).filter(Boolean)
+  return bodies.find((b) => /codex workpad/i.test(b)) ?? null
+}
+
 function toIssue(r: RawIssue): Issue {
   return {
     id: r.id,

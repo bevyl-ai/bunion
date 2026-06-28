@@ -114,8 +114,12 @@ Issue context:
 
 Description:
 {% if issue.description %}{{ issue.description }}{% else %}No description provided.{% endif %}
+{% if workpad %}
+## Your current Codex Workpad (live from Linear — already fetched for you; do NOT spend a tool call re-reading it)
+{{ workpad }}
+{% endif %}
 
-You can talk to Linear through the injected `linear_graphql` tool (one GraphQL operation per call; reuse it for reads, comments, state changes, PR attachment). You have `git`, `gh`, a shell, and this checkout of the target repo. Skills live in `.codex/skills/`.
+Linear tools (we are rate-limited — use sparingly): `linear_read` returns a ticket's CURRENT cached state (status / labels / priority / blockers / PR) with NO API cost — prefer it for re-checking state. `linear_graphql` runs one raw GraphQL op per call — use it for WRITES (the workpad comment, state changes, PR attachment) and anything `linear_read` doesn't cover. Your workpad is already provided above, so don't re-fetch it. You have `git`, `gh`, a shell, and this checkout of the target repo. Skills live in `.codex/skills/`.
 
 ## Always (every phase)
 

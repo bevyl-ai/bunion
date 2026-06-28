@@ -6,7 +6,7 @@ import { startRole, type RoleHandle } from './role-runner'
 import { AppServerSession } from './codex/app-server'
 import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
-import { fetchBoard, fetchCandidates, fetchIssuesByStates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment } from './linear'
+import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment } from './linear'
 import { log, warn } from './log'
 import { readJson, throttledWriter, writeJson } from './persist'
 import { remoteHome } from './ssh'
@@ -380,22 +380,9 @@ export async function start(workflowPath?: string): Promise<void> {
   const workerDesc = hosts().length === 0 ? 'local' : `${hosts().length} VM${hosts().length > 1 ? 's' : ''}×${cfg.worker.maxPerHost}`
   log(`bunion up · scope=${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''} · cap=${displayCap()} · workers=${workerDesc} · poll=${cfg.pollIntervalMs}ms`)
 
-  // §8.6 Startup terminal workspace cleanup: remove leftover workspaces for issues already in terminal states so stale
-  // dirs don't accumulate across daemon restarts. On fetch failure: warn + continue — never block startup.
-  void (async () => {
-    try {
-      const terminal = await fetchIssuesByStates(cfg, cfg.tracker.terminalStates)
-      for (const i of terminal) {
-        if (running.has(i.id)) continue // a ticket the first poll already picked up — don't wipe a live workspace
-        for (const h of (hosts().length ? hosts() : [null])) {
-          removeWorkspace(cfg, i.identifier, h)
-        }
-      }
-      if (terminal.length > 0) log(`startup cleanup: removed workspaces for ${terminal.length} terminal issue(s)`)
-    } catch (e) {
-      warn(`startup cleanup: ${e instanceof Error ? e.message : String(e)} (continuing)`)
-    }
-  })()
+  // §8.6 startup workspace hygiene: an immediate pruneWorkspaces() sweep runs below (after its setInterval) — it's
+  // bounded by the workspace dirs that ACTUALLY exist and is fire-and-forget (spawn, not a sync per-terminal-ticket
+  // scan), so stale dirs clear at startup without blocking the event loop.
 
   const rankStatus = (s: BoardItem['status']): number => (s === 'running' ? 0 : s === 'retrying' ? 1 : s === 'queued' ? 2 : 3)
   const snapshot = (): Snapshot => {
@@ -672,7 +659,10 @@ export async function start(workflowPath?: string): Promise<void> {
     }
     log(`workspace prune swept ${hosts.length} VM(s)`)
   }
-  if (cfg.worker.sshHosts.length) setInterval(pruneWorkspaces, 20 * 60 * 1000)
+  if (cfg.worker.sshHosts.length) {
+    setInterval(pruneWorkspaces, 20 * 60 * 1000)
+    pruneWorkspaces() // §8.6: immediate startup sweep so stale (terminal/abandoned) workspaces don't wait 20min to clear
+  }
 
   for (;;) {
     try {

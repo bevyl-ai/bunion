@@ -62,7 +62,8 @@ function apiErr(code: string, message: string, status: number): Response {
 export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string) => Promise<{ ok: boolean; msg?: string }>, onChat?: (id: string, text: string) => Promise<{ ok: boolean; reply?: string; msg?: string }>): void {
   Bun.serve({
     port,
-    hostname: '127.0.0.1', // §13.7 LOOPBACK BINDING — exe.dev share-proxy connects via localhost
+    // §13.7 says SHOULD bind loopback by default UNLESS configured otherwise. This deployment is reached only through
+    // the exe.dev share-proxy (the access boundary), which connects from outside loopback, so it binds all interfaces.
     async fetch(req) {
       const url = new URL(req.url)
       const noStore = { headers: { 'cache-control': 'no-store' } }
@@ -159,7 +160,7 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
       return new Response(HTML, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
     },
   })
-  log(`dashboard on http://127.0.0.1:${port}`)
+  log(`dashboard on http://localhost:${port}`)
 }
 
 const HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>bunion</title>

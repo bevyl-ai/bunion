@@ -676,9 +676,12 @@ export async function start(workflowPath?: string): Promise<void> {
           pr.tokensAtProgress = grandTotal(tokens, i.identifier)
         }
         progress.set(i.id, pr)
-        if (isActive(i.state) && !isTerminal(i.state) && norm(i.state) !== 'qa blocked') {
+        if (isActive(i.state) && !isTerminal(i.state)) {
           const reason = deadlockReason(grandTotal(tokens, i.identifier) - pr.tokensAtProgress, now - pr.since, cfg.deadlock)
-          if (reason) stuck.push({ issue: i, target: deadlocked.has(i.id) ? 'Needs human' : 'QA blocked', reason })
+          // A ticket deadlocking while IN `QA blocked` means the unblocker itself is looping — its burn used to be
+          // exempt from this sweep entirely (the runaway hole). The last automated stop has failed, so escalate it
+          // straight to Needs human. Anywhere else: 1st offense → QA blocked (let the unblocker try), 2nd → Needs human.
+          if (reason) stuck.push({ issue: i, target: norm(i.state) === 'qa blocked' || deadlocked.has(i.id) ? 'Needs human' : 'QA blocked', reason })
         }
         const s = norm(i.state)
         if ((s === 'qa blocked' || s === 'needs human' || s === 'ready to ship') && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {

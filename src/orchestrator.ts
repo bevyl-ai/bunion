@@ -8,7 +8,7 @@ import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
 import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment } from './linear'
 import { log, warn } from './log'
-import { readJson, throttledWriter } from './persist'
+import { readJson, throttledWriter, writeJson } from './persist'
 import { remoteHome } from './ssh'
 import { backfillThreads } from './thread-backfill'
 import { foldDelta, grandTotal, phaseBreakdown, totals, zeroCounts, type TokenTally } from './tokens'
@@ -49,6 +49,7 @@ const TOKENS_FILE = join(STATE_DIR, 'tokens.json') // identifier → phase → t
 const LOGS_FILE = join(STATE_DIR, 'logs.json') // identifier → recent transcript lines
 const THREADS_FILE = join(STATE_DIR, 'threads.json') // issue.id / role:<name> → { threadId, host }
 const QUOTA_FILE = join(STATE_DIR, 'role-quota.json') // role name → { day, count } — daily ticket-filing cap, persisted
+const PAUSED_FILE = join(STATE_DIR, 'paused.json') // operator panic switch — { paused: bool }, persisted so a restart mid-incident stays paused
 
 // One codex thread per ticket / role, persisted (key → thread id + the worker holding its rollout) so the next
 // phase and operator chat resume the same conversation, and a resume lands on the right worker after a restart.
@@ -80,6 +81,10 @@ export async function start(workflowPath?: string): Promise<void> {
   const retries = new Map<string, RetryTimer>()
   let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
   let tokenSeq = 0
+  // Operator panic switch — when paused, NOTHING dispatches (pipeline or roles) and running agents are halted, but the
+  // daemon + dashboard stay up so you can watch + resume. Persisted, so a restart mid-incident does NOT un-pause.
+  let paused = readJson<{ paused: boolean }>(PAUSED_FILE, { paused: false }).paused
+  const savePaused = (v: boolean): void => writeJson(PAUSED_FILE, { paused: v })
 
   // Persistent state under ~/.bunion, loaded once and re-saved (coalesced) as it changes, so numbers + transcripts
   // survive a daemon restart. `get` is read at write time, so callers just mutate then call save*().
@@ -203,6 +208,20 @@ export async function start(workflowPath?: string): Promise<void> {
     if (cleanup && e) removeWorkspace(cfg, e.issue.identifier, host)
   }
 
+  // Toggle the panic switch. On pause, halt every running pipeline agent + pool role so the gateway/Linear stop being
+  // hit immediately; dispatch stays off (guarded in the loop/retry/role paths) until resumed. The poll keeps running.
+  const setPaused = (v: boolean): void => {
+    paused = v
+    savePaused(v)
+    if (v) {
+      for (const id of [...running.keys()]) stopRun(id)
+      for (const [, e] of roleRunning) e.handle.stop()
+      log('■ factory PAUSED by operator — dispatch off, all running agents halted')
+    } else {
+      log('▶ factory RESUMED by operator')
+    }
+  }
+
   const retryDelay = (attempt: number, continuation: boolean): number =>
     continuation && attempt === 1 ? CONTINUATION_MS : Math.min(FAILURE_BASE_MS * 2 ** Math.min(attempt - 1, 10), cfg.agent.maxRetryBackoffMs)
 
@@ -267,6 +286,10 @@ export async function start(workflowPath?: string): Promise<void> {
   async function onRetry(id: string, identifier: string, attempt: number, token: number): Promise<void> {
     if (retries.get(id)?.token !== token) return // superseded
     retries.delete(id)
+    if (paused) {
+      claimed.delete(id) // panic switch: drop the claim (keep the pin, like stopRun) so the main loop re-dispatches on resume
+      return
+    }
     let candidates: Issue[]
     try {
       candidates = await fetchCandidates(cfg)
@@ -364,30 +387,24 @@ export async function start(workflowPath?: string): Promise<void> {
       totalInput: t.input,
       totalOutput: t.output,
       totalCached: t.cached,
+      paused,
       roles: cfg.roles.map(roleItem),
     }
   }
-  // Operator chat: reopen the ticket's thread on its worker and run ONE read-only turn with the operator's message,
-  // appending both sides to the ticket's transcript (the log). Idle tickets only — a running agent owns the thread.
-  const onChat = async (identifier: string, text: string): Promise<{ ok: boolean; reply?: string; msg?: string }> => {
-    const msg = text.trim()
-    if (!msg) return { ok: false, msg: 'empty message' }
-    const issue = lastBoard.find((i) => i.identifier === identifier)
-    if (!issue) return { ok: false, msg: 'ticket not on the board' }
-    if (running.has(issue.id)) return { ok: false, msg: 'the agent is mid-run — chat once it hands off / is idle' }
-    const rec = threadRecs.get(issue.id)
-    if (!rec?.threadId) return { ok: false, msg: 'no thread yet — this ticket has not run' }
-    const host = placement.get(issue.id) ?? rec.host
-    // Resume runs in the worker's HOME, not the ticket workspace — handed-off workspaces get pruned, and codex
-    // thread/resume loads the thread's full context regardless of cwd. (Dispatches re-create the workspace; chat doesn't.)
+  // One read-only chat turn against a persisted thread (a ticket OR a pool role): resume it on its worker, run the
+  // operator's message, and append both sides to the `logKey` transcript. The agent answers from the thread's context;
+  // it never edits — steering is acknowledged and acted on at the next dispatch/run. cwd is the worker HOME, not the
+  // ticket workspace (handed-off workspaces get pruned; codex thread/resume loads context regardless of cwd).
+  const chatTurn = async (logKey: string, threadId: string, host: string | null, displayMsg: string, prompt: string, label: string): Promise<{ ok: boolean; reply?: string; msg?: string }> => {
     const cwd = host ? remoteHome(host) : homedir()
     if (host && !cwd) return { ok: false, msg: 'cannot resolve the worker home' }
-    let lg = logs.get(identifier)
+    let lg = logs.get(logKey)
     if (!lg) {
       lg = []
-      logs.set(identifier, lg)
+      logs.set(logKey, lg)
     }
-    lg.push(`○ ${msg}`) // operator turn — shows in the transcript immediately
+    touchLog(logKey) // bump to MRU so the LRU cap doesn't evict this transcript mid-conversation on a busy board
+    lg.push(`○ ${displayMsg}`) // operator turn — shows in the transcript immediately
     saveLogs()
     const replies: string[] = []
     const chat = new AppServerSession(cfg, [], (e) => {
@@ -395,8 +412,8 @@ export async function start(workflowPath?: string): Promise<void> {
     })
     try {
       await chat.start(cwd, host)
-      await chat.resumeThread(rec.threadId)
-      await chat.runTurn(rec.threadId, cwd, chatPrompt(msg), `${identifier}: operator chat`, { type: 'readOnly' })
+      await chat.resumeThread(threadId)
+      await chat.runTurn(threadId, cwd, prompt, label, { type: 'readOnly' })
     } catch (e) {
       chat.stop()
       const m = e instanceof Error ? e.message : String(e)
@@ -409,14 +426,37 @@ export async function start(workflowPath?: string): Promise<void> {
     lg.push(`● ${reply}`)
     if (lg.length > 600) lg.splice(0, lg.length - 600)
     saveLogs()
-    log(`chat: ${identifier} ←→ operator`)
+    log(`chat: ${logKey} ←→ operator`)
     return { ok: true, reply }
+  }
+  // Operator chat. A pool-role name steers that role (it acts on its next scheduled run); otherwise it's a ticket —
+  // idle tickets only, since a running agent owns the thread.
+  const onChat = async (identifier: string, text: string): Promise<{ ok: boolean; reply?: string; msg?: string }> => {
+    const msg = text.trim()
+    if (!msg) return { ok: false, msg: 'empty message' }
+    const role = cfg.roles.find((r) => r.name === identifier)
+    if (role) {
+      if (roleRunning.has(role.name)) return { ok: false, msg: 'the role is mid-run — message it once it is idle' }
+      const rec = threadRecs.get(`role:${role.name}`)
+      if (!rec?.threadId) return { ok: false, msg: 'no thread yet — this role has not run' }
+      return chatTurn(role.name, rec.threadId, rec.host, msg, rolePrompt(role, msg), `${role.name}: operator chat`)
+    }
+    const issue = lastBoard.find((i) => i.identifier === identifier)
+    if (!issue) return { ok: false, msg: 'ticket not on the board' }
+    if (running.has(issue.id)) return { ok: false, msg: 'the agent is mid-run — chat once it hands off / is idle' }
+    const rec = threadRecs.get(issue.id)
+    if (!rec?.threadId) return { ok: false, msg: 'no thread yet — this ticket has not run' }
+    return chatTurn(identifier, rec.threadId, placement.get(issue.id) ?? rec.host, msg, chatPrompt(msg), `${identifier}: operator chat`)
   }
 
   // Operator actions = pure pipeline transitions. The thread carries context (chat + prior phases), so an action just
   // advances the ticket and the next dispatch resumes the same thread on the same worker. `restart` is the hard reset:
   // wipe the workspace AND drop the thread so the ticket replans from scratch.
   const onAction = async (identifier: string, action: string): Promise<{ ok: boolean; msg?: string }> => {
+    if (identifier === '__pause__') {
+      setPaused(!paused)
+      return { ok: true, msg: paused ? 'factory paused' : 'factory resumed' }
+    }
     const issue = lastBoard.find((i) => i.identifier === identifier)
     if (!issue) return { ok: false, msg: 'ticket not on the board' }
     const host = placement.get(issue.id) ?? null
@@ -467,6 +507,7 @@ export async function start(workflowPath?: string): Promise<void> {
     return hs.length ? (hs[i % hs.length] ?? null) : null
   }
   const dispatchRole = (role: Role, i: number): void => {
+    if (paused) return // operator panic switch — no role runs while paused
     if (roleRunning.has(role.name)) return // last cadence's run still going — skip this tick
     const quota = makeQuota(role)
     if (quota.remaining() <= 0) {
@@ -651,7 +692,7 @@ export async function start(workflowPath?: string): Promise<void> {
           warn(`deadlock move ${issue.identifier}: ${e instanceof Error ? e.message : String(e)}`)
         }
       }
-      if (slots() > 0) {
+      if (!paused && slots() > 0) {
         for (const issue of board.filter((i) => isActive(i.state)).sort(byDispatch)) {
           if (slots() <= 0) break
           if (!eligible(issue)) continue
@@ -681,6 +722,11 @@ export function deadlockReason(tokensSinceProgress: number, msSinceProgress: num
 // An operator chat turn: read-only, answer from the thread's own context. Terse so it doesn't crowd the history.
 function chatPrompt(msg: string): string {
   return `The operator is messaging you directly about this ticket — READ-ONLY: do not edit files, push, or change Linear; just answer, using this thread's full context. If they are steering you, acknowledge it; you will act on it when the next phase runs. Operator:\n\n${msg}`
+}
+
+// An operator chat turn for a pool role — same read-only contract, framed as steering the role's standing focus.
+function rolePrompt(role: Role, msg: string): string {
+  return `The operator is messaging you, the "${role.name}" pool role — READ-ONLY: do not edit files, push, or change Linear; just answer using your thread's full context. If they are steering you (changing what you should focus on), acknowledge it; you will act on it on your next scheduled run. Operator:\n\n${msg}`
 }
 
 // Symphony dispatch order: priority (urgent→low, none last), then oldest, then identifier.

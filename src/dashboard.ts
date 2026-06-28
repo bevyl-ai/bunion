@@ -45,6 +45,7 @@ export interface Snapshot {
   totalInput: number
   totalOutput: number
   totalCached: number // cache-hit input tokens — the cheap part; cached/input is the hit rate
+  paused: boolean // operator panic switch — when true, dispatch is halted (daemon + dashboard stay up)
   roles: RoleItem[] // the pool — ambient roles rendered in the bottom dock
 }
 
@@ -91,8 +92,8 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
 *{box-sizing:border-box}
 :root{--bg:#090a0e;--surf:#15171e;--surf2:#1b1e27;--surf3:#232733;--line:#23262f;--line2:#2e323d;--line3:#3b4150;--fg:#eef1f7;--mut:#99a0ad;--mut2:#5a6270;--accent:#5b8def;--accent2:#86acff;--sh1:0 1px 2px rgba(0,0,0,.45);--sh2:0 8px 26px rgba(0,0,0,.42)}
 html,body{height:100%}
-body{margin:0;background:var(--bg);background-image:radial-gradient(1100px 520px at 80% -10%,#14171f 0%,rgba(20,23,31,0) 60%),linear-gradient(180deg,#0b0d12 0%,#090a0e 100%);background-attachment:fixed;color:var(--fg);font:13.5px/1.5 -apple-system,BlinkMacSystemFont,'Inter','Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(11,12,17,.72);backdrop-filter:saturate(150%) blur(14px);z-index:10}
+body{margin:0;display:flex;flex-direction:column;height:100vh;overflow:hidden;background:var(--bg);background-image:radial-gradient(1100px 520px at 80% -10%,#14171f 0%,rgba(20,23,31,0) 60%),linear-gradient(180deg,#0b0d12 0%,#090a0e 100%);background-attachment:fixed;color:var(--fg);font:13.5px/1.5 -apple-system,BlinkMacSystemFont,'Inter','Segoe UI',Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(11,12,17,.72);backdrop-filter:saturate(150%) blur(14px);z-index:10}
 .brand{font-weight:650;letter-spacing:.2px;display:flex;align-items:center;gap:10px;font-size:14px}
 .mark{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px #5b8def22,0 0 14px var(--accent)}
 .sub{color:var(--mut);font-weight:400;font-size:12.5px;margin-left:2px;letter-spacing:.2px}
@@ -101,12 +102,24 @@ header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:
 .chip i{width:7px;height:7px;border-radius:50%}
 .cap{color:var(--mut);font-size:12px;align-self:center}
 .clock{margin-left:auto;color:var(--mut2);font-size:12px;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace}
-.board{display:flex;gap:14px;padding:22px 22px 32px;align-items:flex-start;overflow-x:auto;scroll-behavior:smooth}
+.pausebtn{margin-left:12px;background:#15171e;border:1px solid #4a3a1a;color:#d99a2b;border-radius:8px;padding:5px 13px;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.2px;transition:background .15s,border-color .15s;white-space:nowrap}
+.pausebtn:hover{background:#1d1810;border-color:#d99a2b}
+.pausebtn.on{background:#11201a;border-color:#3fb27f;color:#3fb27f}
+.pausebtn.on:hover{background:#142a20}
+#pausebanner{flex:0 0 auto;display:none;align-items:center;gap:10px;padding:9px 22px;background:linear-gradient(90deg,#2a1414,#1a0f0f);border-bottom:1px solid #5a2222;color:#e8a0a0;font-size:12.5px;font-weight:600}
+#pausebanner.show{display:flex}
+#pausebanner .pb-dot{width:8px;height:8px;border-radius:50%;background:#e0564f;box-shadow:0 0 8px #e0564f}
+.board{flex:1 1 auto;min-height:0;display:flex;gap:14px;padding:22px 22px 16px;align-items:stretch;overflow-x:auto;overflow-y:hidden;scroll-behavior:smooth}
 .board::-webkit-scrollbar{height:10px}
 .board::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px}
 .board::-webkit-scrollbar-thumb:hover{background:#3a4150}
 .board::-webkit-scrollbar-track{background:transparent}
-.col{flex:0 0 256px;min-width:0;max-width:256px;display:flex;flex-direction:column;gap:10px}
+.col{flex:0 0 256px;min-width:0;max-width:256px;display:flex;flex-direction:column;gap:10px;min-height:0}
+.colcards{display:flex;flex-direction:column;gap:10px;flex:1 1 auto;overflow-y:auto;overflow-x:hidden;min-height:0;padding-bottom:8px}
+.colcards>*{flex-shrink:0}
+.colcards::-webkit-scrollbar{width:8px}
+.colcards::-webkit-scrollbar-thumb{background:var(--line2);border-radius:5px}
+.colcards::-webkit-scrollbar-thumb:hover{background:#3a4150}
 .colh{display:flex;align-items:center;gap:8px;padding:2px 4px 9px;font-size:11px;font-weight:700;color:var(--mut);letter-spacing:.7px;text-transform:uppercase}
 .colh i{width:8px;height:8px;border-radius:50%}
 .colh .ct{margin-left:auto;color:var(--mut);font-weight:600;font-variant-numeric:tabular-nums;background:var(--surf2);border:1px solid var(--line);border-radius:20px;min-width:22px;text-align:center;padding:1px 7px;font-size:10.5px;letter-spacing:0}
@@ -166,7 +179,7 @@ header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:
 .mbtn.danger{color:#eaa6a0;border-color:#e0564f55}.mbtn.danger:hover{background:#e0564f1a}
 .mbtn.busy{opacity:.6;pointer-events:none}
 .empty{color:var(--mut);padding:64px;text-align:center;width:100%}
-#dock{padding:2px 22px 30px}
+#dock{flex:0 0 auto;padding:12px 22px 16px;border-top:1px solid var(--line);background:linear-gradient(180deg,rgba(11,12,17,.35),rgba(9,10,14,.85))}
 .docklab{font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:var(--mut);font-weight:700;margin:0 4px 11px}
 .dockrow{display:flex;gap:14px;flex-wrap:wrap}
 .rcard{flex:0 0 292px;max-width:360px;background:linear-gradient(180deg,var(--surf) 0%,#13151c 100%);border:1px solid var(--line);border-left:2.5px solid var(--accent);border-radius:12px;padding:13px 15px;cursor:pointer;box-shadow:var(--sh1);transition:transform .15s cubic-bezier(.2,.7,.2,1),border-color .15s,box-shadow .15s}
@@ -215,7 +228,9 @@ header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:
  <div class="brand"><span class="mark"></span>bunion<span class="sub" id="scope"></span></div>
  <div class="stats" id="stats"></div>
  <span class="clock" id="clock"></span>
+ <button id="pausebtn" class="pausebtn" onclick="postAction(this,'__pause__','toggle',event)">&#9208; Pause</button>
 </header>
+<div id="pausebanner"></div>
 <div class="board" id="board"></div>
 <div id="dock"></div>
 <div id="modal"><div id="mpanel">
@@ -253,17 +268,17 @@ function actionList(it){if(!it||it.state==='Done')return [];
 function abtn(id,d){return '<button class="mbtn '+(d.c||'')+'" title="'+(d.t||'')+'" onclick="modalAct(\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>';}
 function kebab(it){return actionList(it).length?'<button class="kebab" data-id="'+it.identifier+'" onclick="toggleMenu(this,event)" title="actions">&#8943;</button>':'';}
 const COLS=[
- {name:'Triage',c:'#6b7280',states:['Triage']},
- {name:'Backlog',c:'#6b7280',states:['Backlog']},
- {name:'Todo',c:'#8b93a1',states:['Todo']},
+ {name:'Planning',c:'#8b93a1',states:['Triage','Backlog','Todo']},
  {name:'In Progress',c:'#5b8def',states:['In Progress']},
  {name:'QA check',c:'#d99a2b',states:['QA Requested']},
  {name:'Verify QA',c:'#c79a3a',states:['QA Verify']},
  {name:'Unblocking',c:'#e0564f',states:['QA blocked']},
  {name:'Needs human',c:'#d9568c',states:['Needs human']},
  {name:'Ready',c:'#3fb27f',states:['Ready to ship']},
- {name:'Merged',c:'#a371f7',states:['Done']}];
-function colIdx(st){for(var i=0;i<COLS.length;i++)if(COLS[i].states.indexOf(st)>=0)return i;return -1;}
+ {name:'In Staging',c:'#e3b341',states:['Merged: In Staging']},
+ {name:'Verifying prod',c:'#4a9eda',states:['Verifying in Prod']},
+ {name:'Done',c:'#6b7280',states:['Done']}];
+function colIdx(st){var l=(st||'').trim().toLowerCase();for(var i=0;i<COLS.length;i++)for(var j=0;j<COLS[i].states.length;j++)if(COLS[i].states[j].toLowerCase()===l)return i;return -1;}
 function moveItems(it){if(!it)return [];var cur=colIdx(it.state);return COLS.map(function(col,i){return i===cur?null:{a:'move:'+col.states[0],l:'\\u2192 '+col.name,c:'',t:'Move this ticket to '+col.name};}).filter(Boolean);}
 let snap={items:[],cap:0,scope:''};
 async function pull(){try{snap=await (await fetch('/state.json',{cache:'no-store'})).json()}catch(e){}render()}
@@ -292,12 +307,13 @@ function cardHtml(r,now){
   '<div class="cfoot">'+status+'<span class="meta">'+tk+tot+'</span></div>'+
  '</div>';
 }
-function colHtml(col,arr,now){return '<div class="col"><div class="colh"><i style="background:'+col.c+'"></i>'+col.name+'<span class="ct">'+arr.length+'</span></div>'+(arr.length?arr.map(r=>cardHtml(r,now)).join(''):'<div class="colempty">empty</div>')+'</div>';}
+function colHtml(col,arr,now){return '<div class="col"><div class="colh"><i style="background:'+col.c+'"></i>'+col.name+'<span class="ct">'+arr.length+'</span></div><div class="colcards">'+(arr.length?arr.map(r=>cardHtml(r,now)).join(''):'<div class="colempty">empty</div>')+'</div></div>';}
 let lastSig='';
 function render(){
  const items=snap.items||[];
  const run=items.filter(r=>r.status==='running').length,q=items.filter(r=>r.status==='queued').length,rt=items.filter(r=>r.status==='retrying').length;
  scope.textContent=snap.scope||'';
+ var pb=document.getElementById('pausebtn'),pbn=document.getElementById('pausebanner');if(pb){if(snap.paused){pb.className='pausebtn on';pb.innerHTML='&#9654; Resume';pbn.className='show';pbn.innerHTML='<span class="pb-dot"></span><b>FACTORY PAUSED</b> &middot; dispatch halted, agents stopped &mdash; click Resume to continue';}else{pb.className='pausebtn';pb.innerHTML='&#9208; Pause';pbn.className='';}}
  const chip=(col,n,lab)=>'<span class="chip"><i style="background:'+col+'"></i>'+n+' '+lab+'</span>';
  stats.innerHTML=chip('#3fb27f',run,'running')+(q?chip('#7c8493',q,'queued'):'')+(rt?chip('#d99a2b',rt,'retrying'):'')+'<span class="cap">'+(snap.cap||0)+' slots</span>'+(snap.totalTokens?'<span class="cap" title="~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' at GPT-5.5 API rates &mdash; but actual spend is the flat $200/mo Pro plan, so this is the value extracted, not what you pay ('+fmtTok(snap.totalCached||0)+' of '+fmtTok(snap.totalInput||0)+' input cached)">&#931; '+fmtTok(snap.totalTokens)+' tok'+(snap.totalInput?' &middot; <b style="color:#3fb27f">'+Math.round(snap.totalCached/snap.totalInput*100)+'% cached</b>':'')+' &middot; <span title="At GPT-5.5 API rates this volume would cost ~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+'. A $'+PLAN_MONTHLY+'/mo Pro plan is worth up to ~$'+Math.round(PLAN_API_VALUE/1000)+'k/mo in API terms, so the same compute on the plan is ~'+fmtCost(planCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' &mdash; about 1/'+Math.round(PLAN_API_VALUE/PLAN_MONTHLY)+'th of API, and what you actually pay.">~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' api &middot; ~'+fmtCost(planCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' on plan</span></span>':'');
  // Rebuild the board ONLY when structure changes (membership / state / status / pr); live fields tick in place.
@@ -306,11 +322,9 @@ function render(){
   lastSig=sig;const now=Date.now();
   if(!items.length){board.innerHTML='<div class="empty">no '+esc(snap.scope||'dark-factory')+' tickets in scope</div>';}
   else{
-   const bk=COLS.map(()=>[]),other=[];
-   for(const r of items){const i=colIdx(r.state);if(i<0)other.push(r);else bk[i].push(r);}
-   let html=COLS.map((col,i)=>colHtml(col,bk[i],now)).join('');
-   if(other.length)html+=colHtml({name:'Other',c:'#596069'},other,now);
-   board.innerHTML=html;
+   const bk=COLS.map(()=>[]);
+   for(const r of items){const i=colIdx(r.state);if(i>=0)bk[i].push(r);}  // post-merge states (In Staging/Verifying/Done) own columns; anything unmapped is skipped
+   board.innerHTML=COLS.map((col,i)=>colHtml(col,bk[i],now)).join('');
   }
  }
  renderDock();
@@ -342,9 +356,9 @@ function renderRoleHead(r){var live=r.status==='running';
  if(r.tokens)meta.push('<span class="m">&#931; '+fmtTok(r.tokens)+' tok</span>');
  if(r.host)meta.push('<span class="m">&#9709; '+esc(r.host.replace(/\\.exe\\.xyz$/,''))+'</span>');
  document.getElementById('msub').innerHTML='<div class="mtitle2">'+(live?esc(r.activity||'working\\u2026'):'idle \\u2014 waiting for the next run')+'</div><div class="mmeta">'+meta.join('')+'</div>';
- document.getElementById('mbanner').style.display='none';document.getElementById('mtokens').style.display='none';document.getElementById('mchat').style.display='none';document.getElementById('mactions').style.display='none';}
+ document.getElementById('mbanner').style.display='none';document.getElementById('mtokens').style.display='none';document.getElementById('mactions').style.display='none';document.getElementById('mchat').style.display='flex';document.getElementById('mmsg').placeholder='Prompt '+r.name+' \\u2014 steer it; it acts on its next run';}
 let expandedId=null;
-function syncHead(){var role=(snap.roles||[]).find(x=>x.name===expandedId);if(role){renderRoleHead(role);return;}document.getElementById('mchat').style.display='flex';const it=(snap.items||[]).find(x=>x.identifier===expandedId);const c=it?SC(it.state):'#7c8493';
+function syncHead(){var role=(snap.roles||[]).find(x=>x.name===expandedId);if(role){renderRoleHead(role);return;}document.getElementById('mchat').style.display='flex';document.getElementById('mmsg').placeholder='Message the agent \\u2014 it answers with this ticket\\u2019s full thread as context';const it=(snap.items||[]).find(x=>x.identifier===expandedId);const c=it?SC(it.state):'#7c8493';
  document.getElementById('mtitle').innerHTML=esc(expandedId||'')+(it?' <span class="pill" style="color:'+c+';background:'+c+'22">'+esc(it.state)+'</span>':'')+(it&&it.prUrl?' <a class="pr" href="'+it.prUrl+'" target="_blank" rel="noopener">PR #'+(it.prUrl.split("/pull/")[1]||"")+'</a>':'')+(it&&it.url?' <a class="pr" style="background:#8b929e1a;color:var(--mut)" href="'+it.url+'" target="_blank" rel="noopener">Linear &#8599;</a>':'');
  const sub=document.getElementById('msub');
  if(it){var m=[];
@@ -367,7 +381,7 @@ function openModal(id){expandedId=id;chatPending=false;document.getElementById('
 function closeModal(){expandedId=null;document.getElementById('modal').style.display='none';}
 async function postAction(btn,id,action,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
  var box=btn&&btn.parentNode;if(box)box.querySelectorAll('button').forEach(function(x){x.classList.add('busy')});
- try{var r=await (await fetch('/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:id,action:action})})).json();showToast((r&&r.ok)?(id+' &mdash; '+(r.msg||'done')):('Failed: '+((r&&r.msg)||'error')),!(r&&r.ok));}catch(e){showToast('Action failed',true);}
+ try{var r=await (await fetch('/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:id,action:action})})).json();var sys=(id||'').indexOf('__')===0;showToast((r&&r.ok)?((sys?'':id+' &mdash; ')+(r.msg||'done')):('Failed: '+((r&&r.msg)||'error')),!(r&&r.ok));}catch(e){showToast('Action failed',true);}
  setTimeout(pull,400);setTimeout(pull,1600);}
 function showToast(msg,isErr){var t=document.getElementById('toast');t.innerHTML=(isErr?'&#10007; ':'&#10003; ')+msg;t.className=(isErr?'err':'ok')+' show';clearTimeout(window._tt);window._tt=setTimeout(function(){t.className=isErr?'err':'ok'},3400);}
 function modalAct(id,action,ev){postAction(null,id,action,ev);}

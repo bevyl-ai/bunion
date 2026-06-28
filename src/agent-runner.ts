@@ -5,11 +5,14 @@ import { fetchById } from './linear'
 import { log } from './log'
 import { ensureWorkspace, installSkills, removeWorkspace, runHook } from './workspace'
 import { renderPrompt } from './workflow'
+import { CategorizedError } from './types'
 import type { AgentEvent, Config, Issue } from './types'
 
 export interface AgentOutcome {
   ok: boolean
   error?: string
+  // §10.6 stable error code (CategorizedError.code) for orchestrator routing (setup failures vs transient)
+  code?: string
 }
 
 export interface AgentHandle {
@@ -53,7 +56,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
     } catch (e) {
       // A transient host failure during setup (unreachable VM, ssh hiccup) must fail this session cleanly so the
       // orchestrator retries it — never escape as an unhandled rejection that takes the whole daemon down.
-      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      return { ok: false, error: e instanceof Error ? e.message : String(e), code: e instanceof CategorizedError ? e.code : undefined }
     }
 
     session = new AppServerSession(cfg, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state))], onEvent)
@@ -85,7 +88,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
       }
       return { ok: true }
     } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      return { ok: false, error: e instanceof Error ? e.message : String(e), code: e instanceof CategorizedError ? e.code : undefined }
     } finally {
       session.stop()
       if (cfg.hooks.afterRun) {

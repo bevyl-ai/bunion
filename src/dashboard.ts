@@ -52,14 +52,86 @@ export interface Snapshot {
   roles: RoleItem[] // the pool — ambient roles rendered in the bottom dock
 }
 
+// §13.7.2: JSON error envelope for /api/v1/* responses.
+function apiErr(code: string, message: string, status: number): Response {
+  return Response.json({ error: { code, message } }, { status, headers: { 'cache-control': 'no-store' } })
+}
+
 // A tiny status server: GET /state.json is the live orchestrator snapshot; GET / is a self-contained page that
 // polls it and renders the board (kanban by pipeline stage) + a per-run log modal.
 export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string) => Promise<{ ok: boolean; msg?: string }>, onChat?: (id: string, text: string) => Promise<{ ok: boolean; reply?: string; msg?: string }>): void {
   Bun.serve({
     port,
+    hostname: '127.0.0.1', // §13.7 LOOPBACK BINDING — exe.dev share-proxy connects via localhost
     async fetch(req) {
       const url = new URL(req.url)
       const noStore = { headers: { 'cache-control': 'no-store' } }
+
+      // §13.7.2 /api/v1/* — additive JSON REST API (does NOT remove legacy endpoints below)
+      if (url.pathname.startsWith('/api/v1/')) {
+        const sub = url.pathname.slice('/api/v1/'.length)
+
+        if (sub === 'state') {
+          // §13.7.2 GET /api/v1/state — full snapshot
+          if (req.method !== 'GET') return apiErr('method_not_allowed', 'Use GET', 405)
+          const snap = getSnapshot()
+          return Response.json({
+            generated_at: new Date().toISOString(),
+            counts: {
+              running: snap.items.filter(i => i.status === 'running').length,
+              retrying: snap.items.filter(i => i.status === 'retrying').length,
+            },
+            items: snap.items,
+            codex_totals: {
+              total_tokens: snap.totalTokens,
+              input_tokens: snap.totalInput,
+              output_tokens: snap.totalOutput,
+              cached_tokens: snap.totalCached,
+              seconds_running: snap.secondsRunning, // §13.3
+            },
+            rate_limits: snap.rateLimits, // §13.3
+            paused: snap.paused,
+          }, noStore)
+        }
+
+        if (sub === 'refresh') {
+          // §13.7.2 POST /api/v1/refresh — no clean way to trigger a poll from the dashboard layer
+          // (the poll loop lives in the orchestrator which isn't passed in); return 202 with a note.
+          if (req.method !== 'POST') return apiErr('method_not_allowed', 'Use POST', 405)
+          return Response.json({
+            queued: false,
+            note: 'polling runs automatically on the configured interval; no external trigger available from the dashboard layer',
+            requested_at: new Date().toISOString(),
+          }, { status: 202, headers: { 'cache-control': 'no-store' } })
+        }
+
+        // §13.7.2 GET /api/v1/<issue_identifier>
+        if (sub && !sub.includes('/')) {
+          if (req.method !== 'GET') return apiErr('method_not_allowed', 'Use GET', 405)
+          const identifier = decodeURIComponent(sub)
+          const snap = getSnapshot()
+          const item = snap.items.find(i => i.identifier === identifier)
+          if (!item) return apiErr('issue_not_found', `Unknown identifier: ${identifier}`, 404)
+          return Response.json({
+            issue_identifier: item.identifier,
+            status: item.status,
+            state: item.state,
+            host: item.host,
+            turn: item.turn,
+            activity: item.activity,
+            started_at: item.startedAt ? new Date(item.startedAt).toISOString() : null,
+            last_activity_at: item.lastActivity ? new Date(item.lastActivity).toISOString() : null,
+            retry_attempt: item.retryAttempt,
+            retry_due_at: item.retryDueAt ? new Date(item.retryDueAt).toISOString() : null,
+            tokens: item.tokens,
+            recent_events: getLog(identifier).slice(-20),
+          }, noStore)
+        }
+
+        // Unknown /api/v1/* path
+        return apiErr('not_found', 'Unknown /api/v1/ endpoint', 404)
+      }
+
       if (url.pathname === '/state.json') return Response.json(getSnapshot(), noStore)
       if (url.pathname.startsWith('/transcript/')) return Response.json({ log: getLog(decodeURIComponent(url.pathname.slice('/transcript/'.length))) }, noStore)
       if (url.pathname === '/action' && req.method === 'POST') {
@@ -87,7 +159,7 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
       return new Response(HTML, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
     },
   })
-  log(`dashboard on http://localhost:${port}`)
+  log(`dashboard on http://127.0.0.1:${port}`)
 }
 
 const HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>bunion</title>
@@ -318,7 +390,12 @@ function render(){
  scope.textContent=snap.scope||'';
  var pb=document.getElementById('pausebtn'),pbn=document.getElementById('pausebanner');if(pb){if(snap.paused){pb.className='pausebtn on';pb.innerHTML='&#9654; Resume';pbn.className='show';pbn.innerHTML='<span class="pb-dot"></span><b>FACTORY PAUSED</b> &middot; dispatch halted, agents stopped &mdash; click Resume to continue';}else{pb.className='pausebtn';pb.innerHTML='&#9208; Pause';pbn.className='';}}
  const chip=(col,n,lab)=>'<span class="chip"><i style="background:'+col+'"></i>'+n+' '+lab+'</span>';
- stats.innerHTML=chip('#3fb27f',run,'running')+(q?chip('#7c8493',q,'queued'):'')+(rt?chip('#d99a2b',rt,'retrying'):'')+'<span class="cap">'+(snap.cap||0)+' slots</span>'+(snap.totalTokens?'<span class="cap" title="~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' at GPT-5.5 API rates &mdash; but actual spend is the flat $200/mo Pro plan, so this is the value extracted, not what you pay ('+fmtTok(snap.totalCached||0)+' of '+fmtTok(snap.totalInput||0)+' input cached)">&#931; '+fmtTok(snap.totalTokens)+' tok'+(snap.totalInput?' &middot; <b style="color:#3fb27f">'+Math.round(snap.totalCached/snap.totalInput*100)+'% cached</b>':'')+' &middot; <span title="At GPT-5.5 API rates this volume would cost ~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+'. A $'+PLAN_MONTHLY+'/mo Pro plan is worth up to ~$'+Math.round(PLAN_API_VALUE/1000)+'k/mo in API terms, so the same compute on the plan is ~'+fmtCost(planCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' &mdash; about 1/'+Math.round(PLAN_API_VALUE/PLAN_MONTHLY)+'th of API, and what you actually pay.">~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' api &middot; ~'+fmtCost(planCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' on plan</span></span>':'');
+ // §13.3 rate-limit chip: amber ≥80%, red ≥95%; resetsIn countdown when known
+ function rlChip(rl){if(!rl||rl.usedPercent==null)return '';var pct=rl.usedPercent,col=pct>=95?'#e0564f':pct>=80?'#d99a2b':'#3fb27f',bg=pct>=95?'#e0564f22':pct>=80?'#d99a2b22':'';var label=Math.round(pct)+'% rl'+(rl.resetsInSeconds!=null?' ('+Math.round(rl.resetsInSeconds)+'s)':'');return '<span class="chip" title="rate-limit usage (Symphony §13.3)" style="'+(bg?'background:'+bg+';border-color:'+col+'44;':'')+'"><i style="background:'+col+'"></i><span style="color:'+col+'">'+label+'</span></span>';}
+ // §13.3 secondsRunning: aggregate runtime across all sessions
+ var sr=snap.secondsRunning||0,srH=Math.floor(sr/3600),srM=Math.floor((sr%3600)/60),srS=Math.floor(sr%60);
+ var srStr=(srH?srH+'h ':'')+(srH||srM?String(srM).padStart(2,'0')+'m ':'')+String(srS).padStart(2,'0')+'s';
+ stats.innerHTML=chip('#3fb27f',run,'running')+(q?chip('#7c8493',q,'queued'):'')+(rt?chip('#d99a2b',rt,'retrying'):'')+'<span class="cap">'+(snap.cap||0)+' slots</span>'+(snap.totalTokens?'<span class="cap" title="~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' at GPT-5.5 API rates &mdash; but actual spend is the flat $200/mo Pro plan, so this is the value extracted, not what you pay ('+fmtTok(snap.totalCached||0)+' of '+fmtTok(snap.totalInput||0)+' input cached)">&#931; '+fmtTok(snap.totalTokens)+' tok'+(snap.totalInput?' &middot; <b style="color:#3fb27f">'+Math.round(snap.totalCached/snap.totalInput*100)+'% cached</b>':'')+' &middot; <span title="At GPT-5.5 API rates this volume would cost ~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+'. A $'+PLAN_MONTHLY+'/mo Pro plan is worth up to ~$'+Math.round(PLAN_API_VALUE/1000)+'k/mo in API terms, so the same compute on the plan is ~'+fmtCost(planCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' &mdash; about 1/'+Math.round(PLAN_API_VALUE/PLAN_MONTHLY)+'th of API, and what you actually pay.">~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' api &middot; ~'+fmtCost(planCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' on plan</span></span>':'')+(sr?'<span class="cap" title="aggregate runtime across all sessions (Symphony §13.3 secondsRunning)">&#9201; '+srStr+'</span>':'')+rlChip(snap.rateLimits);
  // Rebuild the board ONLY when structure changes (membership / state / status / pr); live fields tick in place.
  const sig=JSON.stringify(items.map(r=>[r.identifier,r.state,r.status,r.host,r.prUrl,r.retryAttempt,r.state==='QA blocked'?(r.note||''):'']));
  if(sig!==lastSig){

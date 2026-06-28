@@ -6,7 +6,7 @@ import { startRole, type RoleHandle } from './role-runner'
 import { AppServerSession } from './codex/app-server'
 import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
-import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment } from './linear'
+import { fetchBoard, fetchCandidates, fetchIssuesByStates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment } from './linear'
 import { log, warn } from './log'
 import { readJson, throttledWriter, writeJson } from './persist'
 import { remoteHome } from './ssh'
@@ -26,6 +26,7 @@ interface RunningEntry {
   host: string | null // the worker VM this run is pinned to (null = local)
   phase: string // the pipeline phase this session is running (tokens are attributed here)
   tokenBase: TokenCounts // last-folded thread-cumulative usage, so we add only the delta to the persistent tally
+  turnId: string | null // latest codex turn id — composes session_id = `${threadId}-${turnId}` (§13.1 / §4.2)
 }
 interface RoleEntry {
   handle: RoleHandle
@@ -254,13 +255,16 @@ export async function start(workflowPath?: string): Promise<void> {
       hostCounts.set(host, (hostCounts.get(host) ?? 0) + 1)
     }
     touchLog(issue.identifier)
-    const entry: RunningEntry = { issue, handle: undefined as unknown as AgentHandle, retryAttempt: attempt > 0 ? attempt : 0, startedAt: Date.now(), lastActivity: Date.now(), turn: 0, activity: 'starting…', host, phase: phaseOf(cfg, issue.state), tokenBase: zeroCounts() }
+    const entry: RunningEntry = { issue, handle: undefined as unknown as AgentHandle, retryAttempt: attempt > 0 ? attempt : 0, startedAt: Date.now(), lastActivity: Date.now(), turn: 0, activity: 'starting…', host, phase: phaseOf(cfg, issue.state), tokenBase: zeroCounts(), turnId: null }
     running.set(issue.id, entry)
+    // §13.1: session_id = `${threadId}-${turnId}` when both known; threadId alone until first turn id arrives
+    const sessionId = (): string => { const t = threadRecs.get(issue.id)?.threadId; return t ? `${t}${entry.turnId ? `-${entry.turnId}` : ''}` : '' }
     log(`→ ${issue.identifier} (${issue.state})${attempt > 0 ? ` retry#${attempt}` : ''}${host ? ` @ ${host}` : ''}`)
     entry.handle = startAgent(cfg, issue, attempt > 0 ? attempt : null, host, (e) => {
       entry.lastActivity = Date.now()
       if (e.turn != null) entry.turn = e.turn
       if (e.label != null) entry.activity = e.label
+      if (e.turnId) entry.turnId = e.turnId // §13.1: track latest turn id for session_id composition
       if (e.threadId) {
         threadRecs.set(issue.id, { threadId: e.threadId, host })
         saveThreads()
@@ -283,17 +287,34 @@ export async function start(workflowPath?: string): Promise<void> {
       }
       if (e.rateLimits) lastRateLimits = e.rateLimits // newest coding-agent rate-limit snapshot for the dashboard
     }, threadRecs.get(issue.id)?.threadId ?? null)
-    void entry.handle.done.then((outcome) => {
+    void entry.handle.done.then(async (outcome) => {
       if (running.get(issue.id) !== entry) return // already terminated by reconcile
       running.delete(issue.id)
       endedRuntimeMs += Date.now() - entry.startedAt // fold this session's wall-clock into the aggregate runtime (§13.3)
+      const sid = sessionId()
       if (outcome.ok) {
         scheduleRetry(issue.id, issue.identifier, 1, true) // re-check & continue while active
-        log(`✓ ${issue.identifier} session done`)
+        log(`✓ ${issue.identifier} session done${sid ? ` session=${sid}` : ''}`) // §13.1
       } else {
-        const next = entry.retryAttempt > 0 ? entry.retryAttempt + 1 : 1
-        scheduleRetry(issue.id, issue.identifier, next, false)
-        warn(`✗ ${issue.identifier}: ${(outcome.error ?? '').slice(0, 200)}`)
+        const code = outcome.code
+        // §10.6: a genuinely-missing codex binary is non-transient — retrying forever won't fix it; route to Needs
+        // human so an operator can diagnose. Ambiguous codes (invalid_workspace_cwd etc.) may be transient
+        // version-skew, so they keep retrying via the normal backoff rather than parking.
+        const isSetupFailure = code === 'codex_not_found'
+        warn(`✗ ${issue.identifier}: ${(outcome.error ?? '').slice(0, 200)}${sid ? ` session=${sid}` : ''}${code ? ` code=${code}` : ''}`) // §13.1
+        if (isSetupFailure) {
+          log(`setup failure ${issue.identifier} (${code}) → Needs human`)
+          try {
+            await moveIssue(cfg, issue.id, 'Needs human')
+            await postComment(cfg, issue.id, `## ⚠️ Setup failure — needs operator\nThe factory cannot run this ticket: \`${code}\`.\n\n> ${(outcome.error ?? '').slice(0, 400)}\n\nManual intervention required before it can retry.`)
+          } catch (e) {
+            warn(`setup failure move ${issue.identifier}: ${e instanceof Error ? e.message : String(e)}`)
+          }
+          release(issue.id) // release the claim/pin AFTER the move lands, so the next poll can't re-dispatch it mid-move
+        } else {
+          const next = entry.retryAttempt > 0 ? entry.retryAttempt + 1 : 1
+          scheduleRetry(issue.id, issue.identifier, next, false)
+        }
       }
     })
   }
@@ -358,6 +379,23 @@ export async function start(workflowPath?: string): Promise<void> {
 
   const workerDesc = hosts().length === 0 ? 'local' : `${hosts().length} VM${hosts().length > 1 ? 's' : ''}×${cfg.worker.maxPerHost}`
   log(`bunion up · scope=${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''} · cap=${displayCap()} · workers=${workerDesc} · poll=${cfg.pollIntervalMs}ms`)
+
+  // §8.6 Startup terminal workspace cleanup: remove leftover workspaces for issues already in terminal states so stale
+  // dirs don't accumulate across daemon restarts. On fetch failure: warn + continue — never block startup.
+  void (async () => {
+    try {
+      const terminal = await fetchIssuesByStates(cfg, cfg.tracker.terminalStates)
+      for (const i of terminal) {
+        if (running.has(i.id)) continue // a ticket the first poll already picked up — don't wipe a live workspace
+        for (const h of (hosts().length ? hosts() : [null])) {
+          removeWorkspace(cfg, i.identifier, h)
+        }
+      }
+      if (terminal.length > 0) log(`startup cleanup: removed workspaces for ${terminal.length} terminal issue(s)`)
+    } catch (e) {
+      warn(`startup cleanup: ${e instanceof Error ? e.message : String(e)} (continuing)`)
+    }
+  })()
 
   const rankStatus = (s: BoardItem['status']): number => (s === 'running' ? 0 : s === 'retrying' ? 1 : s === 'queued' ? 2 : 3)
   const snapshot = (): Snapshot => {

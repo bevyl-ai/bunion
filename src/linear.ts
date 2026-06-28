@@ -1,4 +1,4 @@
-import type { Config, Issue } from './types'
+import { CategorizedError, type Config, type Issue } from './types'
 
 export interface GraphqlResult {
   body: unknown
@@ -8,16 +8,27 @@ export interface GraphqlResult {
 
 // Raw single-operation GraphQL against the configured Linear endpoint with the tracker auth. Used by the
 // linear_graphql host tool AND by the orchestrator's reads below.
+// §11.2: 30s network timeout so a hung Linear call never freezes the poll loop.
 export async function graphql(cfg: Config, query: string, variables: Record<string, unknown>, token?: string | null): Promise<GraphqlResult> {
-  const res = await fetch(cfg.tracker.endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: (token ?? cfg.tracker.apiKey) ?? '' },
-    body: JSON.stringify({ query, variables }),
-  })
+  let res: Response
+  try {
+    res = await fetch(cfg.tracker.endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: (token ?? cfg.tracker.apiKey) ?? '' },
+      body: JSON.stringify({ query, variables }),
+      signal: AbortSignal.timeout(30_000),
+    })
+  } catch (err) {
+    // §11.4: transport failure or timeout → linear_api_request
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new CategorizedError('linear_api_request', `linear: request failed — ${msg}`)
+  }
   let body: unknown
   try {
     body = await res.json()
-  } catch {
+  } catch (err) {
+    // §11.4: a timeout/abort during body read is a transport failure, not a GraphQL error
+    if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) throw new CategorizedError('linear_api_request', 'linear: request timed out during body read')
     body = { errors: [{ message: `linear: non-JSON response (${res.status})` }] }
   }
   return { body, httpOk: res.ok, status: res.status }
@@ -25,11 +36,36 @@ export async function graphql(cfg: Config, query: string, variables: Record<stri
 
 async function query<T>(cfg: Config, q: string, variables: Record<string, unknown>): Promise<T> {
   const r = await graphql(cfg, q, variables)
-  if (!r.httpOk) throw new Error(`linear http ${r.status}`)
+  // §11.4: non-2xx HTTP → linear_api_status
+  if (!r.httpOk) throw new CategorizedError('linear_api_status', `linear http ${r.status}`)
   const b = r.body as { data?: T; errors?: unknown }
-  if (Array.isArray(b.errors) && b.errors.length > 0) throw new Error(`linear gql: ${JSON.stringify(b.errors)}`)
-  if (b.data == null) throw new Error('linear gql: empty data')
+  // §11.4: GraphQL-level errors → linear_graphql_errors
+  if (Array.isArray(b.errors) && b.errors.length > 0) throw new CategorizedError('linear_graphql_errors', `linear gql: ${JSON.stringify(b.errors)}`)
+  // §11.4: empty/missing data → linear_unknown_payload
+  if (b.data == null) throw new CategorizedError('linear_unknown_payload', 'linear gql: empty data')
   return b.data
+}
+
+// §11.2 PAGINATION: loop on pageInfo.hasNextPage/endCursor, accumulate nodes across pages.
+// Used by fetchCandidates, fetchBoard, fetchIssuesByStates — all of which are unbounded queries.
+async function queryPaginated<N>(
+  cfg: Config,
+  buildQuery: (after: string | null) => string,
+  variables: Record<string, unknown>,
+  extract: (data: unknown) => { nodes: N[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } },
+): Promise<N[]> {
+  const all: N[] = []
+  let cursor: string | null = null
+  do {
+    const q = buildQuery(cursor)
+    const data = await query<unknown>(cfg, q, { ...variables, after: cursor })
+    const page = extract(data)
+    all.push(...page.nodes)
+    if (!page.pageInfo.hasNextPage) break
+    if (!page.pageInfo.endCursor) throw new CategorizedError('linear_missing_end_cursor', 'linear gql: hasNextPage=true but endCursor missing')
+    cursor = page.pageInfo.endCursor
+  } while (true)
+  return all
 }
 
 interface RawIssue {
@@ -56,23 +92,37 @@ const ISSUE_FIELDS = `id identifier title description url priority branchName cr
   inverseRelations { nodes { type issue { id identifier state { name } } } }
   attachments { nodes { url } }`
 
-const CANDIDATES = `query Candidates($filter: IssueFilter) {
-  issues(first: 100, filter: $filter) { nodes { ${ISSUE_FIELDS} } }
+// §11.2 PAGINATION: each paginated query accepts $after and returns pageInfo.
+const CANDIDATES = (after: string | null) => `query Candidates($filter: IssueFilter${after != null ? ', $after: String' : ''}) {
+  issues(first: 100, filter: $filter${after != null ? ', after: $after' : ''}) {
+    nodes { ${ISSUE_FIELDS} }
+    pageInfo { hasNextPage endCursor }
+  }
 }`
 
 const BY_IDS = `query ByIds($ids: [ID!]) {
   issues(first: 100, filter: { id: { in: $ids } }) { nodes { ${ISSUE_FIELDS} } }
 }`
 
-const BOARD = `query Board($filter: IssueFilter) {
-  issues(first: 50, filter: $filter) { nodes { ${ISSUE_FIELDS} } }
+// §11.2 PAGINATION: board is also unbounded when a team has many recent tickets.
+const BOARD = (after: string | null) => `query Board($filter: IssueFilter${after != null ? ', $after: String' : ''}) {
+  issues(first: 100, filter: $filter${after != null ? ', after: $after' : ''}) {
+    nodes { ${ISSUE_FIELDS} }
+    pageInfo { hasNextPage endCursor }
+  }
 }`
 
 const BY_KEY = `query ByKey($id: String!) { issue(id: $id) { ${ISSUE_FIELDS} } }`
 
-const BY_STATES = `query ByStates($filter: IssueFilter) {
-  issues(first: 100, filter: $filter) { nodes { ${ISSUE_FIELDS} } }
+// §11.2 PAGINATION: startup terminal cleanup can return many tickets.
+const BY_STATES = (after: string | null) => `query ByStates($filter: IssueFilter${after != null ? ', $after: String' : ''}) {
+  issues(first: 100, filter: $filter${after != null ? ', after: $after' : ''}) {
+    nodes { ${ISSUE_FIELDS} }
+    pageInfo { hasNextPage endCursor }
+  }
 }`
+
+type PagedIssues = { issues: { nodes: RawIssue[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } }
 
 export async function fetchCandidates(cfg: Config): Promise<Issue[]> {
   // Scope by team and/or project + the active states. required_labels stay OUT of the query (Linear label matching
@@ -80,8 +130,13 @@ export async function fetchCandidates(cfg: Config): Promise<Issue[]> {
   const filter: Record<string, unknown> = { state: { name: { in: cfg.tracker.activeStates } } }
   if (cfg.tracker.team) filter.team = { key: { eq: cfg.tracker.team } }
   if (cfg.tracker.projectSlug) filter.project = { slugId: { eq: cfg.tracker.projectSlug } }
-  const d = await query<{ issues: { nodes: RawIssue[] } }>(cfg, CANDIDATES, { filter })
-  return d.issues.nodes.map(toIssue)
+  const nodes = await queryPaginated<RawIssue>(
+    cfg,
+    CANDIDATES,
+    { filter },
+    (d) => (d as PagedIssues).issues,
+  )
+  return nodes.map(toIssue)
 }
 
 // The board = every labeled ticket that's either active/handed-off OR recently merged (Done in the last day), so the
@@ -96,8 +151,13 @@ export async function fetchBoard(cfg: Config): Promise<Issue[]> {
   if (cfg.tracker.team) filter.team = { key: { eq: cfg.tracker.team } }
   if (cfg.tracker.projectSlug) filter.project = { slugId: { eq: cfg.tracker.projectSlug } }
   if (cfg.tracker.requiredLabels.length) filter.labels = { name: { in: cfg.tracker.requiredLabels } }
-  const d = await query<{ issues: { nodes: RawIssue[] } }>(cfg, BOARD, { filter })
-  return d.issues.nodes.map(toIssue)
+  const nodes = await queryPaginated<RawIssue>(
+    cfg,
+    BOARD,
+    { filter },
+    (d) => (d as PagedIssues).issues,
+  )
+  return nodes.map(toIssue)
 }
 
 export async function fetchStatesByIds(cfg: Config, ids: string[]): Promise<Issue[]> {
@@ -120,8 +180,13 @@ export async function fetchIssuesByStates(cfg: Config, stateNames: string[]): Pr
   const filter: Record<string, unknown> = { state: { name: { in: stateNames } } }
   if (cfg.tracker.team) filter.team = { key: { eq: cfg.tracker.team } }
   if (cfg.tracker.projectSlug) filter.project = { slugId: { eq: cfg.tracker.projectSlug } }
-  const d = await query<{ issues: { nodes: RawIssue[] } }>(cfg, BY_STATES, { filter })
-  return d.issues.nodes.map(toIssue)
+  const nodes = await queryPaginated<RawIssue>(
+    cfg,
+    BY_STATES,
+    { filter },
+    (d) => (d as PagedIssues).issues,
+  )
+  return nodes.map(toIssue)
 }
 
 // --- mutations + extra reads for dashboard action buttons ---

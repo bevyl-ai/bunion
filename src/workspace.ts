@@ -58,20 +58,31 @@ export function removeWorkspace(cfg: Config, identifier: string, host: Host): vo
     return
   }
   if (host) {
-    if (cfg.hooks.beforeRemove) sshExec(host, `cd ${shq(dir)} 2>/dev/null && sh -lc ${shq(cfg.hooks.beforeRemove)}`) // failure ignored
+    if (cfg.hooks.beforeRemove) {
+      // §9.4: pass configured timeout (not sshExec's 180 s default); failure logged-and-ignored
+      log(`hook before_remove start identifier=${identifier} host=${host}`)
+      const r = sshExec(host, `cd ${shq(dir)} 2>/dev/null && sh -lc ${shq(cfg.hooks.beforeRemove)}`, cfg.hooks.timeoutMs)
+      if (!r.ok) log(`hook before_remove failed identifier=${identifier} host=${host}: ${r.out.trim().slice(-400)}`)
+    }
     sshExec(host, `rm -rf ${shq(dir)}`)
     return
   }
-  if (cfg.hooks.beforeRemove && existsSync(dir)) runHook(cfg, dir, 'before_remove', cfg.hooks.beforeRemove, null) // failure ignored
+  if (cfg.hooks.beforeRemove && existsSync(dir)) {
+    runHook(cfg, dir, 'before_remove', cfg.hooks.beforeRemove, null) // §9.4: runHook logs start + failure; non-fatal, cleanup proceeds
+  }
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
 }
 
 export function runHook(cfg: Config, dir: string, name: string, script: string, host: Host): HookResult {
+  // §9.4: log hook start so operators can see what is running and when
+  log(`hook ${name} start dir=${dir}${host ? ` host=${host}` : ''}`)
   if (host) {
     const r = sshExec(host, `cd ${shq(dir)} && sh -lc ${shq(script)}`, cfg.hooks.timeoutMs)
+    if (!r.ok) log(`hook ${name} failed host=${host}: ${r.out.trim().slice(-400)}`)
     return r.ok ? { ok: true } : { ok: false, error: `${name} hook failed on ${host}:\n${r.out.trim().slice(-800)}` }
   }
   const r = exec('sh', ['-lc', script], { cwd: dir, timeoutMs: cfg.hooks.timeoutMs })
+  if (!r.ok) log(`hook ${name} failed: ${r.combined.trim().slice(-400)}`)
   return r.ok ? { ok: true } : { ok: false, error: `${name} hook failed:\n${r.combined.trim().slice(-800)}` }
 }
 

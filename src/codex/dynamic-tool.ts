@@ -74,15 +74,34 @@ function injectCreateAsUser(query: string, variables: Record<string, unknown>, n
   return { query: query.replace(/(commentCreate\s*\(\s*input\s*:\s*\{)/, `$1 createAsUser: ${JSON.stringify(name)}, `), variables }
 }
 
+// §10.5: count how many top-level operation definitions a GraphQL document contains. We detect named operations
+// (query/mutation/subscription followed by optional name) and anonymous shorthand queries (a bare `{`). A single
+// anonymous `{` is one definition; everything else increments the counter via the keyword scan.
+function countGraphqlOperations(query: string): number {
+  // Strip block comments (""" … """) and line comments (# …) to avoid false positives inside strings.
+  const stripped = query
+    .replace(/"""[\s\S]*?"""/g, '') // block strings
+    .replace(/#[^\n]*/g, '') // line comments
+  // Exclude the keyword when it's a variable ($query) or an argument/field NAME (query:) — only operation definitions count.
+  const keywords = (stripped.match(/(?<!\$)\b(query|mutation|subscription)\b(?!\s*:)/g) ?? []).length
+  // A lone `{` at the start (after whitespace) is a valid shorthand query definition.
+  const hasShorthand = /^\s*\{/.test(stripped) ? 1 : 0
+  return keywords + hasShorthand
+}
+
 function normalize(args: unknown): { query: string; variables: Record<string, unknown> } | { error: string } {
   if (typeof args === 'string') {
     const q = args.trim()
-    return q ? { query: q, variables: {} } : { error: 'missing_query' }
+    if (!q) return { error: 'missing_query' }
+    if (countGraphqlOperations(q) > 1) return { error: 'invalid input: multiple operations' }
+    return { query: q, variables: {} }
   }
   if (args && typeof args === 'object' && !Array.isArray(args)) {
     const a = args as Record<string, unknown>
     const q = typeof a.query === 'string' ? a.query.trim() : ''
     if (!q) return { error: 'missing_query' }
+    // §10.5: reject documents containing more than one operation definition (Symphony §10.5).
+    if (countGraphqlOperations(q) > 1) return { error: 'invalid input: multiple operations' }
     const v = a.variables
     if (v != null && (typeof v !== 'object' || Array.isArray(v))) return { error: 'invalid_variables' }
     return { query: q, variables: (v as Record<string, unknown>) ?? {} }

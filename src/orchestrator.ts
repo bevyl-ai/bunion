@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { startAgent, type AgentHandle } from './agent-runner'
 import { startRole, type RoleHandle } from './role-runner'
 import { AppServerSession } from './codex/app-server'
@@ -9,7 +8,10 @@ import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
 import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment } from './linear'
 import { log, warn } from './log'
+import { readJson, throttledWriter } from './persist'
 import { remoteHome } from './ssh'
+import { backfillThreads } from './thread-backfill'
+import { foldDelta, grandTotal, phaseBreakdown, totals, zeroCounts, type TokenTally } from './tokens'
 import { removeWorkspace } from './workspace'
 import type { Config, Issue, Role, RoleQuota, TokenCounts } from './types'
 
@@ -27,8 +29,6 @@ interface RunningEntry {
 }
 interface RoleEntry {
   handle: RoleHandle
-  startedAt: number
-  lastActivity: number
   activity: string
   host: string | null
   tokenBase: TokenCounts
@@ -43,142 +43,32 @@ interface RetryTimer {
 
 const CONTINUATION_MS = 1000
 const FAILURE_BASE_MS = 10_000
+const LOG_TICKETS = 60 // most-recent tickets whose transcript we keep in memory + persist
+const STATE_DIR = join(homedir(), '.bunion')
+const TOKENS_FILE = join(STATE_DIR, 'tokens.json') // identifier → phase → token counts
+const LOGS_FILE = join(STATE_DIR, 'logs.json') // identifier → recent transcript lines
+const THREADS_FILE = join(STATE_DIR, 'threads.json') // issue.id / role:<name> → { threadId, host }
+const QUOTA_FILE = join(STATE_DIR, 'role-quota.json') // role name → { day, count } — daily ticket-filing cap, persisted
 
-// Per-ticket / per-phase token tracking. codex reports thread-cumulative usage per turn; we fold the delta into a
-// tally keyed by issue identifier → phase, persisted to disk so the numbers survive daemon restarts.
-const TOKENS_FILE = join(homedir(), '.bunion', 'tokens.json')
-const PHASE_ORDER = ['plan', 'build', 'qa', 'verify']
-type TokenTally = Record<string, Record<string, TokenCounts>>
-const zeroCounts = (): TokenCounts => ({ total: 0, input: 0, output: 0, cached: 0, reasoning: 0 })
-const foldDelta = (acc: TokenCounts, cur: TokenCounts, base: TokenCounts): void => {
-  acc.total += cur.total - base.total
-  acc.input += cur.input - base.input
-  acc.output += cur.output - base.output
-  acc.cached += cur.cached - base.cached
-  acc.reasoning += cur.reasoning - base.reasoning
-}
-function loadTokens(): TokenTally {
-  try {
-    const v = JSON.parse(readFileSync(TOKENS_FILE, 'utf8'))
-    return v && typeof v === 'object' ? (v as TokenTally) : {}
-  } catch {
-    return {}
-  }
-}
-function saveTokens(t: TokenTally): void {
-  try {
-    mkdirSync(dirname(TOKENS_FILE), { recursive: true })
-    writeFileSync(TOKENS_FILE, JSON.stringify(t))
-  } catch {
-    // best effort; tracking is non-critical
-  }
-}
-
-// Per-ticket activity logs, persisted so a handed-off ticket keeps its log across daemon restarts + eviction
-// (they're in-memory otherwise, so a restart blanks every non-running ticket's log).
-const LOGS_FILE = join(homedir(), '.bunion', 'logs.json')
-function loadLogs(): Map<string, string[]> {
-  try {
-    const v = JSON.parse(readFileSync(LOGS_FILE, 'utf8'))
-    if (v && typeof v === 'object') return new Map(Object.entries(v).filter(([, a]) => Array.isArray(a)) as [string, string[]][])
-  } catch {
-    // none yet
-  }
-  return new Map()
-}
-function saveLogs(logs: Map<string, string[]>): void {
-  try {
-    mkdirSync(dirname(LOGS_FILE), { recursive: true })
-    writeFileSync(LOGS_FILE, JSON.stringify(Object.fromEntries(logs)))
-  } catch {
-    // best effort
-  }
-}
-
-// One codex thread per ticket, persisted (issue.id → thread + the worker holding its rollout) so the next phase and
-// operator chat resume the same conversation — and so a resume lands on the right worker after a daemon restart.
-const THREADS_FILE = join(homedir(), '.bunion', 'threads.json')
+// One codex thread per ticket / role, persisted (key → thread id + the worker holding its rollout) so the next
+// phase and operator chat resume the same conversation, and a resume lands on the right worker after a restart.
 interface ThreadRec {
   threadId: string
   host: string | null
 }
-function loadThreads(): Map<string, ThreadRec> {
-  try {
-    const v = JSON.parse(readFileSync(THREADS_FILE, 'utf8'))
-    if (v && typeof v === 'object') return new Map(Object.entries(v) as [string, ThreadRec][])
-  } catch {
-    // none yet
-  }
-  return new Map()
-}
-function saveThreads(m: Map<string, ThreadRec>): void {
-  try {
-    mkdirSync(dirname(THREADS_FILE), { recursive: true })
-    writeFileSync(THREADS_FILE, JSON.stringify(Object.fromEntries(m)))
-  } catch {
-    // best effort
-  }
-}
-
-// Per-role daily ticket-filing counters, persisted so the cap survives daemon restarts (we redeploy often). Keyed by
-// role name → { day, count }; the day is a UTC date string, so the count resets at UTC midnight.
-const QUOTA_FILE = join(homedir(), '.bunion', 'role-quota.json')
+// A role's daily ticket-filing counter, persisted (role name → { day, count }) so the cap survives the frequent
+// daemon restarts. `day` is a UTC date string, so the count resets at UTC midnight.
 interface QuotaRec {
   day: string
   count: number
-}
-function loadQuota(): Map<string, QuotaRec> {
-  try {
-    const v = JSON.parse(readFileSync(QUOTA_FILE, 'utf8'))
-    if (v && typeof v === 'object') return new Map(Object.entries(v) as [string, QuotaRec][])
-  } catch {
-    // none yet
-  }
-  return new Map()
-}
-function saveQuota(m: Map<string, QuotaRec>): void {
-  try {
-    mkdirSync(dirname(QUOTA_FILE), { recursive: true })
-    writeFileSync(QUOTA_FILE, JSON.stringify(Object.fromEntries(m)))
-  } catch {
-    // best effort
-  }
 }
 function utcDay(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-// Recover threads bunion has no record of (tickets that ran before thread-persistence shipped, or a lost threads.json)
-// by reading codex's own threads DB on each worker, keyed by the ticket's workspace cwd. Read-only + best-effort.
-const BACKFILL_PY = `
-import sqlite3, glob, os, json
-dbs = sorted(glob.glob(os.path.expanduser('~/.codex/state_*.sqlite')))
-out = {}
-if dbs:
-    try:
-        con = sqlite3.connect('file:' + dbs[-1] + '?mode=ro', uri=True)
-        for cwd, tid, upd in con.execute("SELECT cwd, id, updated_at FROM threads WHERE cwd LIKE '%/.bunion/workspaces/%' AND archived = 0 ORDER BY updated_at ASC"):
-            out[os.path.basename(str(cwd).rstrip('/'))] = [tid, str(upd)]
-    except Exception:
-        pass
-print(json.dumps(out))
-`
-const BACKFILL_CMD = `echo ${Buffer.from(BACKFILL_PY).toString('base64')} | base64 -d | python3`
-function sshCapture(host: string, cmd: string): Promise<string> {
-  return new Promise((resolve) => {
-    const p = spawn('ssh', ['-o', 'ConnectTimeout=15', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', host, cmd], { stdio: ['ignore', 'pipe', 'ignore'] })
-    let out = ''
-    p.stdout?.on('data', (d: Buffer) => {
-      out += d.toString()
-    })
-    p.on('close', () => resolve(out))
-    p.on('error', () => resolve(''))
-  })
-}
-
 // The thin harness. Poll the tracker's active states, dispatch a Codex worker per issue (bounded), reconcile
-// running issues against the tracker, and retry. It never touches Linear state or git — the AGENT does, via the
-// workflow prompt + skills. Faithful to Symphony's orchestrator (SSH pool, blocked-state, dashboard omitted).
+// running issues against the tracker, and retry. It never touches Linear state or git for the normal flow — the
+// AGENT does, via the workflow prompt + skills; the host's only writes are operator actions and deadlock moves.
 export async function start(workflowPath?: string): Promise<void> {
   // Unattended daemon: a stray rejection (flaky VM, transient API error) must never take the whole factory down.
   process.on('unhandledRejection', (e) => warn(`unhandled rejection: ${e instanceof Error ? e.message : String(e)}`))
@@ -191,14 +81,19 @@ export async function start(workflowPath?: string): Promise<void> {
   let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
   let tokenSeq = 0
 
-  const logs = loadLogs() // per-identifier run log; loaded from disk so handed-off tickets keep their log
-  let lastLogSave = 0
-  const threadRecs = loadThreads() // issue.id → { codex threadId, host } — the persistent thread per ticket
-  let lastThreadSave = 0
+  // Persistent state under ~/.bunion, loaded once and re-saved (coalesced) as it changes, so numbers + transcripts
+  // survive a daemon restart. `get` is read at write time, so callers just mutate then call save*().
+  const logs = new Map<string, string[]>(Object.entries(readJson<Record<string, string[]>>(LOGS_FILE, {})).filter(([, a]) => Array.isArray(a)))
+  const threadRecs = new Map<string, ThreadRec>(Object.entries(readJson<Record<string, ThreadRec>>(THREADS_FILE, {})))
+  const tokens = readJson<TokenTally>(TOKENS_FILE, {}) // identifier → phase → cumulative token counts
+  const saveLogs = throttledWriter(LOGS_FILE, () => Object.fromEntries(logs))
+  const saveThreads = throttledWriter(THREADS_FILE, () => Object.fromEntries(threadRecs))
+  const saveTokens = throttledWriter(TOKENS_FILE, () => tokens)
   let backfilled = false // one-shot: recover unknown threads from worker rollouts on the first board
   const roleRunning = new Map<string, RoleEntry>() // role name → its current run (the pool — ambient agents)
   const roleLast = new Map<string, number>() // role name → last completed run (ms)
-  const roleQuota = loadQuota() // role name → today's filed-ticket count, persisted (survives restarts)
+  const roleQuota = new Map<string, QuotaRec>(Object.entries(readJson<Record<string, QuotaRec>>(QUOTA_FILE, {})))
+  const saveQuota = throttledWriter(QUOTA_FILE, () => Object.fromEntries(roleQuota))
   const countToday = (name: string): number => {
     const r = roleQuota.get(name)
     return r && r.day === utcDay() ? r.count : 0
@@ -213,13 +108,10 @@ export async function start(workflowPath?: string): Promise<void> {
       const r = roleQuota.get(role.name)
       if (r && r.day === day) r.count++
       else roleQuota.set(role.name, { day, count: 1 })
-      saveQuota(roleQuota)
+      saveQuota()
     },
   })
-  const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
   const summaries = new Map<string, string>() // last agent message per ticket — survives the log buffer, surfaces the human action
-  const tokens = loadTokens() // identifier → phase → cumulative token counts; persisted across restarts
-  let lastTokenSave = 0
   const notesFetched = new Set<string>() // stuck tickets whose verdict comment we've pulled once for display
   const lastState = new Map<string, string>() // last-seen Linear state per ticket — drops a stale note on transition
   // Deadlock detection. `progress` is a forward-progress clock per ticket: it resets whenever the ticket reaches a
@@ -228,7 +120,20 @@ export async function start(workflowPath?: string): Promise<void> {
   // a second one escalates past the unblocker straight to a human.
   const progress = new Map<string, { since: number; tokensAtProgress: number; seen: Set<string> }>()
   const deadlocked = new Set<string>()
-  const grandTotal = (identifier: string): number => Object.values(tokens[identifier] ?? {}).reduce((s, c) => s + (c?.total ?? 0), 0)
+
+  // One rolling transcript per ticket (LRU). NOT cleared on re-dispatch, so operator chat + prior phases survive a
+  // continuation/handoff; `restart` clears it for a from-scratch run. `touchLog` marks a ticket most-recent and
+  // evicts the oldest past the cap.
+  const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
+  const touchLog = (identifier: string): void => {
+    const prev = logs.get(identifier) ?? []
+    logs.delete(identifier)
+    logs.set(identifier, prev)
+    if (logs.size > LOG_TICKETS) {
+      const oldest = logs.keys().next().value
+      if (oldest && oldest !== identifier) logs.delete(oldest)
+    }
+  }
 
   // Worker placement. An issue is PINNED to one host for its whole life (continuation turns reuse the same VM so the
   // cloned workspace + workpad survive). hostCounts = pinned issues per host; the pin is held until the issue is
@@ -316,12 +221,7 @@ export async function start(workflowPath?: string): Promise<void> {
       placement.set(issue.id, host)
       hostCounts.set(host, (hostCounts.get(host) ?? 0) + 1)
     }
-    logs.delete(issue.identifier)
-    logs.set(issue.identifier, []) // fresh log at the newest position
-    if (logs.size > 60) {
-      const oldest = logs.keys().next().value
-      if (oldest && oldest !== issue.identifier) logs.delete(oldest)
-    }
+    touchLog(issue.identifier)
     const entry: RunningEntry = { issue, handle: undefined as unknown as AgentHandle, retryAttempt: attempt > 0 ? attempt : 0, startedAt: Date.now(), lastActivity: Date.now(), turn: 0, activity: 'starting…', host, phase: phaseOf(cfg, issue.state), tokenBase: zeroCounts() }
     running.set(issue.id, entry)
     log(`→ ${issue.identifier} (${issue.state})${attempt > 0 ? ` retry#${attempt}` : ''}${host ? ` @ ${host}` : ''}`)
@@ -331,36 +231,23 @@ export async function start(workflowPath?: string): Promise<void> {
       if (e.label != null) entry.activity = e.label
       if (e.threadId) {
         threadRecs.set(issue.id, { threadId: e.threadId, host })
-        const tt = Date.now()
-        if (tt - lastThreadSave > 3000) {
-          lastThreadSave = tt
-          saveThreads(threadRecs)
-        }
+        saveThreads()
       }
       if (e.log != null) {
         const arr = logs.get(issue.identifier)
         if (arr) {
           arr.push(e.log)
           if (arr.length > 600) arr.splice(0, arr.length - 600)
-          const tl = Date.now()
-          if (tl - lastLogSave > 3000) {
-            lastLogSave = tl
-            saveLogs(logs)
-          }
+          saveLogs()
         }
         if (e.log.startsWith('● ')) summaries.set(issue.identifier, e.log.slice(2, 400)) // keep the latest agent message
       }
       if (e.tokens) {
         // codex sends the thread-cumulative total each turn; fold the delta into this ticket's phase tally.
-        const tbl = (tokens[issue.identifier] ??= {})
-        const acc = (tbl[entry.phase] ??= zeroCounts())
+        const acc = ((tokens[issue.identifier] ??= {})[entry.phase] ??= zeroCounts())
         foldDelta(acc, e.tokens, entry.tokenBase)
         entry.tokenBase = e.tokens
-        const t = Date.now()
-        if (t - lastTokenSave > 3000) {
-          lastTokenSave = t
-          saveTokens(tokens)
-        }
+        saveTokens()
       }
     }, threadRecs.get(issue.id)?.threadId ?? null)
     void entry.handle.done.then((outcome) => {
@@ -435,16 +322,6 @@ export async function start(workflowPath?: string): Promise<void> {
   log(`bunion up · scope=${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''} · cap=${displayCap()} · workers=${workerDesc} · poll=${cfg.pollIntervalMs}ms`)
 
   const rankStatus = (s: BoardItem['status']): number => (s === 'running' ? 0 : s === 'retrying' ? 1 : s === 'queued' ? 2 : 3)
-  const tokenSummary = (identifier: string): BoardItem['tokens'] => {
-    const tbl = tokens[identifier]
-    if (!tbl) return null
-    const phases = Object.keys(tbl)
-      .sort((a, b) => (PHASE_ORDER.indexOf(a) + 1 || 99) - (PHASE_ORDER.indexOf(b) + 1 || 99))
-      .map((ph) => ({ phase: ph, ...tbl[ph]! }))
-      .filter((p) => p.total > 0)
-    const total = phases.reduce((s, p) => s + p.total, 0)
-    return total > 0 ? { total, phases } : null
-  }
   const snapshot = (): Snapshot => {
     const board = new Map<string, BoardItem>()
     const base = (i: Issue): BoardItem => ({
@@ -453,7 +330,7 @@ export async function start(workflowPath?: string): Promise<void> {
       status: isActive(i.state) ? 'queued' : 'handoff',
       enteredAt: i.startedAt ? Date.parse(i.startedAt) : null, endedAt: i.completedAt ? Date.parse(i.completedAt) : null,
       turn: 0, activity: '', startedAt: 0, lastActivity: 0, retryAttempt: 0, retryDueAt: null,
-      tokens: tokenSummary(i.identifier),
+      tokens: phaseBreakdown(tokens, i.identifier),
     })
     for (const c of lastBoard) board.set(c.id, base(c))
     for (const [id, r] of retries) {
@@ -478,27 +355,15 @@ export async function start(workflowPath?: string): Promise<void> {
       it.host = e.host
     }
     const items = [...board.values()].sort((a, b) => rankStatus(a.status) - rankStatus(b.status) || rank(a.priority) - rank(b.priority) || a.identifier.localeCompare(b.identifier))
-    let totalTokens = 0
-    let totalInput = 0
-    let totalOutput = 0
-    let totalCached = 0
-    for (const ph of Object.values(tokens))
-      for (const c of Object.values(ph)) {
-        totalTokens += c?.total ?? 0
-        totalInput += c?.input ?? 0
-        totalOutput += c?.output ?? 0
-        totalCached += c?.cached ?? 0
-      }
+    const t = totals(tokens)
     return {
       scope: `${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''}`,
       cap: displayCap(),
-      pollMs: cfg.pollIntervalMs,
-      now: Date.now(),
       items,
-      totalTokens,
-      totalInput,
-      totalOutput,
-      totalCached,
+      totalTokens: t.total,
+      totalInput: t.input,
+      totalOutput: t.output,
+      totalCached: t.cached,
       roles: cfg.roles.map(roleItem),
     }
   }
@@ -523,7 +388,7 @@ export async function start(workflowPath?: string): Promise<void> {
       logs.set(identifier, lg)
     }
     lg.push(`○ ${msg}`) // operator turn — shows in the transcript immediately
-    saveLogs(logs)
+    saveLogs()
     const replies: string[] = []
     const chat = new AppServerSession(cfg, [], (e) => {
       if (e.log && e.log.startsWith('● ')) replies.push(e.log.slice(2))
@@ -536,14 +401,14 @@ export async function start(workflowPath?: string): Promise<void> {
       chat.stop()
       const m = e instanceof Error ? e.message : String(e)
       lg.push(`● (couldn't reach the agent: ${m})`)
-      saveLogs(logs)
+      saveLogs()
       return { ok: false, msg: m }
     }
     chat.stop()
     const reply = replies.join('\n\n').trim() || '(no reply)'
     lg.push(`● ${reply}`)
     if (lg.length > 600) lg.splice(0, lg.length - 600)
-    saveLogs(logs)
+    saveLogs()
     log(`chat: ${identifier} ←→ operator`)
     return { ok: true, reply }
   }
@@ -561,7 +426,9 @@ export async function start(workflowPath?: string): Promise<void> {
         removeWorkspace(cfg, issue.identifier, host)
         release(issue.id)
         threadRecs.delete(issue.id)
-        saveThreads(threadRecs)
+        saveThreads()
+        logs.set(issue.identifier, []) // from-scratch run: clear the transcript too
+        saveLogs()
         log(`action: ${identifier} restart (operator, fresh thread)`)
         return { ok: true, msg: 'restarting fresh' }
       }
@@ -609,7 +476,7 @@ export async function start(workflowPath?: string): Promise<void> {
     const host = roleHostFor(role, i)
     if (!logs.has(role.name)) logs.set(role.name, [])
     const acc = ((tokens[role.name] ??= {}).pool ??= zeroCounts())
-    const entry: RoleEntry = { handle: undefined as unknown as RoleHandle, startedAt: Date.now(), lastActivity: Date.now(), activity: 'starting…', host, tokenBase: zeroCounts() }
+    const entry: RoleEntry = { handle: undefined as unknown as RoleHandle, activity: 'starting…', host, tokenBase: zeroCounts() }
     roleRunning.set(role.name, entry)
     log(`◆ role ${role.name} run${host ? ` @ ${host}` : ''}`)
     entry.handle = startRole(
@@ -617,32 +484,23 @@ export async function start(workflowPath?: string): Promise<void> {
       role,
       host,
       (e) => {
-        entry.lastActivity = Date.now()
         if (e.label != null) entry.activity = e.label
         if (e.log != null) {
           const a = logs.get(role.name)
           if (a) {
             a.push(e.log)
             if (a.length > 600) a.splice(0, a.length - 600)
-            const tl = Date.now()
-            if (tl - lastLogSave > 3000) {
-              lastLogSave = tl
-              saveLogs(logs)
-            }
+            saveLogs()
           }
         }
         if (e.threadId) {
           threadRecs.set(`role:${role.name}`, { threadId: e.threadId, host })
-          saveThreads(threadRecs)
+          saveThreads()
         }
         if (e.tokens) {
           foldDelta(acc, e.tokens, entry.tokenBase)
           entry.tokenBase = e.tokens
-          const t = Date.now()
-          if (t - lastTokenSave > 3000) {
-            lastTokenSave = t
-            saveTokens(tokens)
-          }
+          saveTokens()
         }
       },
       threadRecs.get(`role:${role.name}`)?.threadId ?? null,
@@ -665,47 +523,24 @@ export async function start(workflowPath?: string): Promise<void> {
       host: e?.host ?? threadRecs.get(`role:${role.name}`)?.host ?? null,
       tokens: tokens[role.name]?.pool?.total ?? 0,
       cadenceMs: role.cadenceMs,
-      startedAt: e?.startedAt ?? 0,
-      lastActivity: e?.lastActivity ?? 0,
       lastRunAt: roleLast.get(role.name) ?? null,
       filedToday: countToday(role.name),
       maxPerDay: role.maxPerDay,
     }
   }
 
-  // Ask each worker's codex DB for the thread keyed to a board ticket's workspace, for tickets bunion has no record
-  // of, and seed threadRecs with the newest match. Runs once on the first board; makes pre-persistence handoffs
-  // chattable. Best-effort — a worker that's down or has no match is simply skipped.
-  const backfillThreads = async (board: Issue[]): Promise<void> => {
-    const missing = board.filter((i) => !threadRecs.has(i.id))
-    if (missing.length === 0 || hosts().length === 0) return
-    const want = new Map(missing.map((i) => [i.identifier, i.id])) // identifier → linear id
-    const found = new Map<string, { threadId: string; host: string; upd: string }>()
-    await Promise.all(
-      hosts().map(async (host) => {
-        let obj: Record<string, [string, string]>
-        try {
-          obj = JSON.parse((await sshCapture(host, BACKFILL_CMD)).trim() || '{}')
-        } catch {
-          return
-        }
-        for (const [ident, v] of Object.entries(obj)) {
-          if (!want.has(ident) || !Array.isArray(v)) continue
-          const [tid, upd] = v
-          const prev = found.get(ident)
-          if (typeof tid === 'string' && (!prev || String(upd) > prev.upd)) found.set(ident, { threadId: tid, host, upd: String(upd) })
-        }
-      }),
-    )
+  // Recover threads from worker rollouts for tickets bunion has no record of, then persist what was found. Runs
+  // once on the first board; makes a pre-persistence handoff chattable.
+  const runBackfill = async (board: Issue[]): Promise<void> => {
+    const found = await backfillThreads(board, hosts(), (id) => threadRecs.has(id))
     let n = 0
-    for (const [ident, rec] of found) {
-      const id = want.get(ident)
-      if (!id || threadRecs.has(id)) continue
-      threadRecs.set(id, { threadId: rec.threadId, host: rec.host })
-      n++
-    }
+    for (const [id, rec] of found)
+      if (!threadRecs.has(id)) {
+        threadRecs.set(id, rec)
+        n++
+      }
     if (n > 0) {
-      saveThreads(threadRecs)
+      saveThreads()
       log(`backfilled ${n} ticket thread(s) from worker rollouts`)
     }
   }
@@ -768,7 +603,7 @@ export async function start(workflowPath?: string): Promise<void> {
       lastBoard = board
       if (!backfilled) {
         backfilled = true
-        void backfillThreads(board)
+        void runBackfill(board)
       }
       // Surface WHY a ticket is stuck: pull its workpad Verdict for the unblock + needs-human states (not while an
       // agent is live on it — its own messages fill the note then). Clear a cached note when a ticket changes state
@@ -782,15 +617,15 @@ export async function start(workflowPath?: string): Promise<void> {
           notesFetched.delete(i.id)
         }
         // Forward-progress clock: reaching a not-yet-seen state resets it; sitting in seen states burns it down.
-        const pr = progress.get(i.id) ?? { since: now, tokensAtProgress: grandTotal(i.identifier), seen: new Set<string>() }
+        const pr = progress.get(i.id) ?? { since: now, tokensAtProgress: grandTotal(tokens, i.identifier), seen: new Set<string>() }
         if (!pr.seen.has(norm(i.state))) {
           pr.seen.add(norm(i.state))
           pr.since = now
-          pr.tokensAtProgress = grandTotal(i.identifier)
+          pr.tokensAtProgress = grandTotal(tokens, i.identifier)
         }
         progress.set(i.id, pr)
         if (isActive(i.state) && !isTerminal(i.state) && norm(i.state) !== 'qa blocked') {
-          const reason = deadlockReason(grandTotal(i.identifier) - pr.tokensAtProgress, now - pr.since, cfg.deadlock)
+          const reason = deadlockReason(grandTotal(tokens, i.identifier) - pr.tokensAtProgress, now - pr.since, cfg.deadlock)
           if (reason) stuck.push({ issue: i, target: deadlocked.has(i.id) ? 'Needs human' : 'QA blocked', reason })
         }
         const s = norm(i.state)

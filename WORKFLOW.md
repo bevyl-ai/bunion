@@ -15,7 +15,7 @@ phases:                              # a worker hands off to a FRESH agent when 
   build: [In Progress]               # BUILD: implement + PR + stupify review loop
   qa: [QA Requested]                 # QA CHECK: independent verification + screenshot proof
   verify: [QA Verify]                # VERIFY QA: a 2nd, adversarial agent — did QA test the REAL scenario? is it proven safe?
-  unblock: [QA blocked]              # UNBLOCK: triage a stuck ticket — clear the meta-problem or escalate to a human
+  blocked: [QA blocked]              # BLOCKED: triage a stuck ticket — clear the meta-problem or escalate to a human
   verify_prod: [Verifying in prod]   # VERIFY:PROD: the train shipped it to prod — confirm it's live + healthy, then Done
 roles:                               # the pool — ambient agents on a clock, BESIDE the per-ticket pipeline. Each runs
                                      # on its cadence with a persistent thread + its own model, FILING tickets (never
@@ -73,7 +73,7 @@ hooks:
 agent:
   max_concurrent_agents: 12
   # Per-state concurrency caps (Symphony §5.3.5): bound how many agents run in a given state at once, so one
-  # expensive stage — especially the unblocker on `QA blocked` — can't grab every slot. Names match active_states;
+  # expensive stage — especially the blocked phase on `QA blocked` — can't grab every slot. Names match active_states;
   # an absent state falls back to the global cap, which still binds the total. Tune freely.
   max_concurrent_agents_by_state:
     In Progress: 6
@@ -93,7 +93,7 @@ codex:
   approval_policy: never
   thread_sandbox: danger-full-access     # the agent runs its own git; workspace-write protects .git and breaks it
   read_timeout_ms: 15000                 # initialize/handshake; 5s default is too tight when the shared-CPU VM is under load
-deadlock:                                # a ticket looping without progress is auto-moved to `QA blocked` (the unblocker triages it)
+deadlock:                                # a ticket looping without progress is auto-moved to `QA blocked` (the blocked phase triages it)
   tokens: 20000000                       # 20M tokens spent with no NEW pipeline state reached (once stalled ≥ stall_ms) → blocked
   stall_ms: 1800000                      # 30min — min time with no forward progress before the token rule trips
   hard_stall_ms: 5400000                 # 90min with no forward progress → blocked regardless of token spend. 2nd deadlock → `Needs human`
@@ -178,14 +178,14 @@ You are an **independent verifier**. You did NOT write this code; approach it sk
 3. Record your **`Verdict:`** line in the workpad (with a confidence level + how you verified — `BLOCKED`/`FAILED` must state the concrete reason), then route by it:
    - **PASS** — you genuinely verified it works, the acceptance criteria are met, and checks are green → move the ticket to `QA Verify` for an independent adversarial re-check. **Do NOT merge — a human owns the merge.**
    - **FAILED** — you reproduced a defect, an acceptance criterion is objectively not met, or a check is red. This is a concrete, fixable failure → move the ticket **back to `In Progress`** for rework, and write a precise `[codex]` comment of exactly what failed and how to reproduce it so the build agent can fix it. Don't fix it yourself — you're QA, not the author.
-   - **BLOCKED** — you *cannot actually verify* it: it needs a running environment or access you don't have, a product/human decision, or you're not confident → move the ticket to `QA blocked`. An **unblocker** agent picks it up next — it tries to clear the path (find the missing access/env/data/URL) or escalate to a human — so record exactly what you tried and what was missing. Never pass — or fail to `In Progress` — something you could not actually verify; that's what `QA blocked` is for.
+   - **BLOCKED** — you *cannot actually verify* it: it needs a running environment or access you don't have, a product/human decision, or you're not confident → move the ticket to `QA blocked`. The **blocked** phase picks it up next — it tries to clear the path (find the missing access/env/data/URL) or escalate to a human — so record exactly what you tried and what was missing. Never pass — or fail to `In Progress` — something you could not actually verify; that's what `QA blocked` is for.
 
 ## VERIFY QA — status `QA Verify` (the adversarial check)
 
-A QA agent already verified this and moved it here. You are a **second, independent reviewer of the QA itself** — assume the QA pass may have proven the wrong thing. Your one question: **did QA produce sufficient, on-target proof that this change works for the real scenario?** You **audit QA's evidence — you do NOT re-run QA or reproduce the bug yourself.** If the proof is inadequate, that's a QA failure to send back, not work for you to do. You did NOT write the code and you did NOT run the original QA. **Do NOT change product code.**
+A QA agent already verified this and moved it here. You are a **quick sanity check on the QA itself** — a fast, skeptical read of whether QA actually proved the change. Your one question: **did QA produce sufficient, on-target proof that this change works for the real scenario?** You **audit QA's evidence — you do NOT re-run QA or reproduce the bug yourself.** If the proof is inadequate, that's a QA failure to send back, not work for you to do. You did NOT write the code and you did NOT run the original QA. **Do NOT change product code.**
 
 1. Read the workpad: acceptance criteria, the QA verdict, and exactly what QA claims it verified (steps + screenshot). Open the PR (diff + checks); run the `pull` skill for the PR branch.
-2. Be adversarial about QA's PROOF — judge whether its evidence is sufficient and on-target. Assess what QA recorded; do NOT re-run the test yourself:
+2. Sanity-check QA's PROOF — a quick, skeptical read of whether its evidence is sufficient and on-target. Assess what QA recorded; do NOT re-run the test yourself:
    - Did QA exercise the **real reported scenario**, or a stand-in? (synthetic data instead of the reported data, the wrong route/workspace, a happy path that sidesteps the actual bug, *a* screenshot that isn't the fixed behaviour.)
    - Is the proof **tied to THIS change** (the PR diff) and complete enough to convince a skeptic — the right before/after, the actual bug condition exercised, and the obvious edge/regression cases the change could break addressed? Or are there gaps?
    - Your evidence is QA's recorded steps + screenshot, the PR diff, and the checks — read them critically. If the proof is thin, off-target, or missing, that is a QA failure to send back; it is NOT something you reproduce yourself.
@@ -195,9 +195,9 @@ A QA agent already verified this and moved it here. You are a **second, independ
    - **QA INADEQUATE** — the fix may be fine but QA's proof is insufficient, off-target, or proves the wrong thing → move back to `QA Requested` with a precise `[codex]` comment of exactly what proof QA must produce.
    - **DEFECT** — you reproduced a real failure or regression, OR stupify's latest review is an unaddressed changes-request (step 3) → move back to `In Progress` with the exact repro steps / the stupify objection for the build agent.
 
-## UNBLOCK — status `QA blocked` (the unblocker)
+## BLOCKED — status `QA blocked` (triage a blocked ticket)
 
-A QA or verify agent got stuck and parked this here. You are the **unblocker**: figure out WHY it's stuck and clear the path, so a human only ever sees the ones that genuinely need a person. **Do NOT write product code** — a real defect is a build problem, not a block.
+A QA or verify agent got stuck and parked this here. You are triaging a **blocked** ticket: figure out WHY it's stuck and clear the path, so a human only ever sees the ones that genuinely need a person. **Do NOT write product code** — a real defect is a build problem, not a block.
 
 1. Read the workpad `Verdict:` and exactly what the previous agent says it could not do, plus the PR + checks. Run the `pull` skill.
 2. Classify the blocker:

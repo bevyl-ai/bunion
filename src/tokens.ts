@@ -2,7 +2,7 @@ import type { TokenCounts } from './types'
 
 // Per-ticket (and per-role) token usage, keyed identifier → phase → counts. codex reports its thread-cumulative
 // usage each turn; the orchestrator folds the per-turn delta into whichever phase the worker is running, so spend
-// is attributed to plan/build/qa/verify/unblock independently (roles accumulate under a single `pool` phase).
+// is attributed to plan/build/qa/verify/blocked independently (roles accumulate under a single `pool` phase).
 export type TokenTally = Record<string, Record<string, TokenCounts>>
 
 export interface PhaseTokens extends TokenCounts {
@@ -14,7 +14,7 @@ export interface TokenBreakdown {
 }
 
 // Pipeline phases in display order; anything else (e.g. a role's `pool`) sorts after. Mirrors WORKFLOW.md phases.
-const PHASE_ORDER = ['plan', 'build', 'qa', 'verify', 'unblock']
+const PHASE_ORDER = ['plan', 'build', 'qa', 'verify', 'blocked']
 
 export const zeroCounts = (): TokenCounts => ({ total: 0, input: 0, output: 0, cached: 0, reasoning: 0 })
 

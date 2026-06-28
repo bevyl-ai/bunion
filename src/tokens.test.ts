@@ -17,10 +17,10 @@ test('phaseBreakdown is null when the ticket has no usage', () => {
 })
 
 test('phaseBreakdown orders by pipeline phase, drops empty phases, and totals', () => {
-  const tally: TokenTally = { 'BEV-1': { qa: counts(30), plan: counts(20), unblock: counts(0), build: counts(50) } }
+  const tally: TokenTally = { 'BEV-1': { qa: counts(30), plan: counts(20), blocked: counts(0), build: counts(50) } }
   const b = phaseBreakdown(tally, 'BEV-1')!
   expect(b.total).toBe(100)
-  expect(b.phases.map((p) => p.phase)).toEqual(['plan', 'build', 'qa']) // pipeline order; the empty `unblock` is dropped
+  expect(b.phases.map((p) => p.phase)).toEqual(['plan', 'build', 'qa']) // pipeline order; the empty `blocked` is dropped
 })
 
 test('grandTotal sums every phase for one ticket, 0 for an unknown one', () => {

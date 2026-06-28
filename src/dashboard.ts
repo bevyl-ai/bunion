@@ -348,7 +348,7 @@ const COLS=[
  {name:'In Progress',c:'#5b8def',states:['In Progress']},
  {name:'QA check',c:'#d99a2b',states:['QA Requested']},
  {name:'Verify QA',c:'#c79a3a',states:['QA Verify']},
- {name:'Unblocking',c:'#e0564f',states:['QA blocked']},
+ {name:'Blocked',c:'#e0564f',states:['QA blocked']},
  {name:'Needs human',c:'#d9568c',states:['Needs human']},
  {name:'Ready',c:'#3fb27f',states:['Ready to ship']},
  {name:'In Staging',c:'#e3b341',states:['Merged: In Staging']},

@@ -125,7 +125,7 @@ export async function start(workflowPath?: string): Promise<void> {
   // Deadlock detection. `progress` is a forward-progress clock per ticket: it resets whenever the ticket reaches a
   // pipeline state it hasn't been in this lifecycle; while it sits in already-seen states it burns down. A ticket
   // that spends tokens/time without resetting is looping → auto-block it. `deadlocked` remembers a first offense so
-  // a second one escalates past the unblocker straight to a human.
+  // a second one escalates past the blocked phase straight to a human.
   const progress = new Map<string, { since: number; tokensAtProgress: number; seen: Set<string> }>()
   const deadlocked = new Set<string>()
 
@@ -182,7 +182,7 @@ export async function start(workflowPath?: string): Promise<void> {
   // Per-state concurrency (Symphony §8.2/§8.3): an issue in state S is dispatch-eligible only if fewer than
   // max_concurrent_agents_by_state[S] agents are already running on issues in S (counted by their CURRENT state). No
   // entry for S = no per-state limit (the global cap is the only ceiling). Bounds an expensive stage's blast radius —
-  // one phase (e.g. the unblocker on `QA blocked`) can't consume every slot.
+  // one phase (e.g. the blocked phase on `QA blocked`) can't consume every slot.
   const stateFull = (state: string): boolean => {
     const cap = cfg.agent.maxConcurrentByState[norm(state)]
     if (cap === undefined) return false
@@ -697,9 +697,9 @@ export async function start(workflowPath?: string): Promise<void> {
         backfilled = true
         void runBackfill(board)
       }
-      // Surface WHY a ticket is stuck: pull its workpad Verdict for the unblock + needs-human states (not while an
+      // Surface WHY a ticket is stuck: pull its workpad Verdict for the blocked + needs-human states (not while an
       // agent is live on it — its own messages fill the note then). Clear a cached note when a ticket changes state
-      // so a qa-blocked verdict doesn't linger after the unblocker escalates it to Needs human.
+      // so a qa-blocked verdict doesn't linger after the blocked phase escalates it to Needs human.
       const now = Date.now()
       const stuck: { issue: Issue; target: string; reason: string }[] = []
       for (const i of board) {
@@ -718,9 +718,9 @@ export async function start(workflowPath?: string): Promise<void> {
         progress.set(i.id, pr)
         if (isActive(i.state) && !isTerminal(i.state)) {
           const reason = deadlockReason(grandTotal(tokens, i.identifier) - pr.tokensAtProgress, now - pr.since, cfg.deadlock)
-          // A ticket deadlocking while IN `QA blocked` means the unblocker itself is looping — its burn used to be
+          // A ticket deadlocking while IN `QA blocked` means the blocked phase itself is looping — its burn used to be
           // exempt from this sweep entirely (the runaway hole). The last automated stop has failed, so escalate it
-          // straight to Needs human. Anywhere else: 1st offense → QA blocked (let the unblocker try), 2nd → Needs human.
+          // straight to Needs human. Anywhere else: 1st offense → QA blocked (let the blocked phase try), 2nd → Needs human.
           if (reason) stuck.push({ issue: i, target: norm(i.state) === 'qa blocked' || deadlocked.has(i.id) ? 'Needs human' : 'QA blocked', reason })
         }
         const s = norm(i.state)
@@ -730,7 +730,7 @@ export async function start(workflowPath?: string): Promise<void> {
         }
       }
       for (const id of [...progress.keys()]) if (!board.some((i) => i.id === id)) { progress.delete(id); deadlocked.delete(id) }
-      // Deadlock sweep: no forward progress + resource burn → move to the blocked state (the unblocker triages it),
+      // Deadlock sweep: no forward progress + resource burn → move to the blocked state (the blocked phase triages it),
       // or to Needs human if it already deadlocked once. Await the move so it isn't re-dispatched below this poll.
       for (const { issue, target, reason } of stuck) {
         deadlocked.add(issue.id)
@@ -741,7 +741,7 @@ export async function start(workflowPath?: string): Promise<void> {
         log(`deadlock: ${issue.identifier} ${reason} → ${target}`)
         try {
           await moveIssue(cfg, issue.id, target)
-          await postComment(cfg, issue.id, `## 🔁 Auto-blocked — deadlock\nThe factory ${reason} on this ticket, so I moved it to \`${target}\` instead of looping further.${target === 'QA blocked' ? '\n\n**Unblocker:** if there is no concrete, fixable meta-problem here, escalate to `Needs human` — do not just send it back to loop again.' : ''}`)
+          await postComment(cfg, issue.id, `## 🔁 Auto-blocked — deadlock\nThe factory ${reason} on this ticket, so I moved it to \`${target}\` instead of looping further.${target === 'QA blocked' ? '\n\n**Blocked phase:** if there is no concrete, fixable meta-problem here, escalate to `Needs human` — do not just send it back to loop again.' : ''}`)
         } catch (e) {
           warn(`deadlock move ${issue.identifier}: ${e instanceof Error ? e.message : String(e)}`)
         }

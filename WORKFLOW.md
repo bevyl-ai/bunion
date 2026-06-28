@@ -14,6 +14,32 @@ phases:                              # a worker hands off to a FRESH agent when 
   qa: [QA Requested]                 # QA CHECK: independent verification + screenshot proof
   verify: [QA Verify]                # VERIFY QA: a 2nd, adversarial agent — did QA test the REAL scenario? is it proven safe?
   unblock: [QA blocked]              # UNBLOCK: triage a stuck ticket — clear the meta-problem or escalate to a human
+roles:                               # the pool — ambient agents on a clock, BESIDE the per-ticket pipeline. Each runs
+                                     # on its cadence with a persistent thread + its own model, FILING tickets (never
+                                     # fixing). Add a row to add a role; the engine is generic — nothing else changes.
+  - name: mechanic
+    cadence: 30m
+    model: gpt-5.5                      # the gateway only serves gpt-5.5 today; gpt-5 / -codex return empty turns
+    prompt: |
+      You are the factory's mechanic — keep the repo (bevyl-ai/bevyl.ai) and the factory itself healthy by FILING the
+      work, never fixing it yourself. Each run:
+      1. Find what's broken: red CI on `main` (gh run list --branch main --limit 15), tickets stuck in `Needs human`
+         or `QA blocked` on the board, flaky/failing tests, stale or vulnerable dependencies, bunion's own errors.
+      2. For each concrete, fixable problem, file ONE `dark-factory`-labeled Linear ticket (team BEV) through the
+         linear_graphql tool — clear title, acceptance criteria, sensible priority. DEDUPE first: search open issues;
+         never file a duplicate or re-file something already queued.
+      3. Never open a PR, push, merge, or change code yourself — the pipeline does the fixing. You only find + frame.
+      Keep it high-signal: a few real tickets, not noise. If nothing is broken, file nothing and say so.
+  - name: dreamer
+    cadence: 4h
+    model: gpt-5.5
+    prompt: |
+      You are the factory's dreamer — find the next thing worth building and FILE it. Each run, look outward: the
+      product, the codebase, what shipped recently, the obvious gaps. Propose a few high-leverage improvements —
+      features, refactors, tech-debt paydown, UX polish, missing tests — and file each as a `dark-factory`-labeled
+      Linear ticket (team BEV) through linear_graphql, with a crisp title + acceptance criteria + priority. DEDUPE
+      against open issues; don't repeat work already queued. You only file — the pipeline builds. Favor a few strong
+      ideas over a long thin list.
 server:
   port: 4319                       # live status dashboard at http://localhost:4319 (or set BUNION_PORT)
 workspace:

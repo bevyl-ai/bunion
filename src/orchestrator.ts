@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { startAgent, type AgentHandle } from './agent-runner'
+import { startRole, type RoleHandle } from './role-runner'
 import { AppServerSession } from './codex/app-server'
 import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
@@ -10,7 +11,7 @@ import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIss
 import { log, warn } from './log'
 import { remoteHome } from './ssh'
 import { removeWorkspace } from './workspace'
-import type { Config, Issue, TokenCounts } from './types'
+import type { Config, Issue, Role, TokenCounts } from './types'
 
 interface RunningEntry {
   issue: Issue
@@ -23,6 +24,14 @@ interface RunningEntry {
   host: string | null // the worker VM this run is pinned to (null = local)
   phase: string // the pipeline phase this session is running (tokens are attributed here)
   tokenBase: TokenCounts // last-folded thread-cumulative usage, so we add only the delta to the persistent tally
+}
+interface RoleEntry {
+  handle: RoleHandle
+  startedAt: number
+  lastActivity: number
+  activity: string
+  host: string | null
+  tokenBase: TokenCounts
 }
 interface RetryTimer {
   timer: ReturnType<typeof setTimeout>
@@ -159,6 +168,8 @@ export async function start(workflowPath?: string): Promise<void> {
   const threadRecs = loadThreads() // issue.id → { codex threadId, host } — the persistent thread per ticket
   let lastThreadSave = 0
   let backfilled = false // one-shot: recover unknown threads from worker rollouts on the first board
+  const roleRunning = new Map<string, RoleEntry>() // role name → its current run (the pool — ambient agents)
+  const roleLast = new Map<string, number>() // role name → last completed run (ms)
   const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
   const summaries = new Map<string, string>() // last agent message per ticket — survives the log buffer, surfaces the human action
   const tokens = loadTokens() // identifier → phase → cumulative token counts; persisted across restarts
@@ -442,6 +453,7 @@ export async function start(workflowPath?: string): Promise<void> {
       totalInput,
       totalOutput,
       totalCached,
+      roles: cfg.roles.map(roleItem),
     }
   }
   // Operator chat: reopen the ticket's thread on its worker and run ONE read-only turn with the operator's message,
@@ -532,6 +544,81 @@ export async function start(workflowPath?: string): Promise<void> {
       return { ok: false, msg: e instanceof Error ? e.message : String(e) }
     }
   }
+  // The pool. Each configured role runs on its own cadence with a persistent thread (resumed each run so it remembers
+  // what it filed) and its own model, filing tickets through the Linear tool. A role pins to a worker (round-robin, or
+  // the one holding its thread) and does NOT count against the per-ticket cap — roles are few and infrequent.
+  const roleHostFor = (role: Role, i: number): string | null => {
+    const held = threadRecs.get(`role:${role.name}`)?.host
+    if (held && hosts().includes(held)) return held
+    const hs = hosts()
+    return hs.length ? (hs[i % hs.length] ?? null) : null
+  }
+  const dispatchRole = (role: Role, i: number): void => {
+    if (roleRunning.has(role.name)) return // last cadence's run still going — skip this tick
+    const host = roleHostFor(role, i)
+    if (!logs.has(role.name)) logs.set(role.name, [])
+    const acc = ((tokens[role.name] ??= {}).pool ??= zeroCounts())
+    const entry: RoleEntry = { handle: undefined as unknown as RoleHandle, startedAt: Date.now(), lastActivity: Date.now(), activity: 'starting…', host, tokenBase: zeroCounts() }
+    roleRunning.set(role.name, entry)
+    log(`◆ role ${role.name} run${host ? ` @ ${host}` : ''}`)
+    entry.handle = startRole(
+      cfg,
+      role,
+      host,
+      (e) => {
+        entry.lastActivity = Date.now()
+        if (e.label != null) entry.activity = e.label
+        if (e.log != null) {
+          const a = logs.get(role.name)
+          if (a) {
+            a.push(e.log)
+            if (a.length > 600) a.splice(0, a.length - 600)
+            const tl = Date.now()
+            if (tl - lastLogSave > 3000) {
+              lastLogSave = tl
+              saveLogs(logs)
+            }
+          }
+        }
+        if (e.threadId) {
+          threadRecs.set(`role:${role.name}`, { threadId: e.threadId, host })
+          saveThreads(threadRecs)
+        }
+        if (e.tokens) {
+          foldDelta(acc, e.tokens, entry.tokenBase)
+          entry.tokenBase = e.tokens
+          const t = Date.now()
+          if (t - lastTokenSave > 3000) {
+            lastTokenSave = t
+            saveTokens(tokens)
+          }
+        }
+      },
+      threadRecs.get(`role:${role.name}`)?.threadId ?? null,
+    )
+    void entry.handle.done.then((o) => {
+      roleRunning.delete(role.name)
+      roleLast.set(role.name, Date.now())
+      if (o.ok) log(`◆ role ${role.name} done`)
+      else warn(`◆ role ${role.name}: ${(o.error ?? '').slice(0, 160)}`)
+    })
+  }
+  const roleItem = (role: Role) => {
+    const e = roleRunning.get(role.name)
+    return {
+      name: role.name,
+      status: (e ? 'running' : 'idle') as 'running' | 'idle',
+      activity: e ? e.activity : '',
+      model: role.model,
+      host: e?.host ?? threadRecs.get(`role:${role.name}`)?.host ?? null,
+      tokens: tokens[role.name]?.pool?.total ?? 0,
+      cadenceMs: role.cadenceMs,
+      startedAt: e?.startedAt ?? 0,
+      lastActivity: e?.lastActivity ?? 0,
+      lastRunAt: roleLast.get(role.name) ?? null,
+    }
+  }
+
   // Ask each worker's codex DB for the thread keyed to a board ticket's workspace, for tickets bunion has no record
   // of, and seed threadRecs with the newest match. Runs once on the first board; makes pre-persistence handoffs
   // chattable. Best-effort — a worker that's down or has no match is simply skipped.
@@ -569,6 +656,14 @@ export async function start(workflowPath?: string): Promise<void> {
     }
   }
   if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log, onAction, onChat)
+
+  // Start the pool — each role on its cadence, with a staggered first run shortly after startup. (Role config is read
+  // at start; add/edit roles then restart.)
+  cfg.roles.forEach((role, i) => {
+    const tick = (): void => dispatchRole(role, i)
+    setInterval(tick, role.cadenceMs)
+    setTimeout(tick, 10_000 + i * 20_000)
+  })
 
   // Periodic workspace hygiene: each ticket's checkout is ~5-6G (node_modules + git history), and stale ones pile
   // up as tickets cycle across VMs (every restart re-pins and orphans the old copy). Prune workspaces on each VM

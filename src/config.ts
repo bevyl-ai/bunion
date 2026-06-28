@@ -41,6 +41,15 @@ function expandHome(p: string): string {
   return p === '~' || p.startsWith('~/') ? join(homedir(), p.slice(1)) : p
 }
 
+// A role cadence: a bare number is ms; "30m" / "4h" / "1d" / "45s" are human durations. 0 = invalid (role skipped).
+function parseCadence(v: unknown): number {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  const m = (str(v) ?? '').trim().match(/^(\d+(?:\.\d+)?)\s*(s|m|h|d)?$/i)
+  if (!m) return 0
+  const mult: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }
+  return Math.round(parseFloat(m[1]!) * (mult[(m[2] ?? 'm').toLowerCase()] ?? 60_000))
+}
+
 export function loadConfig(path?: string): Config {
   const workflowPath = path ?? join(process.cwd(), 'WORKFLOW.md')
   const { frontmatter: fm, prompt } = parseWorkflow(workflowPath)
@@ -89,6 +98,10 @@ export function loadConfig(path?: string): Config {
       maxRetryBackoffMs: num(ag.max_retry_backoff_ms, 300_000),
     },
     phases: Object.fromEntries(Object.entries(obj(fm.phases)).map(([k, v]) => [k, arr(v)])),
+    roles: (Array.isArray(fm.roles) ? fm.roles : [])
+      .map(obj)
+      .map((r) => ({ name: (str(r.name) ?? '').trim(), cadenceMs: parseCadence(r.cadence), prompt: str(r.prompt) ?? '', model: str(r.model) }))
+      .filter((r) => r.name && r.prompt && r.cadenceMs > 0),
     worker: {
       sshHosts: arr(wk.ssh_hosts).length ? arr(wk.ssh_hosts) : envHosts,
       maxPerHost: num(wk.max_concurrent_agents_per_host, 1),

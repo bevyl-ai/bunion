@@ -21,6 +21,20 @@ export interface BoardItem {
   tokens: { total: number; phases: Array<{ phase: string; total: number; input: number; output: number; cached: number; reasoning: number }> } | null // cumulative token use, per pipeline stage
 }
 
+// One pool role in the bottom dock — an always-on ambient agent (mechanic, dreamer, …) on a cadence.
+export interface RoleItem {
+  name: string
+  status: 'running' | 'idle'
+  activity: string
+  model: string | null
+  host: string | null
+  tokens: number
+  cadenceMs: number
+  startedAt: number
+  lastActivity: number
+  lastRunAt: number | null
+}
+
 export interface Snapshot {
   scope: string
   cap: number
@@ -31,6 +45,7 @@ export interface Snapshot {
   totalInput: number
   totalOutput: number
   totalCached: number // cache-hit input tokens — the cheap part; cached/input is the hit rate
+  roles: RoleItem[] // the pool — ambient roles rendered in the bottom dock
 }
 
 // A tiny status server: GET /state.json is the live orchestrator snapshot; GET / is a self-contained page that
@@ -151,6 +166,18 @@ header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:
 .mbtn.danger{color:#eaa6a0;border-color:#e0564f55}.mbtn.danger:hover{background:#e0564f1a}
 .mbtn.busy{opacity:.6;pointer-events:none}
 .empty{color:var(--mut);padding:64px;text-align:center;width:100%}
+#dock{padding:2px 22px 30px}
+.docklab{font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:var(--mut);font-weight:700;margin:0 4px 11px}
+.dockrow{display:flex;gap:14px;flex-wrap:wrap}
+.rcard{flex:0 0 292px;max-width:360px;background:linear-gradient(180deg,var(--surf) 0%,#13151c 100%);border:1px solid var(--line);border-left:2.5px solid var(--accent);border-radius:12px;padding:13px 15px;cursor:pointer;box-shadow:var(--sh1);transition:transform .15s cubic-bezier(.2,.7,.2,1),border-color .15s,box-shadow .15s}
+.rcard:hover{transform:translateY(-2px);box-shadow:var(--sh2);border-color:var(--line3)}
+.rtop{display:flex;align-items:center;gap:8px}
+.rname{font-weight:650;font-size:13.5px;text-transform:capitalize;letter-spacing:.2px}
+.rmodel{font-size:10px;color:var(--mut2);font-family:ui-monospace,Menlo,monospace;background:var(--surf2);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px}
+.rstat{margin-left:auto;font-size:11px;color:var(--mut);display:inline-flex;align-items:center;gap:5px}
+.rstat .dot{width:7px;height:7px;border-radius:50%}
+.ract{color:var(--mut);font-size:12px;margin-top:9px;line-height:1.45;min-height:17px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rfoot{font-size:11px;color:var(--mut2);margin-top:9px;font-variant-numeric:tabular-nums}
 #modal{position:fixed;inset:0;background:rgba(5,6,10,.66);backdrop-filter:blur(7px);display:none;align-items:center;justify-content:center;z-index:50;padding:28px}
 #mpanel{background:var(--surf);border:1px solid var(--line2);border-radius:16px;width:min(960px,100%);max-height:86vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 30px 90px rgba(0,0,0,.66),0 0 0 1px rgba(255,255,255,.02)}
 #mhead{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap;background:linear-gradient(180deg,#191c24 0%,var(--surf) 100%)}
@@ -190,6 +217,7 @@ header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:
  <span class="clock" id="clock"></span>
 </header>
 <div class="board" id="board"></div>
+<div id="dock"></div>
 <div id="modal"><div id="mpanel">
  <div id="mhead"><span class="live"></span><span id="mtitle"></span><span id="mclose">close &#10005;</span></div>
  <div id="msub"></div>
@@ -285,6 +313,7 @@ function render(){
    board.innerHTML=html;
   }
  }
+ renderDock();
  tickLive();
 }
 function tickLive(){
@@ -298,8 +327,22 @@ function tickLive(){
   const tk=card.querySelector('.t-tok');if(tk)tk.innerHTML=r.tokens?fmtTok(r.tokens.total)+' tok':'';
  });
 }
+function roleColor(n){n=(n||'').toLowerCase();return n==='mechanic'?'#d99a2b':n==='dreamer'?'#b88cd9':'#5b8def';}
+function roleCard(r){var live=r.status==='running',col=roleColor(r.name),dc=live?'#3fb27f':'var(--mut2)';
+ var stat=live?'working':(r.lastRunAt?'last run '+ago(Date.now()-r.lastRunAt)+' ago':'idle');
+ var act=live?esc((r.activity||'working\\u2026').slice(0,120)):'<span style="color:var(--mut2)">waiting for next run</span>';
+ return '<div class="rcard" data-role="'+esc(r.name)+'" style="border-left-color:'+col+'"><div class="rtop"><span class="rname" style="color:'+col+'">'+esc(r.name)+'</span>'+(r.model?'<span class="rmodel">'+esc(r.model)+'</span>':'')+'<span class="rstat"><i class="dot" style="background:'+dc+'"></i>'+stat+'</span></div><div class="ract">'+act+'</div><div class="rfoot">&#8635; every '+ago(r.cadenceMs)+(r.tokens?' &middot; &#931; '+fmtTok(r.tokens)+' tok':'')+(r.host?' &middot; '+esc(r.host.replace(/\\.exe\\.xyz$/,'')):'')+'</div></div>';}
+function renderDock(){var d=document.getElementById('dock');var roles=(snap.roles||[]);if(!roles.length){d.style.display='none';d.innerHTML='';return;}d.style.display='block';d.innerHTML='<div class="docklab">&#9670; the pool &middot; always-on</div><div class="dockrow">'+roles.map(roleCard).join('')+'</div>';}
+function renderRoleHead(r){var live=r.status==='running';
+ document.getElementById('mtitle').innerHTML='<span style="text-transform:capitalize;color:'+roleColor(r.name)+'">'+esc(r.name)+'</span> <span class="pill" style="color:var(--mut);background:#8b929e1a">pool role</span>'+(r.model?' <span class="pill" style="color:var(--mut2);background:#8b929e14;font-family:ui-monospace,Menlo,monospace">'+esc(r.model)+'</span>':'');
+ var meta=['<span class="m">'+(live?'<i class="dot" style="background:#3fb27f"></i>working':'<i class="dot" style="background:var(--mut2)"></i>idle')+'</span>','<span class="m">&#8635; every '+ago(r.cadenceMs)+'</span>'];
+ if(r.lastRunAt)meta.push('<span class="m">last run '+ago(Date.now()-r.lastRunAt)+' ago</span>');
+ if(r.tokens)meta.push('<span class="m">&#931; '+fmtTok(r.tokens)+' tok</span>');
+ if(r.host)meta.push('<span class="m">&#9709; '+esc(r.host.replace(/\\.exe\\.xyz$/,''))+'</span>');
+ document.getElementById('msub').innerHTML='<div class="mtitle2">'+(live?esc(r.activity||'working\\u2026'):'idle \\u2014 waiting for the next run')+'</div><div class="mmeta">'+meta.join('')+'</div>';
+ document.getElementById('mbanner').style.display='none';document.getElementById('mtokens').style.display='none';document.getElementById('mchat').style.display='none';document.getElementById('mactions').style.display='none';}
 let expandedId=null;
-function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId);const c=it?SC(it.state):'#7c8493';
+function syncHead(){var role=(snap.roles||[]).find(x=>x.name===expandedId);if(role){renderRoleHead(role);return;}document.getElementById('mchat').style.display='flex';const it=(snap.items||[]).find(x=>x.identifier===expandedId);const c=it?SC(it.state):'#7c8493';
  document.getElementById('mtitle').innerHTML=esc(expandedId||'')+(it?' <span class="pill" style="color:'+c+';background:'+c+'22">'+esc(it.state)+'</span>':'')+(it&&it.prUrl?' <a class="pr" href="'+it.prUrl+'" target="_blank" rel="noopener">PR #'+(it.prUrl.split("/pull/")[1]||"")+'</a>':'')+(it&&it.url?' <a class="pr" style="background:#8b929e1a;color:var(--mut)" href="'+it.url+'" target="_blank" rel="noopener">Linear &#8599;</a>':'');
  const sub=document.getElementById('msub');
  if(it){var m=[];
@@ -340,6 +383,7 @@ function closeMenu(){var m=document.getElementById('actmenu');m.style.display='n
 document.addEventListener('click',function(e){if(!e.target.closest('#actmenu')&&!e.target.closest('.kebab'))closeMenu();});
 window.addEventListener('scroll',closeMenu,true);window.addEventListener('resize',closeMenu);
 board.addEventListener('click',function(e){const c=e.target.closest('[data-id]');if(!c)return;openModal(c.getAttribute('data-id'));});
+document.getElementById('dock').addEventListener('click',function(e){const c=e.target.closest('[data-role]');if(!c)return;openModal(c.getAttribute('data-role'));});
 document.getElementById('mclose').addEventListener('click',closeModal);
 document.getElementById('modal').addEventListener('click',function(e){if(e.target.id==='modal')closeModal();});
 document.addEventListener('keydown',function(e){if(e.key==='Escape')closeModal();});

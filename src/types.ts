@@ -46,6 +46,16 @@ export interface CodexConfig {
   stallTimeoutMs: number
 }
 
+// A pool role: a generic ambient agent with a standing mission + clock, NOT tied to a ticket. The engine runs each
+// configured role on its cadence with a persistent thread (so it remembers prior runs); the role files/tags tickets
+// through the same Linear tool the pipeline uses. mechanic + dreamer ship as defaults — add rows, no code change.
+export interface Role {
+  name: string
+  cadenceMs: number // how often this role runs
+  prompt: string // the standing mission, sent as the turn each run
+  model: string | null // codex model for this role's turns; null = the worker default
+}
+
 export interface Config {
   tracker: TrackerConfig
   pollIntervalMs: number
@@ -53,6 +63,7 @@ export interface Config {
   hooks: HooksConfig
   agent: { maxConcurrentAgents: number; maxTurns: number; maxRetryBackoffMs: number }
   phases: Record<string, string[]> // phase name → its states; a worker hands off to a FRESH agent when the ticket crosses phases
+  roles: Role[] // the pool — ambient roles run on a cadence beside the per-ticket pipeline
   worker: { sshHosts: string[]; maxPerHost: number } // [] = run agents locally; else fan out across these hosts
   codex: CodexConfig
   deadlock: { tokens: number; stallMs: number; hardStallMs: number } // auto-block a ticket burning resources with no forward progress

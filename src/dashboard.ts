@@ -36,6 +36,7 @@ export interface RoleItem {
   lastRunAt: number | null
   filedToday: number
   maxPerDay: number | null
+  granted: number // operator top-up granted for today (adds to maxPerDay)
 }
 
 export interface Snapshot {
@@ -182,6 +183,9 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 .pausebtn{margin-left:12px;background:#15171e;border:1px solid #4a3a1a;color:#d99a2b;border-radius:8px;padding:5px 13px;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.2px;transition:background .15s,border-color .15s;white-space:nowrap}
 .pausebtn:hover{background:#1d1810;border-color:#d99a2b}
 .pausebtn.on{background:#11201a;border-color:#3fb27f;color:#3fb27f}
+.grantbtn{margin-left:6px;background:#1a1622;border:1px solid #4a3a5a;color:#b88cd9;border-radius:6px;padding:1px 7px;font-size:11px;font-weight:700;cursor:pointer;vertical-align:baseline}
+.grantbtn:hover{background:#221a2e;border-color:#b88cd9}
+.grantbtn.busy{opacity:.5;pointer-events:none}
 .pausebtn.on:hover{background:#142a20}
 #pausebanner{flex:0 0 auto;display:none;align-items:center;gap:10px;padding:9px 22px;background:linear-gradient(90deg,#2a1414,#1a0f0f);border-bottom:1px solid #5a2222;color:#e8a0a0;font-size:12.5px;font-weight:600}
 #pausebanner.show{display:flex}
@@ -425,15 +429,15 @@ function tickLive(){
 }
 function roleColor(n){n=(n||'').toLowerCase();return n==='mechanic'?'#d99a2b':n==='dreamer'?'#b88cd9':'#5b8def';}
 function roleCard(r){var live=r.status==='running',col=roleColor(r.name),dc=live?'#3fb27f':'var(--mut2)';
- var capped=r.maxPerDay!=null&&r.filedToday>=r.maxPerDay;
+ var cap=r.maxPerDay!=null?r.maxPerDay+(r.granted||0):null;var capped=cap!=null&&r.filedToday>=cap;
  var stat=live?'working':(capped?'capped today':(r.lastRunAt?'last run '+ago(Date.now()-r.lastRunAt)+' ago':'idle'));
  var act=live?esc((r.activity||'working\\u2026').slice(0,120)):'<span style="color:var(--mut2)">'+(capped?'daily cap reached &middot; resumes at UTC midnight':'waiting for next run')+'</span>';
- return '<div class="rcard" data-role="'+esc(r.name)+'" style="border-left-color:'+col+'"><div class="rtop"><span class="rname" style="color:'+col+'">'+esc(r.name)+'</span>'+(r.model?'<span class="rmodel">'+esc(r.model)+'</span>':'')+'<span class="rstat"><i class="dot" style="background:'+dc+'"></i>'+stat+'</span></div><div class="ract">'+act+'</div><div class="rfoot">&#8635; every '+ago(r.cadenceMs)+(r.maxPerDay!=null?' &middot; <span style="color:'+(capped?'#d99a2b':'var(--mut2)')+'">'+r.filedToday+'/'+r.maxPerDay+' today</span>':'')+(r.tokens?' &middot; &#931; '+fmtTok(r.tokens)+' tok':'')+(r.host?' &middot; '+esc(r.host.replace(/\\.exe\\.xyz$/,'')):'')+'</div></div>';}
+ return '<div class="rcard" data-role="'+esc(r.name)+'" style="border-left-color:'+col+'"><div class="rtop"><span class="rname" style="color:'+col+'">'+esc(r.name)+'</span>'+(r.model?'<span class="rmodel">'+esc(r.model)+'</span>':'')+'<span class="rstat"><i class="dot" style="background:'+dc+'"></i>'+stat+'</span></div><div class="ract">'+act+'</div><div class="rfoot">&#8635; every '+ago(r.cadenceMs)+(r.maxPerDay!=null?' &middot; <span style="color:'+(capped?'#d99a2b':'var(--mut2)')+'">'+r.filedToday+'/'+cap+' today'+((r.granted||0)>0?' (+'+r.granted+')':'')+'</span> <button class="grantbtn" title="grant '+esc(r.name)+' +'+r.maxPerDay+' tickets for today" onclick="postAction(this,\\''+esc(r.name)+'\\',\\'grant\\',event)">+'+r.maxPerDay+'</button>':'')+(r.tokens?' &middot; &#931; '+fmtTok(r.tokens)+' tok':'')+(r.host?' &middot; '+esc(r.host.replace(/\\.exe\\.xyz$/,'')):'')+'</div></div>';}
 function renderDock(){var d=document.getElementById('dock');var roles=(snap.roles||[]);if(!roles.length){d.style.display='none';d.innerHTML='';return;}d.style.display='block';d.innerHTML='<div class="docklab">&#9670; the pool &middot; always-on</div><div class="dockrow">'+roles.map(roleCard).join('')+'</div>';}
 function renderRoleHead(r){var live=r.status==='running';
  document.getElementById('mtitle').innerHTML='<span style="text-transform:capitalize;color:'+roleColor(r.name)+'">'+esc(r.name)+'</span> <span class="pill" style="color:var(--mut);background:#8b929e1a">pool role</span>'+(r.model?' <span class="pill" style="color:var(--mut2);background:#8b929e14;font-family:ui-monospace,Menlo,monospace">'+esc(r.model)+'</span>':'');
  var meta=['<span class="m">'+(live?'<i class="dot" style="background:#3fb27f"></i>working':'<i class="dot" style="background:var(--mut2)"></i>idle')+'</span>','<span class="m">&#8635; every '+ago(r.cadenceMs)+'</span>'];
- if(r.maxPerDay!=null)meta.push('<span class="m">'+r.filedToday+'/'+r.maxPerDay+' filed today</span>');
+ if(r.maxPerDay!=null)meta.push('<span class="m">'+r.filedToday+'/'+(r.maxPerDay+(r.granted||0))+' filed today'+((r.granted||0)>0?' (+'+r.granted+' granted)':'')+'</span>');
  if(r.lastRunAt)meta.push('<span class="m">last run '+ago(Date.now()-r.lastRunAt)+' ago</span>');
  if(r.tokens)meta.push('<span class="m">&#931; '+fmtTok(r.tokens)+' tok</span>');
  if(r.host)meta.push('<span class="m">&#9709; '+esc(r.host.replace(/\\.exe\\.xyz$/,''))+'</span>');

@@ -63,6 +63,7 @@ interface ThreadRec {
 interface QuotaRec {
   day: string
   count: number
+  granted?: number // operator top-up for `day` — adds to the cap on demand; resets with the day like count
 }
 function utcDay(): string {
   return new Date().toISOString().slice(0, 10)
@@ -106,11 +107,15 @@ export async function start(workflowPath?: string): Promise<void> {
     const r = roleQuota.get(name)
     return r && r.day === utcDay() ? r.count : 0
   }
+  const grantedToday = (name: string): number => {
+    const r = roleQuota.get(name)
+    return r && r.day === utcDay() ? (r.granted ?? 0) : 0
+  }
   // A role's live daily budget — the tool calls remaining()/record() during a run, so the cap holds within a run, across
   // runs, and across restarts. limit null (no max_per_day) = unlimited, no enforcement.
   const makeQuota = (role: Role): RoleQuota => ({
     limit: role.maxPerDay,
-    remaining: () => (role.maxPerDay == null ? Infinity : Math.max(0, role.maxPerDay - countToday(role.name))),
+    remaining: () => (role.maxPerDay == null ? Infinity : Math.max(0, role.maxPerDay + grantedToday(role.name) - countToday(role.name))),
     record: () => {
       const day = utcDay()
       const r = roleQuota.get(role.name)
@@ -500,6 +505,19 @@ export async function start(workflowPath?: string): Promise<void> {
       setPaused(!paused)
       return { ok: true, msg: paused ? 'factory paused' : 'factory resumed' }
     }
+    if (action === 'grant') {
+      // Operator top-up: extend a capped pool role by another day's allowance for today only (resets at UTC midnight).
+      const role = cfg.roles.find((r) => r.name === identifier)
+      if (!role) return { ok: false, msg: `unknown role: ${identifier}` }
+      if (role.maxPerDay == null) return { ok: false, msg: `${identifier} is uncapped — nothing to grant` }
+      const day = utcDay()
+      const r = roleQuota.get(identifier)
+      if (r && r.day === day) r.granted = (r.granted ?? 0) + role.maxPerDay
+      else roleQuota.set(identifier, { day, count: 0, granted: role.maxPerDay })
+      saveQuota()
+      log(`action: granted ${identifier} +${role.maxPerDay} tickets for today (operator)`)
+      return { ok: true, msg: `${identifier} +${role.maxPerDay} granted for today` }
+    }
     const issue = lastBoard.find((i) => i.identifier === identifier)
     if (!issue) return { ok: false, msg: 'ticket not on the board' }
     const host = placement.get(issue.id) ?? null
@@ -610,6 +628,7 @@ export async function start(workflowPath?: string): Promise<void> {
       lastRunAt: roleLast.get(role.name) ?? null,
       filedToday: countToday(role.name),
       maxPerDay: role.maxPerDay,
+      granted: grantedToday(role.name),
     }
   }
 

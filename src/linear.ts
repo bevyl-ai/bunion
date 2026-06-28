@@ -39,19 +39,21 @@ interface RawIssue {
   description: string | null
   url: string
   priority: number
+  branchName: string | null
   createdAt: string
+  updatedAt: string | null
   startedAt: string | null
   completedAt: string | null
   state: { name: string }
   labels: { nodes: { name: string }[] }
-  inverseRelations: { nodes: { type: string; issue: { state: { name: string } | null } | null }[] }
+  inverseRelations: { nodes: { type: string; issue: { id: string; identifier: string; state: { name: string } | null } | null }[] }
   attachments: { nodes: { url: string }[] }
 }
 
-const ISSUE_FIELDS = `id identifier title description url priority createdAt startedAt completedAt
+const ISSUE_FIELDS = `id identifier title description url priority branchName createdAt updatedAt startedAt completedAt
   state { name }
   labels { nodes { name } }
-  inverseRelations { nodes { type issue { state { name } } } }
+  inverseRelations { nodes { type issue { id identifier state { name } } } }
   attachments { nodes { url } }`
 
 const CANDIDATES = `query Candidates($filter: IssueFilter) {
@@ -67,6 +69,10 @@ const BOARD = `query Board($filter: IssueFilter) {
 }`
 
 const BY_KEY = `query ByKey($id: String!) { issue(id: $id) { ${ISSUE_FIELDS} } }`
+
+const BY_STATES = `query ByStates($filter: IssueFilter) {
+  issues(first: 100, filter: $filter) { nodes { ${ISSUE_FIELDS} } }
+}`
 
 export async function fetchCandidates(cfg: Config): Promise<Issue[]> {
   // Scope by team and/or project + the active states. required_labels stay OUT of the query (Linear label matching
@@ -105,6 +111,17 @@ export async function fetchById(cfg: Config, key: string): Promise<Issue> {
   const d = await query<{ issue: RawIssue | null }>(cfg, BY_KEY, { id: key })
   if (!d.issue) throw new Error(`issue ${key} not found`)
   return toIssue(d.issue)
+}
+
+// Issues currently in any of the given workflow states, scoped to the configured team/project. Used at startup to
+// find terminal-state tickets whose workspaces should be pruned (Symphony §8.6 startup cleanup / §11.1).
+export async function fetchIssuesByStates(cfg: Config, stateNames: string[]): Promise<Issue[]> {
+  if (stateNames.length === 0) return []
+  const filter: Record<string, unknown> = { state: { name: { in: stateNames } } }
+  if (cfg.tracker.team) filter.team = { key: { eq: cfg.tracker.team } }
+  if (cfg.tracker.projectSlug) filter.project = { slugId: { eq: cfg.tracker.projectSlug } }
+  const d = await query<{ issues: { nodes: RawIssue[] } }>(cfg, BY_STATES, { filter })
+  return d.issues.nodes.map(toIssue)
 }
 
 // --- mutations + extra reads for dashboard action buttons ---
@@ -186,11 +203,15 @@ function toIssue(r: RawIssue): Issue {
     url: r.url,
     state: r.state.name,
     priority: typeof r.priority === 'number' ? r.priority : 0,
+    branchName: r.branchName ?? null,
     createdAt: r.createdAt,
+    updatedAt: r.updatedAt ?? null,
     startedAt: r.startedAt,
     completedAt: r.completedAt,
-    labels: r.labels.nodes.map((n) => n.name),
-    blockers: r.inverseRelations.nodes.filter((n) => n.type === 'blocks').map((n) => ({ state: n.issue?.state?.name ?? null })),
+    labels: r.labels.nodes.map((n) => n.name.trim().toLowerCase()), // §4.1.1: labels normalized lowercase
+    blockers: r.inverseRelations.nodes
+      .filter((n) => n.type === 'blocks')
+      .map((n) => ({ id: n.issue?.id ?? null, identifier: n.issue?.identifier ?? null, state: n.issue?.state?.name ?? null })),
     prUrl: r.attachments?.nodes.map((a) => a.url).find((u) => /github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(u)) ?? null,
   }
 }

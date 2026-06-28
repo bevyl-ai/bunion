@@ -1,3 +1,4 @@
+import type { RateLimits } from './types'
 import type { TokenBreakdown } from './tokens'
 
 // One ticket on the board. `status`: running (an agent is on it now), retrying (waiting out a backoff/continuation),
@@ -46,6 +47,8 @@ export interface Snapshot {
   totalOutput: number
   totalCached: number // cache-hit input tokens — the cheap part; cached/input is the hit rate
   paused: boolean // operator panic switch — when true, dispatch is halted (daemon + dashboard stay up)
+  rateLimits: RateLimits | null // latest coding-agent rate-limit snapshot (Symphony §13.3), null until codex reports one
+  secondsRunning: number // aggregate runtime seconds across all sessions incl. active ones (§13.3)
   roles: RoleItem[] // the pool — ambient roles rendered in the bottom dock
 }
 

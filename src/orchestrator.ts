@@ -13,7 +13,7 @@ import { remoteHome } from './ssh'
 import { backfillThreads } from './thread-backfill'
 import { foldDelta, grandTotal, phaseBreakdown, totals, zeroCounts, type TokenTally } from './tokens'
 import { removeWorkspace } from './workspace'
-import type { Config, Issue, Role, RoleQuota, TokenCounts } from './types'
+import type { Config, Issue, RateLimits, Role, RoleQuota, TokenCounts } from './types'
 
 interface RunningEntry {
   issue: Issue
@@ -81,6 +81,8 @@ export async function start(workflowPath?: string): Promise<void> {
   const retries = new Map<string, RetryTimer>()
   let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
   let tokenSeq = 0
+  let lastRateLimits: RateLimits | null = null // most recent codex rate-limit snapshot (Symphony §13.3 / §4.1.8)
+  let endedRuntimeMs = 0 // cumulative wall-clock of ended sessions; live sessions are added at snapshot time
   // Operator panic switch — when paused, NOTHING dispatches (pipeline or roles) and running agents are halted, but the
   // daemon + dashboard stay up so you can watch + resume. Persisted, so a restart mid-incident does NOT un-pause.
   let paused = readJson<{ paused: boolean }>(PAUSED_FILE, { paused: false }).paused
@@ -279,10 +281,12 @@ export async function start(workflowPath?: string): Promise<void> {
         entry.tokenBase = e.tokens
         saveTokens()
       }
+      if (e.rateLimits) lastRateLimits = e.rateLimits // newest coding-agent rate-limit snapshot for the dashboard
     }, threadRecs.get(issue.id)?.threadId ?? null)
     void entry.handle.done.then((outcome) => {
       if (running.get(issue.id) !== entry) return // already terminated by reconcile
       running.delete(issue.id)
+      endedRuntimeMs += Date.now() - entry.startedAt // fold this session's wall-clock into the aggregate runtime (§13.3)
       if (outcome.ok) {
         scheduleRetry(issue.id, issue.identifier, 1, true) // re-check & continue while active
         log(`✓ ${issue.identifier} session done`)
@@ -399,6 +403,8 @@ export async function start(workflowPath?: string): Promise<void> {
       totalOutput: t.output,
       totalCached: t.cached,
       paused,
+      rateLimits: lastRateLimits,
+      secondsRunning: Math.round((endedRuntimeMs + [...running.values()].reduce((s, e) => s + (Date.now() - e.startedAt), 0)) / 1000),
       roles: cfg.roles.map(roleItem),
     }
   }

@@ -7,12 +7,38 @@ export interface Issue {
   url: string
   state: string
   priority: number // 0=none, 1=urgent … 4=low
+  branchName: string | null // tracker-suggested git branch for the issue (Symphony §4.1.1), null if none
   createdAt: string // ISO
+  updatedAt: string | null // ISO — last tracker update (Symphony §4.1.1)
   startedAt: string | null // ISO — first moved to a started state (the factory-entry clock for total elapsed)
   completedAt: string | null // ISO — when it reached Done
-  labels: string[]
-  blockers: { state: string | null }[]
+  labels: string[] // normalized: trimmed + lowercased (Symphony §4.1.1)
+  blockers: { id: string | null; identifier: string | null; state: string | null }[] // each "blocks" relation's source
   prUrl: string | null // the GitHub PR attached to the issue, if any
+}
+
+// A categorized failure carrying a STABLE `code` (Symphony §10.6 / §11.4 normalized error categories) so the
+// orchestrator + logs can route/label by failure class instead of string-matching free-text messages.
+export class CategorizedError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = 'CategorizedError'
+  }
+}
+export function errorCode(e: unknown): string | null {
+  return e instanceof CategorizedError ? e.code : null
+}
+
+// The coding agent's latest rate-limit snapshot (Symphony §4.1.8 codex_rate_limits / §13.3 rate_limits). The upstream
+// codex payload evolves, so `raw` carries it verbatim; the summary fields are best-effort for display/backpressure.
+export interface RateLimits {
+  usedPercent: number | null // primary window utilization 0–100, if known
+  resetsInSeconds: number | null // seconds until the primary window resets, if known
+  raw: unknown // the full codex rate-limit payload
+  at: number // ms epoch the snapshot was captured
 }
 
 export interface TrackerConfig {
@@ -97,6 +123,10 @@ export interface AgentEvent {
   log?: string
   tokens?: TokenCounts
   threadId?: string // emitted once when the agent's codex thread is created or resumed, so the orchestrator persists it
+  turnId?: string // codex turn id — composes session_id = `${threadId}-${turnId}` (Symphony §4.2 / §10.2)
+  event?: string // structured event type: session_started, turn_completed, turn_failed, approval_auto_approved, … (§10.4)
+  ts?: string // ISO-8601 UTC timestamp of the event (§10.4)
+  rateLimits?: RateLimits // latest coding-agent rate-limit snapshot, when codex reports one (§10.4 / §13.3)
 }
 
 // A host-side dynamic tool offered to the agent over the app-server (e.g. linear_graphql).

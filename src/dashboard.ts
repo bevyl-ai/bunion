@@ -26,7 +26,6 @@ export interface Snapshot {
   cap: number
   pollMs: number
   now: number
-  since: number // epoch ms the token tally started — for pricing tokens at the flat plan's effective rate
   items: BoardItem[] // the WHOLE board (every active+labeled ticket), not just the running ones
   totalTokens: number // all-time tokens across every tracked ticket (bunion runs on one account: chatgpt-4)
   totalInput: number
@@ -190,10 +189,10 @@ const fmtTok=n=>{n=n||0;return n>=1e6?(n/1e6).toFixed(2)+'M':n>=1e4?Math.round(n
 var COST_IN=1.25,COST_CACHED=0.125,COST_OUT=10,PLAN_MONTHLY=200;
 function estCost(input,output,cached){var unc=Math.max(0,(input||0)-(cached||0));return (unc*COST_IN+(cached||0)*COST_CACHED+(output||0)*COST_OUT)/1e6;}
 function fmtCost(d){return d>=100?'$'+Math.round(d):d>=1?'$'+d.toFixed(1):'$'+d.toFixed(2);}
-var MONTH_MS=2592000000; // 30d
-// $ on the flat plan: the same tokens priced at the plan's effective rate ($PLAN/mo over the tally's token volume).
-// The TOTAL on-plan = PLAN_MONTHLY*elapsed/MONTH_MS (the prorated flat fee); each ticket gets its token share of it.
-function planCost(tokens,snap){var tt=(snap&&snap.totalTokens)||0,el=snap?Math.max(0,(snap.now||0)-(snap.since||0)):0;return (tt&&snap&&snap.since)?(tokens||0)/tt*PLAN_MONTHLY*el/MONTH_MS:0;}
+// What the same compute costs on the flat plan. A $200/mo ChatGPT Pro (20x) plan is worth up to ~$14k/mo of
+// API-equivalent usage if fully consumed (tbreak / SemiAnalysis), so the plan prices compute at ~$200/$14000 of API.
+var PLAN_API_VALUE=14000;
+function planCost(input,output,cached){return estCost(input,output,cached)*PLAN_MONTHLY/PLAN_API_VALUE;}
 const PRI={1:'Urgent',2:'High',3:'Medium',4:'Low'};
 var A_REWORK={a:'to-build',l:'Send to coding',c:'',t:'Move to In Progress so a fresh agent (re)writes the code and updates the PR'};
 function actionList(it){if(!it||it.state==='Done')return [];
@@ -249,7 +248,7 @@ function render(){
  const run=items.filter(r=>r.status==='running').length,q=items.filter(r=>r.status==='queued').length,rt=items.filter(r=>r.status==='retrying').length;
  scope.textContent=snap.scope||'';
  const chip=(col,n,lab)=>'<span class="chip"><i style="background:'+col+'"></i>'+n+' '+lab+'</span>';
- stats.innerHTML=chip('#3fb27f',run,'running')+(q?chip('#7c8493',q,'queued'):'')+(rt?chip('#d99a2b',rt,'retrying'):'')+'<span class="cap">'+(snap.cap||0)+' slots</span>'+(snap.totalTokens?'<span class="cap" title="~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' at GPT-5 API rates &mdash; but actual spend is the flat $200/mo Pro plan, so this is the value extracted, not what you pay ('+fmtTok(snap.totalCached||0)+' of '+fmtTok(snap.totalInput||0)+' input cached)">&#931; '+fmtTok(snap.totalTokens)+' tok'+(snap.totalInput?' &middot; <b style="color:#3fb27f">'+Math.round(snap.totalCached/snap.totalInput*100)+'% cached</b>':'')+' &middot; <span title="At GPT-5 API rates this volume would cost ~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+'. On your flat $'+PLAN_MONTHLY+'/mo codex plan the same tokens work out to ~'+fmtCost(planCost(snap.totalTokens,snap))+' so far (priced at the plan&apos;s effective rate) &mdash; what you actually pay.">~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' api &middot; ~'+fmtCost(planCost(snap.totalTokens,snap))+' on plan</span></span>':'');
+ stats.innerHTML=chip('#3fb27f',run,'running')+(q?chip('#7c8493',q,'queued'):'')+(rt?chip('#d99a2b',rt,'retrying'):'')+'<span class="cap">'+(snap.cap||0)+' slots</span>'+(snap.totalTokens?'<span class="cap" title="~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' at GPT-5 API rates &mdash; but actual spend is the flat $200/mo Pro plan, so this is the value extracted, not what you pay ('+fmtTok(snap.totalCached||0)+' of '+fmtTok(snap.totalInput||0)+' input cached)">&#931; '+fmtTok(snap.totalTokens)+' tok'+(snap.totalInput?' &middot; <b style="color:#3fb27f">'+Math.round(snap.totalCached/snap.totalInput*100)+'% cached</b>':'')+' &middot; <span title="At GPT-5 API rates this volume would cost ~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+'. A $'+PLAN_MONTHLY+'/mo Pro plan is worth up to ~$'+Math.round(PLAN_API_VALUE/1000)+'k/mo in API terms, so the same compute on the plan is ~'+fmtCost(planCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' &mdash; about 1/'+Math.round(PLAN_API_VALUE/PLAN_MONTHLY)+'th of API, and what you actually pay.">~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' api &middot; ~'+fmtCost(planCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' on plan</span></span>':'');
  // Rebuild the board ONLY when structure changes (membership / state / status / pr); live fields tick in place.
  const sig=JSON.stringify(items.map(r=>[r.identifier,r.state,r.status,r.host,r.prUrl,r.retryAttempt,r.state==='QA blocked'?(r.note||''):'']));
  if(sig!==lastSig){
@@ -293,7 +292,7 @@ function syncHead(){const it=(snap.items||[]).find(x=>x.identifier===expandedId)
  else if(it&&it.note&&it.status!=='running'){ban.style.display='block';ban.className='note';ban.innerHTML=esc(it.note);}
  else{ban.style.display='none';}
  const tk=document.getElementById('mtokens');
- if(it&&it.tokens){var tcached=0,tinput=0,toutput=0;it.tokens.phases.forEach(function(p){tcached+=p.cached;tinput+=p.input;toutput+=p.output});var mc=estCost(tinput,toutput,tcached);tk.style.display='flex';tk.innerHTML='<span class="tklab">tokens</span>'+it.tokens.phases.map(function(p){return '<span class="tkph" title="input '+fmtTok(p.input)+' \\u00b7 output '+fmtTok(p.output)+' \\u00b7 cached '+fmtTok(p.cached)+' \\u00b7 ~'+fmtCost(estCost(p.input,p.output,p.cached))+' API-equiv"><b>'+esc(p.phase)+'</b> '+fmtTok(p.total)+'</span>';}).join('')+'<span class="tktot">&Sigma; '+fmtTok(it.tokens.total)+(tinput?' &middot; <b style="color:#3fb27f">'+fmtTok(tcached)+' cached</b>':'')+' &middot; <span title="at GPT-5 API rates vs your flat $'+PLAN_MONTHLY+'/mo plan (this ticket&apos;s token share)">~'+fmtCost(mc)+' api &middot; ~'+fmtCost(planCost(it.tokens.total,snap))+' on plan</span></span>';}
+ if(it&&it.tokens){var tcached=0,tinput=0,toutput=0;it.tokens.phases.forEach(function(p){tcached+=p.cached;tinput+=p.input;toutput+=p.output});var mc=estCost(tinput,toutput,tcached);tk.style.display='flex';tk.innerHTML='<span class="tklab">tokens</span>'+it.tokens.phases.map(function(p){return '<span class="tkph" title="input '+fmtTok(p.input)+' \\u00b7 output '+fmtTok(p.output)+' \\u00b7 cached '+fmtTok(p.cached)+' \\u00b7 ~'+fmtCost(estCost(p.input,p.output,p.cached))+' API-equiv"><b>'+esc(p.phase)+'</b> '+fmtTok(p.total)+'</span>';}).join('')+'<span class="tktot">&Sigma; '+fmtTok(it.tokens.total)+(tinput?' &middot; <b style="color:#3fb27f">'+fmtTok(tcached)+' cached</b>':'')+' &middot; <span title="at GPT-5 API rates vs the same compute on your $'+PLAN_MONTHLY+'/mo plan (~1/'+Math.round(PLAN_API_VALUE/PLAN_MONTHLY)+'th of API)">~'+fmtCost(mc)+' api &middot; ~'+fmtCost(planCost(tinput,toutput,tcached))+' on plan</span></span>';}
  else{tk.style.display='none';}
  const ma=document.getElementById('mactions');var ah=it?actionList(it).map(function(d){return abtn(it.identifier,d)}).join(''):'';if(ah){ma.style.display='flex';ma.innerHTML=ah;}else{ma.style.display='none';ma.innerHTML='';}}
 function openModal(id){expandedId=id;document.getElementById('modal').style.display='flex';document.getElementById('logbody').innerHTML='<div class="lg" style="color:var(--mut)">loading&hellip;</div>';syncHead();pullLog();}

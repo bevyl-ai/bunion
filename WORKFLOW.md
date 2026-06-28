@@ -127,8 +127,8 @@ Implement the plan, get a clean, reviewed, green PR, and hand it to QA.
    - After each push, read `head=$(gh pr view <N> --json headRefOid -q .headRefOid)` and `gh api repos/$REPO/pulls/<N>/reviews`.
    - Find stupify's review whose `stupify:<sha>` matches `head` — **or the latest real CODE commit** when the only commits after it are trivial `[skip ci]` / `chore(pr): reset branch artifacts` commits. Those don't change code, so stupify won't re-review them (`nothing new — staying silent`) and its `✅` carries forward. **No review on the latest code commit yet → wait and re-check** (don't proceed).
    - **A `✅` approval covering the latest code** → gate passed. **Problems described** → fix them in code (or push back inline, `in_reply_to` the review-comment id, with justified `[codex]` reasoning), push, and loop again. A `✅` for an OLDER *code* commit doesn't count — a real code change must earn a fresh `✅`.
-   - If stupify genuinely never reviews a real code commit after repeated pushes + waits, record that in the workpad and leave the ticket in `In Progress` with a `[blocked]` note — never hand off un-approved work.
-6. Hand off only once stupify has approved (`✅`) the latest code, CI checks are green, and the acceptance criteria are met → move to `QA Requested`. A fresh, independent QA agent verifies it.
+   - **If stupify flakes** — no review of the latest code commit after ~3 re-checks over a few minutes (it's slow, backlogged, or down) — **do NOT block the pipeline.** Note in the workpad that you proceeded without a stupify `✅` (reviewer unavailable), then hand off to QA anyway. A flaky reviewer must never wedge build — QA + the human merge are still gates. (Only genuine *changes-requested* keep you in build; absence of a review does not.)
+6. Hand off once stupify has approved (`✅`) the latest code — or has flaked per the fallback above — CI checks are green, and the acceptance criteria are met → move to `QA Requested`. A fresh, independent QA agent verifies it.
 
 ## QA CHECK — status `QA Requested` (the review/QA pass)
 

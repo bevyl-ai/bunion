@@ -645,7 +645,7 @@ export async function start(workflowPath?: string): Promise<void> {
           if (reason) stuck.push({ issue: i, target: deadlocked.has(i.id) ? 'Needs human' : 'QA blocked', reason })
         }
         const s = norm(i.state)
-        if ((s === 'qa blocked' || s === 'needs human') && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
+        if ((s === 'qa blocked' || s === 'needs human' || s === 'ready to ship') && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
           notesFetched.add(i.id)
           void fetchLatestNote(cfg, i.id).then((n) => n && summaries.set(i.identifier, n)).catch(() => {})
         }

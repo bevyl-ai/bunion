@@ -8,10 +8,13 @@
 #   ssh exe.dev integrations attach llm vm:bunion-bevyl-N
 set -e
 
-# 1. Keyless codex via the exe-llm gateway.
+# 1. Keyless codex via the exe-llm gateway. High reasoning effort: tokens are ~free on the flat plan, so the only
+#    cost is slower turns — worth it for first-pass quality (a rework loop wastes far more than reasoning tokens).
+#    (Later: tune effort per stage — e.g. high for build/verify, medium for plan/qa.)
 mkdir -p "$HOME/.codex"
 cat > "$HOME/.codex/config.toml" <<'EOF'
 model_provider = "exe-llm"
+model_reasoning_effort = "high"
 
 [model_providers.exe-llm]
 name = "exe-llm"

@@ -120,7 +120,7 @@ src/
 
 ## Not ported
 
-The `Blocked`/operator-input-hold state (the host auto-approves instead) and per-state concurrency (`max_concurrent_agents_by_state` — only the global cap applies) are omitted, and VMs are a pool you provide rather than auto-provisioned per ticket. A single daemon is assumed (no distributed claim). The app-server protocol is pinned to the Codex build the host spawns.
+The `Blocked`/operator-input-hold state is omitted (the host auto-approves instead), and VMs are a pool you provide rather than auto-provisioned per ticket. A single daemon is assumed (no distributed claim). The app-server protocol is pinned to the Codex build the host spawns.
 
 ## License
 

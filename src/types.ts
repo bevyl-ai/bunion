@@ -70,7 +70,7 @@ export interface Config {
   pollIntervalMs: number
   workspaceRoot: string
   hooks: HooksConfig
-  agent: { maxConcurrentAgents: number; maxTurns: number; maxRetryBackoffMs: number }
+  agent: { maxConcurrentAgents: number; maxConcurrentByState: Record<string, number>; maxTurns: number; maxRetryBackoffMs: number } // global + per-state concurrency caps
   phases: Record<string, string[]> // phase name → its states; a worker hands off to a FRESH agent when the ticket crosses phases
   roles: Role[] // the pool — ambient roles run on a cadence beside the per-ticket pipeline
   worker: { sshHosts: string[]; maxPerHost: number } // [] = run agents locally; else fan out across these hosts

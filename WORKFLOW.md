@@ -70,6 +70,14 @@ hooks:
   timeout_ms: 180000
 agent:
   max_concurrent_agents: 12
+  # Per-state concurrency caps (Symphony §5.3.5): bound how many agents run in a given state at once, so one
+  # expensive stage — especially the unblocker on `QA blocked` — can't grab every slot. Names match active_states;
+  # an absent state falls back to the global cap, which still binds the total. Tune freely.
+  max_concurrent_agents_by_state:
+    In Progress: 6
+    QA Requested: 4
+    QA Verify: 3
+    QA blocked: 3
   max_turns: 20
 worker:
   # Empty → agents run locally (workspace + clone + codex on this machine; max_concurrent_agents is the only cap).

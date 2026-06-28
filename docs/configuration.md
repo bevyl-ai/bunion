@@ -71,6 +71,7 @@ The effective concurrency cap is `min(agent.max_concurrent_agents, hosts × max_
 | Key | Default | Notes |
 |---|---|---|
 | `max_concurrent_agents` | `10` | global cap on concurrent sessions |
+| `max_concurrent_agents_by_state` | `{}` | per-state concurrency caps (state name → max agents running in that state); absent states fall back to the global cap. Bounds an expensive stage's blast radius |
 | `max_turns` | `20` | turns per session before a graceful handoff cap |
 | `max_retry_backoff_ms` | `300000` | ceiling for failure backoff |
 

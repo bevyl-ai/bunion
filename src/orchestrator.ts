@@ -176,6 +176,17 @@ export async function start(workflowPath?: string): Promise<void> {
   const planBlocked = (i: Issue): boolean => phaseOf(cfg, i.state) === 'plan' && i.blockers.some((b) => b.state == null || !isTerminal(b.state))
   const eligible = (i: Issue): boolean =>
     isActive(i.state) && !isTerminal(i.state) && isRoutable(i) && !planBlocked(i) && !claimed.has(i.id) && !running.has(i.id)
+  // Per-state concurrency (Symphony §8.2/§8.3): an issue in state S is dispatch-eligible only if fewer than
+  // max_concurrent_agents_by_state[S] agents are already running on issues in S (counted by their CURRENT state). No
+  // entry for S = no per-state limit (the global cap is the only ceiling). Bounds an expensive stage's blast radius —
+  // one phase (e.g. the unblocker on `QA blocked`) can't consume every slot.
+  const stateFull = (state: string): boolean => {
+    const cap = cfg.agent.maxConcurrentByState[norm(state)]
+    if (cap === undefined) return false
+    let n = 0
+    for (const e of running.values()) if (norm(e.issue.state) === norm(state)) n++
+    return n >= cap
+  }
 
   const clearRetry = (id: string): void => {
     const r = retries.get(id)
@@ -304,7 +315,7 @@ export async function start(workflowPath?: string): Promise<void> {
       return release(id)
     }
     if (!eligible(issue)) return release(id)
-    if (slots() <= 0) return scheduleRetry(id, identifier, attempt + 1, false)
+    if (slots() <= 0 || stateFull(issue.state)) return scheduleRetry(id, identifier, attempt + 1, false)
     const host = placeFor(id) // a continuation reuses its pinned VM; a fresh retry takes any free worker
     if (host === undefined) return scheduleRetry(id, identifier, attempt + 1, false)
     dispatch(issue, attempt, host)
@@ -696,6 +707,7 @@ export async function start(workflowPath?: string): Promise<void> {
         for (const issue of board.filter((i) => isActive(i.state)).sort(byDispatch)) {
           if (slots() <= 0) break
           if (!eligible(issue)) continue
+          if (stateFull(issue.state)) continue // per-state concurrency cap reached — skip; this issue retries next poll
           const host = placeFor(issue.id)
           if (host === undefined) continue // every worker VM is full — try this issue again next poll
           dispatch(issue, 0, host)

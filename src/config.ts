@@ -15,6 +15,13 @@ function num(v: unknown, dflt: number): number {
 function arr(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 }
+// A normalized state→positive-int map (per-state concurrency caps). Keys are trimmed + lowercased for lookup;
+// non-numeric / non-integer / non-positive entries are dropped (Symphony §5.3.5).
+function intMap(v: unknown): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const [k, val] of Object.entries(obj(v))) if (typeof val === 'number' && Number.isInteger(val) && val > 0) out[k.trim().toLowerCase()] = val
+  return out
+}
 
 // `$VAR` → env; literal otherwise. Missing/empty env → fall back to canonical env, then null.
 function secret(v: unknown, fallbackEnv: string): string | null {
@@ -94,6 +101,7 @@ export function loadConfig(path?: string): Config {
     },
     agent: {
       maxConcurrentAgents: num(ag.max_concurrent_agents, 10),
+      maxConcurrentByState: intMap(ag.max_concurrent_agents_by_state), // per-state concurrency caps (Symphony §5.3.5); {} = global cap only
       maxTurns: num(ag.max_turns, 20),
       maxRetryBackoffMs: num(ag.max_retry_backoff_ms, 300_000),
     },

@@ -71,7 +71,7 @@ const DEFAULT_COLUMNS: BoardColumn[] = [
   { name: 'QA check', color: '#d99a2b', states: ['QA Requested'] },
   { name: 'Verify QA', color: '#c79a3a', states: ['QA Verify'] },
   { name: 'Blocked', color: '#e0564f', states: ['QA blocked'] },
-  { name: 'Needs engineer', color: '#d9568c', states: ['Needs human'] },
+  { name: 'Needs Engineer', color: '#d9568c', states: ['Needs Engineer'] },
   { name: 'Ready', color: '#3fb27f', states: ['Ready to ship'] },
   { name: 'In Staging', color: '#e3b341', states: ['Merged: In Staging'] },
   { name: 'Verifying prod', color: '#4a9eda', states: ['Verifying in Prod'] },
@@ -155,7 +155,7 @@ export function loadConfig(path?: string): Config {
       tokens: num(dl.tokens, 20_000_000), // tokens burned with no new pipeline state (within stallMs) → blocked
       stallMs: num(dl.stall_ms, 30 * 60_000), // ...with no forward progress for at least this long
       hardStallMs: num(dl.hard_stall_ms, 90 * 60_000), // OR this long with no progress, regardless of token spend
-      hardTokenCap: num(dl.hard_token_cap, 200_000_000), // absolute per-ticket total-spend ceiling → Needs human, regardless of progress (blast-radius cap)
+      hardTokenCap: num(dl.hard_token_cap, 200_000_000), // absolute per-ticket total-spend ceiling → Needs Engineer, regardless of progress (blast-radius cap)
     },
     dashboardPort: portRaw && Number.isFinite(Number(portRaw)) ? Number(portRaw) : null,
     boardColumns: parseColumns(obj(fm.board).columns),

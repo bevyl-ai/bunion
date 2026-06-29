@@ -326,9 +326,9 @@ export async function start(workflowPath?: string): Promise<void> {
         const isSetupFailure = code === 'codex_not_found'
         warn(`✗ ${issue.identifier}: ${(outcome.error ?? '').slice(0, 200)}${sid ? ` session=${sid}` : ''}${code ? ` code=${code}` : ''}`) // §13.1
         if (isSetupFailure) {
-          log(`setup failure ${issue.identifier} (${code}) → Needs human`)
+          log(`setup failure ${issue.identifier} (${code}) → Needs Engineer`)
           try {
-            await moveIssue(cfg, issue.id, 'Needs human')
+            await moveIssue(cfg, issue.id, 'Needs Engineer')
             await postComment(cfg, issue.id, `## ⚠️ Setup failure — needs operator\nThe factory cannot run this ticket: \`${code}\`.\n\n> ${(outcome.error ?? '').slice(0, 400)}\n\nManual intervention required before it can retry.`)
           } catch (e) {
             warn(`setup failure move ${issue.identifier}: ${e instanceof Error ? e.message : String(e)}`)
@@ -588,7 +588,7 @@ export async function start(workflowPath?: string): Promise<void> {
         const cap = effectiveCap(identifier)
         log(`action: ${identifier} budget +${Math.round(inc / 1e6)}M → ${Math.round(cap / 1e6)}M cap (operator)`)
         const s = norm(issue.state)
-        if (s === 'needs human' || s === 'qa blocked') {
+        if (s === 'needs engineer' || s === 'qa blocked') {
           // It was parked (likely by the cap) — re-open to In Progress with a fresh no-progress clock so it can use the
           // new headroom; the thread resumes on the next dispatch.
           stopRun(issue.id)
@@ -650,7 +650,7 @@ export async function start(workflowPath?: string): Promise<void> {
   // daemon log, token burns, what's stuck), so the mechanic especially gets it first-class instead of guessing.
   const brainDigest = (): string => {
     const lc = (s: string): string => s.trim().toLowerCase()
-    const needs = lastBoard.filter((i) => lc(i.state) === 'needs human').map((i) => i.identifier)
+    const needs = lastBoard.filter((i) => lc(i.state) === 'needs engineer').map((i) => i.identifier)
     const blocked = lastBoard.filter((i) => lc(i.state) === 'qa blocked').map((i) => i.identifier)
     const tok = (n: number): string => (n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${Math.round(n / 1e6)}M` : `${Math.round(n / 1e3)}k`)
     const burns = Object.keys(tokens)
@@ -662,7 +662,7 @@ export async function start(workflowPath?: string): Promise<void> {
     return [
       `## Factory state — live from the brain (you run on a worker and cannot see any of this otherwise)`,
       `- Status: ${paused ? 'PAUSED' : 'running'}`,
-      `- Stuck now: ${needs.length} Needs human${needs.length ? ` (${needs.join(', ')})` : ''}; ${blocked.length} QA blocked${blocked.length ? ` (${blocked.join(', ')})` : ''}`,
+      `- Stuck now: ${needs.length} Needs Engineer${needs.length ? ` (${needs.join(', ')})` : ''}; ${blocked.length} QA blocked${blocked.length ? ` (${blocked.join(', ')})` : ''}`,
       `- Top token burns: ${burns.length ? burns.map(([id, n]) => `${id} ${tok(n)}`).join(', ') : 'none tracked'}`,
       `- Recent brain warnings / errors / deadlocks (daemon.log tail):`,
       ...(warnings.length ? warnings.map((l) => `    ${l}`) : ['    (none recently — factory healthy)']),
@@ -836,7 +836,7 @@ export async function start(workflowPath?: string): Promise<void> {
       }
       // Surface WHY a ticket is stuck: pull its workpad Verdict for the blocked + needs-human states (not while an
       // agent is live on it — its own messages fill the note then). Clear a cached note when a ticket changes state
-      // so a qa-blocked verdict doesn't linger after the blocked phase escalates it to Needs human.
+      // so a qa-blocked verdict doesn't linger after the blocked phase escalates it to Needs Engineer.
       const now = Date.now()
       const stuck: { issue: Issue; target: string; reason: string }[] = []
       for (const i of board) {
@@ -861,24 +861,24 @@ export async function start(workflowPath?: string): Promise<void> {
           const cap = effectiveCap(i.identifier)
           if (total >= cap) {
             // Absolute blast-radius cap (plus any operator budget bump): even a ticket that keeps reaching new states
-            // (which resets the no-progress clock) must never burn unbounded. Straight to Needs human.
-            stuck.push({ issue: i, target: 'Needs human', reason: `burned ${Math.round(total / 1e6)}M tokens — hit the ${Math.round(cap / 1e6)}M per-ticket cap` })
+            // (which resets the no-progress clock) must never burn unbounded. Straight to Needs Engineer.
+            stuck.push({ issue: i, target: 'Needs Engineer', reason: `burned ${Math.round(total / 1e6)}M tokens — hit the ${Math.round(cap / 1e6)}M per-ticket cap` })
           } else {
             // No-progress deadlock: a ticket deadlocking while IN `QA blocked` means the triage itself is looping →
-            // straight to Needs human. Anywhere else: 1st offense → QA blocked (let it triage), 2nd → Needs human.
+            // straight to Needs Engineer. Anywhere else: 1st offense → QA blocked (let it triage), 2nd → Needs Engineer.
             const reason = deadlockReason(total - pr.tokensAtProgress, now - pr.since, cfg.deadlock)
-            if (reason) stuck.push({ issue: i, target: norm(i.state) === 'qa blocked' || deadlocked.has(i.id) ? 'Needs human' : 'QA blocked', reason })
+            if (reason) stuck.push({ issue: i, target: norm(i.state) === 'qa blocked' || deadlocked.has(i.id) ? 'Needs Engineer' : 'QA blocked', reason })
           }
         }
         const s = norm(i.state)
-        if ((s === 'qa blocked' || s === 'needs human' || s === 'ready to ship') && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
+        if ((s === 'qa blocked' || s === 'needs engineer' || s === 'ready to ship') && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
           notesFetched.add(i.id)
           void fetchLatestNote(cfg, i.id).then((n) => n && summaries.set(i.identifier, n)).catch(() => {})
         }
       }
       for (const id of [...progress.keys()]) if (!board.some((i) => i.id === id)) { progress.delete(id); deadlocked.delete(id) }
       // Deadlock sweep: no forward progress + resource burn → move to the blocked state (the blocked phase triages it),
-      // or to Needs human if it already deadlocked once. Await the move so it isn't re-dispatched below this poll.
+      // or to Needs Engineer if it already deadlocked once. Await the move so it isn't re-dispatched below this poll.
       for (const { issue, target, reason } of stuck) {
         deadlocked.add(issue.id)
         terminate(issue.id, false)
@@ -889,7 +889,7 @@ export async function start(workflowPath?: string): Promise<void> {
         stats.record({ identifier: issue.identifier, kind: reason.includes('per-ticket cap') ? 'cap' : 'deadlock', toState: target, threadId: threadRecs.get(issue.id)?.threadId, totalTokens: grandTotal(tokens, issue.identifier), account: acct(placement.get(issue.id) ?? null), detail: reason })
         try {
           await moveIssue(cfg, issue.id, target)
-          await postComment(cfg, issue.id, `## 🔁 Auto-blocked — deadlock\nThe factory ${reason} on this ticket, so I moved it to \`${target}\` instead of looping further.${target === 'QA blocked' ? '\n\n**Blocked phase:** if there is no concrete, fixable meta-problem here, escalate to `Needs human` — do not just send it back to loop again.' : ''}`)
+          await postComment(cfg, issue.id, `## 🔁 Auto-blocked — deadlock\nThe factory ${reason} on this ticket, so I moved it to \`${target}\` instead of looping further.${target === 'QA blocked' ? '\n\n**Blocked phase:** if there is no concrete, fixable meta-problem here, escalate to `Needs Engineer` — do not just send it back to loop again.' : ''}`)
         } catch (e) {
           warn(`deadlock move ${issue.identifier}: ${e instanceof Error ? e.message : String(e)}`)
         }

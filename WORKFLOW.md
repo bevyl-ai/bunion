@@ -9,8 +9,8 @@ tracker:
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project
   api_key: $LINEAR_API_KEY
   required_labels: [dark-factory]    # opt-in: only tickets carrying this label enter the factory
-  active_states: [Triage, Backlog, Todo, In Progress, QA Requested, QA Verify, QA blocked, Verifying in prod]   # Ready to ship + "Merged: In Staging" + Needs human are NOT active (humans / the release train move those)
-  terminal_states: [Done, Canceled, Cancelled, Duplicate, Needs human]   # Needs human = the factory stops + a person must decide
+  active_states: [Triage, Backlog, Todo, In Progress, QA Requested, QA Verify, QA blocked, Verifying in prod]   # Ready to ship + "Merged: In Staging" + Needs Engineer are NOT active (humans / the release train move those)
+  terminal_states: [Done, Canceled, Cancelled, Duplicate, Needs Engineer]   # Needs Engineer = the factory stops + a person must decide
 polling:
   interval_ms: 30000              # poll every 30s (was 10s): 3x fewer Linear reads; the dashboard stays plenty fresh
   # tracker.min_request_gap_ms (default 250) paces EVERY Linear request — orchestrator reads + the agents' linear_graphql
@@ -76,7 +76,7 @@ board:                               # dashboard lanes (name + colour + the stat
     - { name: QA check,       color: '#d99a2b', states: [QA Requested] }
     - { name: Verify QA,      color: '#c79a3a', states: [QA Verify] }
     - { name: Blocked,        color: '#e0564f', states: [QA blocked] }
-    - { name: Needs engineer, color: '#d9568c', states: [Needs human] }
+    - { name: Needs Engineer, color: '#d9568c', states: [Needs Engineer] }
     - { name: Ready,          color: '#3fb27f', states: [Ready to ship] }
     - { name: In Staging,     color: '#e3b341', states: ['Merged: In Staging'] }
     - { name: Verifying prod, color: '#4a9eda', states: [Verifying in Prod] }
@@ -141,13 +141,13 @@ codex:
   init_timeout_ms: 60000                 # codex cold-boot handshake — separate + generous; under shared-CPU load on a fresh
                                          # VM the initialize can exceed 15s, so a tight read timeout caused restart retry-storms
 deadlock:                                # auto-stop a runaway ticket — two independent triggers, both terminate the agent:
-  hard_token_cap: 200000000              # ABSOLUTE per-ticket total-spend ceiling → `Needs human`, no matter how much "progress" it claims (the blast-radius cap)
-  tokens: 20000000                       # no-progress trigger: 20M tokens with no NEW pipeline state reached (once stalled ≥ stall_ms) → `QA blocked`, then `Needs human`
+  hard_token_cap: 200000000              # ABSOLUTE per-ticket total-spend ceiling → `Needs Engineer`, no matter how much "progress" it claims (the blast-radius cap)
+  tokens: 20000000                       # no-progress trigger: 20M tokens with no NEW pipeline state reached (once stalled ≥ stall_ms) → `QA blocked`, then `Needs Engineer`
   stall_ms: 1800000                      # 30min — min time with no forward progress before the token rule trips
-  hard_stall_ms: 5400000                 # 90min with no forward progress → blocked regardless of token spend. 2nd deadlock → `Needs human`
+  hard_stall_ms: 5400000                 # 90min with no forward progress → blocked regardless of token spend. 2nd deadlock → `Needs Engineer`
 ---
 
-You are the agent for Linear ticket `{{ issue.identifier }}`, running unattended. You **own it end-to-end and carry it through every stage yourself, on one continuous thread** — plan → build → QA → verify → ship-ready — advancing its Linear status as you clear each stage. The stages below are *your own* checklist, NOT handoffs to other agents: the ticket's current status (`{{ issue.state }}`) just tells you which stage you're on right now. Keep moving it forward; never ask a human for follow-up; never stop early except for a true blocker (missing required auth/permissions/secrets), which you route to `Needs human`.
+You are the agent for Linear ticket `{{ issue.identifier }}`, running unattended. You **own it end-to-end and carry it through every stage yourself, on one continuous thread** — plan → build → QA → verify → ship-ready — advancing its Linear status as you clear each stage. The stages below are *your own* checklist, NOT handoffs to other agents: the ticket's current status (`{{ issue.state }}`) just tells you which stage you're on right now. Keep moving it forward; never ask a human for follow-up; never stop early except for a true blocker (missing required auth/permissions/secrets), which you route to `Needs Engineer`.
 
 {% if attempt %}
 Continuation: this is attempt #{{ attempt }}. Resume from the `## Codex Workpad`; do not redo completed work or restart from scratch.
@@ -178,7 +178,7 @@ Linear tools (we are rate-limited — use sparingly): `linear_read` returns a ti
 - Minimal, in-scope changes that match the surrounding code. Out-of-scope finds → file a separate `Backlog` issue (clear title/acceptance criteria, same team, `related` link), don't widen scope.
 - Advance the ticket's Linear status as you clear each stage's bar (In Progress → QA Requested → QA Verify → Ready to ship), and only when that bar is genuinely met.
 - Do every stage for real — don't skip one or rubber-stamp. When you reach the QA / verify stages, switch hats and check your OWN work as ruthlessly as an outside reviewer would; catching the bug you'd be tempted to wave through is the whole point of running them.
-- **Avoid loops and churn.** If this ticket is going in circles — you've already run this phase, or it keeps coming back with the same failure or blocker — don't re-run it: route it to `Needs human` with a one-line why. Forward progress or escalate; never spin.
+- **Avoid loops and churn.** If this ticket is going in circles — you've already run this phase, or it keeps coming back with the same failure or blocker — don't re-run it: route it to `Needs Engineer` with a one-line why. Forward progress or escalate; never spin.
 
 ---
 
@@ -226,7 +226,7 @@ Now QA the change you just built. Switch hats and be your own toughest reviewer 
    - Record exactly what you ran/clicked and what you observed in the workpad.
 3. Record your **`Verdict:`** line in the workpad (with a confidence level + how you verified — `BLOCKED`/`FAILED` must state the concrete reason), then route by it:
    - **PASS** — you genuinely verified it works, the acceptance criteria are met, and checks are green → move the ticket to `QA Verify` for one final skeptical pass over your proof. **Do NOT merge — a human owns the merge.**
-   - **FAILED** — you reproduced a defect, an acceptance criterion is objectively not met, or a check is red. This is a concrete, fixable failure → move the ticket **back to `In Progress`**, record in the workpad exactly what failed and how to reproduce it, and fix it in the build stage. Finding it in QA and fixing it in build is the loop working — as long as you're converging, not circling the same failure (if you are, → `Needs human`).
+   - **FAILED** — you reproduced a defect, an acceptance criterion is objectively not met, or a check is red. This is a concrete, fixable failure → move the ticket **back to `In Progress`**, record in the workpad exactly what failed and how to reproduce it, and fix it in the build stage. Finding it in QA and fixing it in build is the loop working — as long as you're converging, not circling the same failure (if you are, → `Needs Engineer`).
    - **BLOCKED** — you *cannot actually verify* it: it needs a running environment or access you don't have, a product/human decision, or you're not confident → move the ticket to `QA blocked` and work the blocker there (clear the missing access/env/data/URL, or escalate), recording exactly what you tried and what was missing. Never pass — or fail to `In Progress` — something you could not actually verify; that's what `QA blocked` is for.
 
 ## VERIFY QA — status `QA Verify` (the adversarial check)
@@ -252,10 +252,10 @@ You hit a blocker during QA / verify and parked the ticket here. Now triage it: 
 2. Classify the blocker:
    - **Fixable meta-problem** — a missing/forgotten preview URL, gh/credential or workspace/test-data access, a wrong route, an environment or tooling gap, or a question you can answer by investigating the code/docs. These are most blocks. Resolve it: find the real preview URL (it's in the PR body), locate or set up the data/access, research the answer, and record what you found.
    - **Genuine human call** — a product/UX decision, an ambiguous or contradictory requirement, an external dependency, or something needing a real person's judgment or credentials you must not handle.
-   - **Fail cheap on capability gaps.** If the blocker is a credential / token / account / tool the worker lacks and can't get via an *already-wired* approved path (an env var that is present, a registered `bevops task:run`, an existing skill), confirm that in ONE focused pass — do NOT burn turns hunting workarounds or probing for secrets. Escalate `NEEDS HUMAN` immediately with the exact thing to provision. Spending many turns to rediscover "I don't have X" is the costly anti-pattern to avoid.
+   - **Fail cheap on capability gaps.** If the blocker is a credential / token / account / tool the worker lacks and can't get via an *already-wired* approved path (an env var that is present, a registered `bevops task:run`, an existing skill), confirm that in ONE focused pass — do NOT burn turns hunting workarounds or probing for secrets. Escalate `NEEDS ENGINEER` immediately with the exact thing to provision. Spending many turns to rediscover "I don't have X" is the costly anti-pattern to avoid.
 3. Record your `Verdict:` line and route:
    - **UNBLOCKED** — you cleared the meta-problem → move back to `QA Requested` and resume verifying (or to `In Progress` if it genuinely needs a code change, with a precise `[codex]` note of what). `Verdict: UNBLOCKED — <what you cleared and how>`.
-   - **NEEDS HUMAN** — it truly requires a person → move to `Needs human`. `Verdict: NEEDS HUMAN — <the single concrete decision or action a person must take>`. Make the ask self-contained.
+   - **NEEDS ENGINEER** — it truly requires a person → move to `Needs Engineer`. `Verdict: NEEDS ENGINEER — <the single concrete decision or action a person must take>`. Make the ask self-contained.
 
 ## VERIFY:PROD — status `Verifying in prod`
 
@@ -270,9 +270,9 @@ The release train just fast-forwarded `prod` to include this ticket's change —
 3. Record your **`Verdict:`** line, then route:
    - **SHIPPED** — confirmed live, no new errors on the touched surface → move to `Done`.
    - **REGRESSION** — live but it broke something in prod (you reproduced it or saw a clear new error spike) → move to `In Progress` with the exact prod symptom + repro, flagged as a prod regression.
-   - **CANNOT VERIFY** — you genuinely lack the access/observability to confirm → move to `Needs human` with the exact check a person must run.
+   - **CANNOT VERIFY** — you genuinely lack the access/observability to confirm → move to `Needs Engineer` with the exact check a person must run.
 
-## Ready to ship / Needs human / Done / Canceled / Duplicate
+## Ready to ship / Needs Engineer / Done / Canceled / Duplicate
 
 Not your job — stop and do nothing. A human merges `Ready to ship`; bunion does not auto-merge.
 

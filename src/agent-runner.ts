@@ -26,7 +26,7 @@ function isActive(cfg: Config, state: string): boolean {
 }
 
 function continuationPrompt(turn: number, maxTurns: number, state: string): string {
-  return `Continuation — turn #${turn} of ${maxTurns}, same thread, same ticket. The ticket is now in \`${state}\`, so work the stage that matches that status from your original instructions. Resume from the workspace + workpad and what you've already done — don't restate or redo finished work. Keep carrying the ticket forward through its stages; stop only when it reaches a handoff state (Ready to ship / Needs human) or you're truly blocked.`
+  return `Continuation — turn #${turn} of ${maxTurns}, same thread, same ticket. The ticket is now in \`${state}\`, so work the stage that matches that status from your original instructions. Resume from the workspace + workpad and what you've already done — don't restate or redo finished work. Keep carrying the ticket forward through its stages; stop only when it reaches a handoff state (Ready to ship / Needs Engineer) or you're truly blocked.`
 }
 
 // One worker session for an issue: prep workspace → run turns on a single app-server thread up to max_turns,
@@ -87,7 +87,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
         const prompt = pending.length ? `${base}\n\n## Operator messages — sent live while you were working; address these now\n${pending.map((m) => `- ${m}`).join('\n')}` : base
         await session.runTurn(threadId, dir, prompt, `${current.identifier}: ${current.title}`)
         current = await fetchById(cfg, issue.id)
-        if (!isActive(cfg, current.state)) break // reached a handoff state (Ready to ship / Needs human / Done) — this ticket is done
+        if (!isActive(cfg, current.state)) break // reached a handoff state (Ready to ship / Needs Engineer / Done) — this ticket is done
         if (turn >= cfg.agent.maxTurns) break // graceful per-session cap; the orchestrator resumes this same thread next poll if the ticket is still active
       }
       return { ok: true }

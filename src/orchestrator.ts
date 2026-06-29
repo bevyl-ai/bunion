@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { startAgent, type AgentHandle } from './agent-runner'
 import { startRole, type RoleHandle } from './role-runner'
 import { AppServerSession } from './codex/app-server'
+import { linearGraphqlTool, linearReadTool } from './codex/dynamic-tool'
 import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
 import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment, recentAuthFailures } from './linear'
@@ -440,11 +441,14 @@ export async function start(workflowPath?: string): Promise<void> {
       columns: cfg.boardColumns.map((c) => ({ name: c.name, c: c.color, states: c.states })),
     }
   }
-  // One read-only chat turn against a persisted thread (a ticket OR a pool role): resume it on its worker, run the
-  // operator's message, and append both sides to the `logKey` transcript. The agent answers from the thread's context;
-  // it never edits — steering is acknowledged and acted on at the next dispatch/run. cwd is the worker HOME, not the
-  // ticket workspace (handed-off workspaces get pruned; codex thread/resume loads context regardless of cwd).
-  const chatTurn = async (logKey: string, threadId: string, host: string | null, displayMsg: string, prompt: string, label: string): Promise<{ ok: boolean; reply?: string; msg?: string }> => {
+  // One chat turn against a persisted thread (a ticket OR a pool role): resume it on its worker, run the operator's
+  // message, and append both sides to the `logKey` transcript. The agent answers from the thread's context. `tools`
+  // decides how first-class the turn is: ticket chat gets the Linear tools so it can ACT on steering (move the ticket's
+  // status + update the workpad) and narrate it; role chat gets none (advisory — it acts on its next scheduled run).
+  // The file sandbox stays read-only either way, so chat never edits code/pushes — the code work happens at the next
+  // dispatch (which resumes THIS thread). cwd is the worker HOME, not the ticket workspace (handed-off workspaces get
+  // pruned; codex thread/resume loads context regardless of cwd).
+  const chatTurn = async (logKey: string, threadId: string, host: string | null, displayMsg: string, prompt: string, label: string, tools: ConstructorParameters<typeof AppServerSession>[1]): Promise<{ ok: boolean; reply?: string; msg?: string }> => {
     const cwd = host ? remoteHome(host) : homedir()
     if (host && !cwd) return { ok: false, msg: 'cannot resolve the worker home' }
     let lg = logs.get(logKey)
@@ -456,7 +460,7 @@ export async function start(workflowPath?: string): Promise<void> {
     lg.push(`○ ${displayMsg}`) // operator turn — shows in the transcript immediately
     saveLogs()
     const replies: string[] = []
-    const chat = new AppServerSession(cfg, [], (e) => {
+    const chat = new AppServerSession(cfg, tools, (e) => {
       if (e.log && e.log.startsWith('● ')) replies.push(e.log.slice(2))
     })
     try {
@@ -488,14 +492,15 @@ export async function start(workflowPath?: string): Promise<void> {
       if (roleRunning.has(role.name)) return { ok: false, msg: 'the role is mid-run — message it once it is idle' }
       const rec = threadRecs.get(`role:${role.name}`)
       if (!rec?.threadId) return { ok: false, msg: 'no thread yet — this role has not run' }
-      return chatTurn(role.name, rec.threadId, rec.host, msg, rolePrompt(role, msg), `${role.name}: operator chat`)
+      return chatTurn(role.name, rec.threadId, rec.host, msg, rolePrompt(role, msg), `${role.name}: operator chat`, []) // role chat stays advisory — no tools
     }
     const issue = lastBoard.find((i) => i.identifier === identifier)
     if (!issue) return { ok: false, msg: 'ticket not on the board' }
     if (running.has(issue.id)) return { ok: false, msg: 'the agent is mid-run — chat once it hands off / is idle' }
     const rec = threadRecs.get(issue.id)
     if (!rec?.threadId) return { ok: false, msg: 'no thread yet — this ticket has not run' }
-    return chatTurn(identifier, rec.threadId, placement.get(issue.id) ?? rec.host, msg, chatPrompt(msg), `${identifier}: operator chat`)
+    // First-class ticket chat: give it the Linear tools so it can move state + update the workpad on the operator's steering.
+    return chatTurn(identifier, rec.threadId, placement.get(issue.id) ?? rec.host, msg, chatPrompt(msg), `${identifier}: operator chat`, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state)), linearReadTool((id) => lastBoard.find((i) => i.id === id || i.identifier === id) ?? null)])
   }
 
   // Operator actions = pure pipeline transitions. The thread carries context (chat + prior phases), so an action just
@@ -842,7 +847,7 @@ export function deadlockReason(tokensSinceProgress: number, msSinceProgress: num
 
 // An operator chat turn: read-only, answer from the thread's own context. Terse so it doesn't crowd the history.
 function chatPrompt(msg: string): string {
-  return `The operator is messaging you directly about this ticket — READ-ONLY: do not edit files, push, or change Linear; just answer, using this thread's full context. If they are steering you, acknowledge it; you will act on it when the next phase runs. Operator:\n\n${msg}`
+  return `The operator is messaging you directly about this ticket, with this thread's full context. You can ACT on their steering through Linear via \`linear_graphql\`: update the \`## Codex Workpad\` and move the ticket's status. Narrate what you do plainly (e.g. "ok — recording the simpler plan in the workpad and moving this to In Progress so the build picks it up"). When their steering means the code should change, capture the concrete change in the workpad and move the ticket to \`In Progress\` — do this even if it is parked in Ready to ship / QA blocked, because that re-enters it into the pipeline and the build agent resumes THIS thread to make the edits. Do NOT edit files, run commands, or push in this turn — only Linear. If the operator is just asking a question, answer it and change nothing. Operator:\n\n${msg}`
 }
 
 // An operator chat turn for a pool role — same read-only contract, framed as steering the role's standing focus.

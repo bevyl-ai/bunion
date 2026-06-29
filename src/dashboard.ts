@@ -403,7 +403,7 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
  <div id="mbanner" style="display:none"></div>
  <div id="mtokens" style="display:none"></div>
  <div id="logbody"></div>
- <div id="mchat"><textarea id="mmsg" rows="1" placeholder="Message the agent — it answers with this ticket's full thread as context" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea><button id="msend" onclick="sendChat()">Send</button></div>
+ <div id="mchat"><textarea id="mmsg" rows="1" placeholder="Message the agent — it can answer, or act on steering (move state, update the plan)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea><button id="msend" onclick="sendChat()">Send</button></div>
  <div id="mactions"></div>
 </div></div>
 <div id="actmenu"></div>
@@ -535,7 +535,7 @@ function renderRoleHead(r){var live=r.status==='running';
  document.getElementById('msub').innerHTML='<div class="mtitle2">'+(live?esc(r.activity||'working\\u2026'):'idle \\u2014 waiting for the next run')+'</div><div class="mmeta">'+meta.join('')+'</div>';
  document.getElementById('mbanner').style.display='none';document.getElementById('mtokens').style.display='none';document.getElementById('mactions').style.display='none';document.getElementById('mchat').style.display='flex';document.getElementById('mmsg').placeholder='Prompt '+r.name+' \\u2014 steer it; it acts on its next run';}
 let expandedId=null;
-function syncHead(){var role=(snap.roles||[]).find(x=>x.name===expandedId);if(role){renderRoleHead(role);return;}document.getElementById('mchat').style.display='flex';document.getElementById('mmsg').placeholder='Message the agent \\u2014 it answers with this ticket\\u2019s full thread as context';var it=(snap.items||[]).find(x=>x.identifier===expandedId);if(it&&optimisticOverrides[it.identifier])it=Object.assign({},it,{state:optimisticOverrides[it.identifier].state});const c=it?SC(it.state):'#7c8493';
+function syncHead(){var role=(snap.roles||[]).find(x=>x.name===expandedId);if(role){renderRoleHead(role);return;}document.getElementById('mchat').style.display='flex';document.getElementById('mmsg').placeholder='Message the agent \\u2014 answer or act on steering (move state, update the plan)';var it=(snap.items||[]).find(x=>x.identifier===expandedId);if(it&&optimisticOverrides[it.identifier])it=Object.assign({},it,{state:optimisticOverrides[it.identifier].state});const c=it?SC(it.state):'#7c8493';
  document.getElementById('mtitle').innerHTML=esc(expandedId||'')+(it?' <span class="pill" style="color:'+c+';background:'+c+'22">'+esc(it.state)+'</span>':'')+(it&&it.prUrl?' <a class="pr" href="'+it.prUrl+'" target="_blank" rel="noopener">PR #'+(it.prUrl.split("/pull/")[1]||"")+'</a>':'')+(it&&it.url?' <a class="pr" style="background:#8b929e1a;color:var(--mut)" href="'+it.url+'" target="_blank" rel="noopener">Linear &#8599;</a>':'');
  const sub=document.getElementById('msub');
  if(it){var m=[];

@@ -1,6 +1,5 @@
 import { AppServerSession } from './codex/app-server'
 import { linearGraphqlTool } from './codex/dynamic-tool'
-import { waitTool } from './codex/wait-tool'
 import { log } from './log'
 import { ensureWorkspace, installSkills, removeWorkspace, runHook } from './workspace'
 import type { AgentEvent, Config, Role, RoleQuota } from './types'
@@ -41,7 +40,7 @@ export function startRole(cfg: Config, role: Role, host: string | null, onEvent:
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
 
-    session = new AppServerSession(cfg, [linearGraphqlTool(cfg, role.name, quota), waitTool(host, dir, onEvent)], onEvent)
+    session = new AppServerSession(cfg, [linearGraphqlTool(cfg, role.name, quota)], onEvent)
     try {
       await session.start(dir, host)
       let threadId: string

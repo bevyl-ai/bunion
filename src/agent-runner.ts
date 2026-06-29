@@ -1,5 +1,5 @@
 import { AppServerSession } from './codex/app-server'
-import { phaseOf } from './config'
+import { phaseOf, repoFor } from './config'
 import { linearGraphqlTool, linearReadTool } from './codex/dynamic-tool'
 import { fetchById, fetchWorkpad } from './linear'
 import { log } from './log'
@@ -38,11 +38,12 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
 
   const done = (async (): Promise<AgentOutcome> => {
     let dir = ''
+    const repo = repoFor(cfg, issue.labels) // this ticket's repo (repo:<slug> label, else default) — drives the clone + .bunion-repo
     try {
       const ws = ensureWorkspace(cfg, issue.identifier, host)
       dir = ws.dir
       if (ws.created && cfg.hooks.afterCreate) {
-        const h = runHook(cfg, dir, 'after_create', cfg.hooks.afterCreate, host)
+        const h = runHook(cfg, dir, 'after_create', cfg.hooks.afterCreate, host, repo)
         if (!h.ok) {
           removeWorkspace(cfg, issue.identifier, host) // don't leave a half-made dir — the retry must re-create + re-clone
           return { ok: false, error: h.error }
@@ -50,7 +51,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
       }
       if (ws.created) installSkills(dir, host)
       if (cfg.hooks.beforeRun) {
-        const h = runHook(cfg, dir, 'before_run', cfg.hooks.beforeRun, host)
+        const h = runHook(cfg, dir, 'before_run', cfg.hooks.beforeRun, host, repo)
         if (!h.ok) return { ok: false, error: h.error }
       }
     } catch (e) {
@@ -95,7 +96,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
     } finally {
       session.stop()
       if (cfg.hooks.afterRun) {
-        const h = runHook(cfg, dir, 'after_run', cfg.hooks.afterRun, host)
+        const h = runHook(cfg, dir, 'after_run', cfg.hooks.afterRun, host, repo)
         if (!h.ok) log(`warn: ${h.error}`)
       }
     }

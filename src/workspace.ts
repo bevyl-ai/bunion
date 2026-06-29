@@ -73,15 +73,18 @@ export function removeWorkspace(cfg: Config, identifier: string, host: Host): vo
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
 }
 
-export function runHook(cfg: Config, dir: string, name: string, script: string, host: Host): HookResult {
+export function runHook(cfg: Config, dir: string, name: string, script: string, host: Host, repo?: string): HookResult {
   // §9.4: log hook start so operators can see what is running and when
   log(`hook ${name} start dir=${dir}${host ? ` host=${host}` : ''}`)
+  // Per-ticket repo: prepend REPO so the hook (clone target, .bunion-repo) uses THIS ticket's repo, overriding the
+  // ~/.profile default. The hook runs after the profile is sourced, so this assignment wins.
+  const s = repo ? `export REPO=${shq(repo)}\n${script}` : script
   if (host) {
-    const r = sshExec(host, `cd ${shq(dir)} && sh -lc ${shq(script)}`, cfg.hooks.timeoutMs)
+    const r = sshExec(host, `cd ${shq(dir)} && sh -lc ${shq(s)}`, cfg.hooks.timeoutMs)
     if (!r.ok) log(`hook ${name} failed host=${host}: ${r.out.trim().slice(-400)}`)
     return r.ok ? { ok: true } : { ok: false, error: `${name} hook failed on ${host}:\n${r.out.trim().slice(-800)}` }
   }
-  const r = exec('sh', ['-lc', script], { cwd: dir, timeoutMs: cfg.hooks.timeoutMs })
+  const r = exec('sh', ['-lc', s], { cwd: dir, timeoutMs: cfg.hooks.timeoutMs })
   if (!r.ok) log(`hook ${name} failed: ${r.combined.trim().slice(-400)}`)
   return r.ok ? { ok: true } : { ok: false, error: `${name} hook failed:\n${r.combined.trim().slice(-800)}` }
 }

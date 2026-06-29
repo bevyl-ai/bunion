@@ -39,6 +39,9 @@ grep -q 'GH_HOST=' "$HOME/.profile" 2>/dev/null || echo 'export GH_HOST=bevyl-we
 # 4. Env for the agents' shells. codex runs commands via `bash -lc`, which sources ~/.bash_profile
 #    (NOT ~/.profile), so make ~/.bash_profile source ~/.profile and put REPO + bun there.
 grep -q 'export REPO=' "$HOME/.profile" 2>/dev/null || echo 'export REPO=bevyl-ai/bevyl.ai' >> "$HOME/.profile"
+# Per-ticket repo: the after_create hook writes the ticket's repo to .bunion-repo in the workspace; override $REPO from it
+# so multi-repo works (the line above is just the default/fallback). Idempotent.
+grep -q 'bunion-repo' "$HOME/.profile" 2>/dev/null || echo '[ -r "$PWD/.bunion-repo" ] && export REPO="$(cat "$PWD/.bunion-repo" 2>/dev/null || echo bevyl-ai/bevyl.ai)"' >> "$HOME/.profile"
 grep -q '.bun/bin' "$HOME/.profile" 2>/dev/null || echo 'export PATH="$HOME/.bun/bin:$PATH"' >> "$HOME/.profile"
 grep -q 'HOME/.profile' "$HOME/.bash_profile" 2>/dev/null || echo '[ -f "$HOME/.profile" ] && . "$HOME/.profile"' >> "$HOME/.bash_profile"
 

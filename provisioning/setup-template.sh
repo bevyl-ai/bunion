@@ -6,8 +6,11 @@
 #
 #   ssh bunion-bevyl-N.exe.xyz 'bash -lc bash' < provisioning/setup-template.sh
 set -e
-T="$HOME/.bunion/repo"
 [ -n "$REPO" ] || { echo "REPO not set in env"; exit 1; }
+# Per-repo template dir (multi-repo): the after_create hook looks for ~/.bunion/repo-<slug> (and falls back to the
+# legacy ~/.bunion/repo when its origin matches $REPO). Provision a new repo's fast-workspace template by running this
+# with REPO=owner/name set.
+T="$HOME/.bunion/repo-$(printf %s "$REPO" | tr '/:' '--')"
 rm -f "$T/.template-ready" # mark not-ready while we (re)build, so the hook falls back to a clone meanwhile
 
 if [ ! -d "$T/.git" ]; then

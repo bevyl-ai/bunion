@@ -1,6 +1,8 @@
 ---
-repo: bevyl-ai/bevyl.ai              # the ONE repo bunion operates on. Single-repo for now — every dark-factory ticket
-                                     # targets it, and the worker VMs export it as $REPO (see provisioning/vm-setup.sh).
+repo: bevyl-ai/bevyl.ai              # default repo — a ticket targets this unless it carries a `repo:<slug>` Linear label
+                                     # mapped in `repos` below. Workers resolve it per-ticket via .bunion-repo (vm-setup.sh).
+repos: {}                            # additional repos keyed by the repo:<slug> label slug, e.g. { remover: bevyl-ai/remover }.
+                                     # Empty for now; add an entry + label a ticket `repo:<slug>` to drive another repo.
 tracker:
   kind: linear
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project
@@ -72,20 +74,24 @@ hooks:
   # @kit/* packages to resolve to THIS branch. (Symlinking node_modules from the template pointed @kit/* at main, so
   # any ticket touching a workspace package silently saw stale types.) No template yet → clone. Degrades gracefully.
   after_create: |
-    T="$HOME/.bunion/repo"; W="$PWD"; ok=0
+    W="$PWD"; ok=0
+    # Pick the template matching THIS ticket's $REPO: a per-repo template, else the legacy ~/.bunion/repo if its origin matches.
+    T="$HOME/.bunion/repo-$(printf %s "$REPO" | tr '/:' '--')"
+    if [ ! -f "$T/.template-ready" ]; then L="$HOME/.bunion/repo"; if [ -f "$L/.template-ready" ] && git -C "$L" remote get-url origin 2>/dev/null | grep -qF "$REPO"; then T="$L"; fi; fi
     if [ -f "$T/.template-ready" ]; then
       ( cd "$T" && git fetch --quiet origin 2>/dev/null; git worktree prune 2>/dev/null ) || true
       rm -rf "$W"
       if ( cd "$T" && { git worktree add --force --detach "$W" origin/main 2>/dev/null || git worktree add --force --detach "$W" HEAD 2>/dev/null; } ); then
         ok=1
         if ( cd "$W" && "$HOME/.bun/bin/bun" install >/dev/null 2>&1 ); then
-          echo "workspace = worktree from template @ $(git -C "$T" rev-parse --short HEAD 2>/dev/null) + bun install"
+          echo "workspace = worktree from $T @ $(git -C "$T" rev-parse --short HEAD 2>/dev/null) + bun install"
         else
-          echo "workspace = worktree @ $(git -C "$T" rev-parse --short HEAD 2>/dev/null) (bun install deferred to agent)"
+          echo "workspace = worktree from $T @ $(git -C "$T" rev-parse --short HEAD 2>/dev/null) (bun install deferred to agent)"
         fi
       fi
     fi
-    if [ "$ok" != 1 ]; then mkdir -p "$W"; cd "$W"; git clone --depth 100 "https://github.com/$REPO.git" . 2>/dev/null || gh repo clone "$REPO" . -- --depth 100; fi
+    if [ "$ok" != 1 ]; then rm -rf "$W"; mkdir -p "$W"; cd "$W"; git clone --depth 100 "https://github.com/$REPO.git" . 2>/dev/null || gh repo clone "$REPO" . -- --depth 100; echo "workspace = fresh clone of $REPO"; fi
+    printf '%s' "$REPO" > "$W/.bunion-repo"  # the ticket's repo — ~/.profile reads this so every agent shell's $REPO is right
   timeout_ms: 180000
 agent:
   max_concurrent_agents: 12

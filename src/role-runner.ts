@@ -20,11 +20,12 @@ export function startRole(cfg: Config, role: Role, host: string | null, onEvent:
 
   const done = (async (): Promise<{ ok: boolean; error?: string }> => {
     let dir = ''
+    const repo = cfg.repo // pool roles operate on the default repo
     try {
       const ws = ensureWorkspace(cfg, wsKey, host)
       dir = ws.dir
       if (ws.created && cfg.hooks.afterCreate) {
-        const h = runHook(cfg, dir, 'after_create', cfg.hooks.afterCreate, host)
+        const h = runHook(cfg, dir, 'after_create', cfg.hooks.afterCreate, host, repo)
         if (!h.ok) {
           removeWorkspace(cfg, wsKey, host)
           return { ok: false, error: h.error }
@@ -32,7 +33,7 @@ export function startRole(cfg: Config, role: Role, host: string | null, onEvent:
       }
       if (ws.created) installSkills(dir, host)
       if (cfg.hooks.beforeRun) {
-        const h = runHook(cfg, dir, 'before_run', cfg.hooks.beforeRun, host)
+        const h = runHook(cfg, dir, 'before_run', cfg.hooks.beforeRun, host, repo)
         if (!h.ok) return { ok: false, error: h.error }
       }
     } catch (e) {
@@ -60,7 +61,7 @@ export function startRole(cfg: Config, role: Role, host: string | null, onEvent:
     } finally {
       session.stop()
       if (cfg.hooks.afterRun) {
-        const h = runHook(cfg, dir, 'after_run', cfg.hooks.afterRun, host)
+        const h = runHook(cfg, dir, 'after_run', cfg.hooks.afterRun, host, repo)
         if (!h.ok) log(`warn: ${h.error}`)
       }
     }

@@ -151,10 +151,24 @@ export function loadConfig(path?: string): Config {
     },
     dashboardPort: portRaw && Number.isFinite(Number(portRaw)) ? Number(portRaw) : null,
     boardColumns: parseColumns(obj(fm.board).columns),
-    repo: str(fm.repo) ?? process.env.REPO ?? 'bevyl-ai/bevyl.ai', // the single repo bunion drives (also the workers' $REPO)
+    repo: str(fm.repo) ?? process.env.REPO ?? 'bevyl-ai/bevyl.ai', // default repo (also the workers' $REPO fallback)
+    repos: Object.fromEntries(Object.entries(obj(fm.repos)).map(([k, v]) => [k.trim().toLowerCase(), str(v)]).filter((e): e is [string, string] => !!e[1])), // repo:<slug> label -> owner/name
     promptTemplate: prompt,
     workflowPath,
   }
+}
+
+// Resolve a ticket's target repo: a `repo:<slug>` label mapped via `repos`, else the default `repo`. Labels arrive
+// lowercased. This is what lets bunion drive more than one repo from a single board.
+export function repoFor(cfg: Config, labels: string[]): string {
+  for (const l of labels) {
+    const m = /^repo:(.+)$/.exec(l)
+    if (m) {
+      const r = cfg.repos[m[1]!.trim().toLowerCase()]
+      if (r) return r
+    }
+  }
+  return cfg.repo
 }
 
 // Which pipeline phase a state belongs to. Unmapped states are their own phase, so crossing into one (e.g. a

@@ -10,7 +10,7 @@ import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
 import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment, recentAuthFailures } from './linear'
 import { log, recentLogs, warn } from './log'
 import { readJson, throttledWriter, writeJson } from './persist'
-import { remoteHome } from './ssh'
+import { remoteHome, sshExec } from './ssh'
 import { backfillThreads } from './thread-backfill'
 import { foldDelta, grandTotal, phaseBreakdown, totals, zeroCounts, type TokenTally } from './tokens'
 import { removeWorkspace } from './workspace'
@@ -85,6 +85,7 @@ export async function start(workflowPath?: string): Promise<void> {
   const claimed = new Set<string>()
   const retries = new Map<string, RetryTimer>()
   let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
+  const gatewayHost = new Map<string, string>() // worker host → its codex base_url's llm-integration hostname (resolved once; display-only LLM-account tracking)
   let tokenSeq = 0
   let lastRateLimits: RateLimits | null = null // most recent codex rate-limit snapshot (Symphony §13.3 / §4.1.8)
   let endedRuntimeMs = 0 // cumulative wall-clock of ended sessions; live sessions are added at snapshot time
@@ -431,10 +432,14 @@ export async function start(workflowPath?: string): Promise<void> {
       it.host = e.host
     }
     const items = [...board.values()].sort((a, b) => rankStatus(a.status) - rankStatus(b.status) || rank(a.priority) - rank(b.priority) || a.identifier.localeCompare(b.identifier))
+    const acct: Record<string, number> = {}
+    for (const h of hosts()) { const gw = gatewayHost.get(h); if (gw === undefined) continue; const label = gw ? (cfg.worker.gatewayAccounts[gw] ?? gw) : 'unknown'; acct[label] = (acct[label] ?? 0) + 1 }
+    const gatewayAccounts = Object.entries(acct).map(([l, n]) => `${l} ×${n}`)
     const t = totals(tokens)
     return {
       scope: `${cfg.tracker.team ?? cfg.tracker.projectSlug}${cfg.tracker.requiredLabels.length ? ` [${cfg.tracker.requiredLabels.join(',')}]` : ''}`,
       cap: displayCap(),
+      gatewayAccounts,
       items,
       totalTokens: t.total,
       totalInput: t.input,
@@ -785,6 +790,13 @@ export async function start(workflowPath?: string): Promise<void> {
         continue
       }
       lastBoard = board
+      // Resolve one worker's LLM-gateway hostname per poll (cached for the daemon's life) → display-only account tracking.
+      const unresolvedHost = hosts().find((h) => !gatewayHost.has(h))
+      if (unresolvedHost) {
+        const gw = sshExec(unresolvedHost, 'grep base_url "$HOME/.codex/config.toml"', 6000)
+        const m = gw.ok ? /llm[0-9-]*\.int\.exe\.xyz/.exec(gw.out) : null
+        gatewayHost.set(unresolvedHost, m ? m[0] : '')
+      }
       if (!backfilled) {
         backfilled = true
         void runBackfill(board)

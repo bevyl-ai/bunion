@@ -22,6 +22,12 @@ function intMap(v: unknown): Record<string, number> {
   for (const [k, val] of Object.entries(obj(v))) if (typeof val === 'number' && Number.isInteger(val) && val > 0) out[k.trim().toLowerCase()] = val
   return out
 }
+// A string→string map (e.g. llm-gateway hostname → ChatGPT account label). Non-string values dropped; keys trimmed.
+function strMap(v: unknown): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, val] of Object.entries(obj(v))) if (typeof val === 'string') out[k.trim()] = val
+  return out
+}
 
 // `$VAR` → env; literal otherwise. Missing/empty env → fall back to canonical env, then null.
 function secret(v: unknown, fallbackEnv: string): string | null {
@@ -133,6 +139,7 @@ export function loadConfig(path?: string): Config {
     worker: {
       sshHosts: arr(wk.ssh_hosts).length ? arr(wk.ssh_hosts) : envHosts,
       maxPerHost: num(wk.max_concurrent_agents_per_host, 1),
+      gatewayAccounts: strMap(wk.gateway_accounts), // llm-integration hostname → ChatGPT account label (display-only tracking)
     },
     codex: {
       command: str(cx.command) ?? 'codex app-server',

@@ -112,6 +112,12 @@ worker:
   # (their exe.dev github integration clones; their exe-llm gateway runs codex). Or set BUNION_SSH_HOSTS=a,b,c.
   ssh_hosts: [bunion-bevyl-1.exe.xyz, bunion-bevyl-2.exe.xyz, bunion-bevyl-3.exe.xyz, bunion-bevyl-4.exe.xyz]
   max_concurrent_agents_per_host: 3      # agents per worker VM; danger-full-access is contained per-box
+  gateway_accounts:                      # display-only LLM-account tracking (NOT routing — routing is set on exe.dev). Maps the
+                                         # llm-integration hostname a worker's codex base_url points at → the ChatGPT account it uses.
+    llm.int.exe.xyz: "chatgpt-4 · noah+2@bevyl.ai"
+    llm-2.int.exe.xyz: "chatgpt · noah@bevyl.ai"
+    llm-3.int.exe.xyz: "chatgpt-3 · hello@bevyl.ai"
+    llm-4.int.exe.xyz: "chatgpt-2 · noah-gpt2@bevyl.ai"
 codex:
   command: codex --config shell_environment_policy.inherit=all app-server
   approval_policy: never

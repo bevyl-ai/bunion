@@ -13,6 +13,7 @@ import { readJson, throttledWriter, writeJson } from './persist'
 import { remoteHome, sshExec } from './ssh'
 import { backfillThreads } from './thread-backfill'
 import { foldDelta, grandTotal, phaseBreakdown, totals, zeroCounts, type TokenTally } from './tokens'
+import { openStats } from './stats'
 import { removeWorkspace } from './workspace'
 import type { Config, Issue, RateLimits, Role, RoleQuota, TokenCounts } from './types'
 
@@ -112,6 +113,8 @@ export async function start(workflowPath?: string): Promise<void> {
   const ticketGrants = new Map<string, number>(Object.entries(readJson<Record<string, number>>(GRANTS_FILE, {})))
   const saveGrants = throttledWriter(GRANTS_FILE, () => Object.fromEntries(ticketGrants))
   const effectiveCap = (identifier: string): number => cfg.deadlock.hardTokenCap + (ticketGrants.get(identifier) ?? 0)
+  const stats = openStats() // local bun:sqlite stats/rollups (~/.bunion/stats.db) — best-effort event log, never throws
+  const acct = (h: string | null): string | null => { if (!h) return null; const gw = gatewayHost.get(h); return gw ? (cfg.worker.gatewayAccounts[gw] ?? gw) : null }
   const countToday = (name: string): number => {
     const r = roleQuota.get(name)
     return r && r.day === utcDay() ? r.count : 0
@@ -274,6 +277,7 @@ export async function start(workflowPath?: string): Promise<void> {
     // §13.1: session_id = `${threadId}-${turnId}` when both known; threadId alone until first turn id arrives
     const sessionId = (): string => { const t = threadRecs.get(issue.id)?.threadId; return t ? `${t}${entry.turnId ? `-${entry.turnId}` : ''}` : '' }
     log(`→ ${issue.identifier} (${issue.state})${attempt > 0 ? ` retry#${attempt}` : ''}${host ? ` @ ${host}` : ''}`)
+    stats.record({ identifier: issue.identifier, kind: 'dispatch', threadId: threadRecs.get(issue.id)?.threadId, host, totalTokens: grandTotal(tokens, issue.identifier), account: acct(host) })
     entry.handle = startAgent(cfg, issue, attempt > 0 ? attempt : null, host, (e) => {
       entry.lastActivity = Date.now()
       if (e.turn != null) entry.turn = e.turn
@@ -309,6 +313,7 @@ export async function start(workflowPath?: string): Promise<void> {
       if (outcome.ok) {
         scheduleRetry(issue.id, issue.identifier, 1, true) // re-check & continue while active
         log(`✓ ${issue.identifier} session done${sid ? ` session=${sid}` : ''}`) // §13.1
+        stats.record({ identifier: issue.identifier, kind: 'session_done', threadId: threadRecs.get(issue.id)?.threadId, host: entry.host, totalTokens: grandTotal(tokens, issue.identifier), account: acct(entry.host) })
       } else {
         const code = outcome.code
         // §10.6: a genuinely-missing codex binary is non-transient — retrying forever won't fix it; route to Needs
@@ -720,7 +725,7 @@ export async function start(workflowPath?: string): Promise<void> {
       log(`backfilled ${n} ticket thread(s) from worker rollouts`)
     }
   }
-  if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log, onAction, onChat)
+  if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log, onAction, onChat, stats)
 
   // Start the pool — each role on its cadence, with a staggered first run shortly after startup. (Role config is read
   // at start; add/edit roles then restart.)
@@ -809,9 +814,12 @@ export async function start(workflowPath?: string): Promise<void> {
       const stuck: { issue: Issue; target: string; reason: string }[] = []
       for (const i of board) {
         if (lastState.get(i.id) !== i.state) {
+          const prev = lastState.get(i.id)
           lastState.set(i.id, i.state)
           summaries.delete(i.identifier)
           notesFetched.delete(i.id)
+          // Record the state transition (skip first-sight / restart re-observations — only real changes from a known prior state).
+          if (prev !== undefined) stats.record({ identifier: i.identifier, kind: 'transition', fromState: prev, toState: i.state, threadId: threadRecs.get(i.id)?.threadId, totalTokens: grandTotal(tokens, i.identifier), account: acct(placement.get(i.id) ?? null), host: placement.get(i.id) ?? null })
         }
         // Forward-progress clock: reaching a not-yet-seen state resets it; sitting in seen states burns it down.
         const pr = progress.get(i.id) ?? { since: now, tokensAtProgress: grandTotal(tokens, i.identifier), seen: new Set<string>() }
@@ -851,6 +859,7 @@ export async function start(workflowPath?: string): Promise<void> {
         lastState.set(issue.id, target)
         issue.state = target
         log(`deadlock: ${issue.identifier} ${reason} → ${target}`)
+        stats.record({ identifier: issue.identifier, kind: reason.includes('per-ticket cap') ? 'cap' : 'deadlock', toState: target, threadId: threadRecs.get(issue.id)?.threadId, totalTokens: grandTotal(tokens, issue.identifier), account: acct(placement.get(issue.id) ?? null), detail: reason })
         try {
           await moveIssue(cfg, issue.id, target)
           await postComment(cfg, issue.id, `## 🔁 Auto-blocked — deadlock\nThe factory ${reason} on this ticket, so I moved it to \`${target}\` instead of looping further.${target === 'QA blocked' ? '\n\n**Blocked phase:** if there is no concrete, fixable meta-problem here, escalate to `Needs human` — do not just send it back to loop again.' : ''}`)

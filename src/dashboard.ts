@@ -1,5 +1,6 @@
 import type { RateLimits } from './types'
 import type { TokenBreakdown } from './tokens'
+import type { Stats } from './stats'
 
 // One ticket on the board. `status`: running (an agent is on it now), retrying (waiting out a backoff/continuation),
 // or queued (an eligible candidate with no free slot/VM yet). The run-specific fields are 0/empty unless running.
@@ -62,7 +63,7 @@ function apiErr(code: string, message: string, status: number): Response {
 
 // A tiny status server: GET /state.json is the live orchestrator snapshot; GET / is a self-contained page that
 // polls it and renders the board (kanban by pipeline stage) + a per-run log modal.
-export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string) => Promise<{ ok: boolean; msg?: string }>, onChat?: (id: string, text: string) => Promise<{ ok: boolean; reply?: string; msg?: string }>): void {
+export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string) => Promise<{ ok: boolean; msg?: string }>, onChat?: (id: string, text: string) => Promise<{ ok: boolean; reply?: string; msg?: string }>, getStats?: Stats): void {
   // Server-Sent Events push. Clients subscribe to /events (board) + /log-stream/<id> (transcript); a tight interval
   // diff-pushes so the dashboard reflects any change within ~150ms WITHOUT the client polling. /state.json + /transcript
   // stay live as the EventSource fallback (the exe.dev proxy could buffer SSE; the client degrades to polling cleanly).
@@ -223,6 +224,9 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
         if (!body.id || !body.text) return Response.json({ ok: false, msg: 'missing id/text' })
         return Response.json(await onChat(body.id, body.text))
       }
+      if (url.pathname === '/stats.json')
+        return Response.json(getStats ? { totals: getStats.totals(), daily: getStats.daily(30), threads: getStats.threads('recent', 100) } : { totals: {}, daily: [], threads: [] }, noStore)
+      if (url.pathname === '/stats') return new Response(STATS_HTML, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
       return new Response(HTML, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
     },
   })
@@ -386,6 +390,7 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
  <div class="brand"><span class="mark"></span>bunion<span class="sub" id="scope"></span></div>
  <div class="stats" id="stats"></div>
  <span class="clock" id="clock"></span>
+ <a href="/stats" target="_blank" rel="noopener" title="rollups + thread stats" style="margin-left:12px;color:var(--mut);font-size:12px;text-decoration:none;padding:5px 11px;border:1px solid var(--line);border-radius:8px;background:var(--surf);white-space:nowrap">&#128202; stats</a>
  <button id="pausebtn" class="pausebtn" onclick="postAction(this,'__pause__','toggle',event)">&#9208; Pause</button>
 </header>
 <div id="pausebanner" role="status" aria-live="polite"></div>
@@ -613,4 +618,56 @@ function startSSE(){var es;try{es=new EventSource('/events');}catch(e){if(!_poll
 setInterval(tickLive,1000);
 if(typeof EventSource!=='undefined')startSSE();else _pollFallback=setInterval(pull,1000);
 pull();
+</script></body></html>`
+
+const STATS_HTML = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>bunion · stats</title>
+<style>
+*{box-sizing:border-box}
+:root{--bg:#090a0e;--surf:#15171e;--surf2:#1b1e27;--line:#23262f;--line2:#2e323d;--fg:#eef1f7;--mut:#99a0ad;--mut2:#5a6270;--accent:#5b8def;--green:#3fb27f;--amber:#d99a2b;--red:#e0564f;--purple:#a371f7}
+body{margin:0;min-height:100vh;background:var(--bg);background-image:radial-gradient(1100px 520px at 80% -10%,#14171f 0%,rgba(20,23,31,0) 60%),linear-gradient(180deg,#0b0d12 0%,#090a0e 100%);color:var(--fg);font:13.5px/1.5 -apple-system,BlinkMacSystemFont,'Inter','Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased;padding:22px 26px 60px}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+h1{font-size:15px;font-weight:650;margin:0;display:flex;align-items:center;gap:11px}
+.mark{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px #5b8def22,0 0 14px var(--accent)}
+.back{color:var(--mut);font-weight:400;font-size:12.5px;margin-left:auto}
+.tot{display:flex;gap:11px;flex-wrap:wrap;margin:18px 0 6px}
+.tot .c{background:var(--surf);border:1px solid var(--line);border-radius:10px;padding:9px 16px;font-variant-numeric:tabular-nums;box-shadow:0 1px 2px rgba(0,0,0,.4)}
+.tot .c b{font-size:19px;display:block;color:var(--fg);font-weight:650}.tot .c span{font-size:10px;color:var(--mut);text-transform:uppercase;letter-spacing:.6px}
+h2{font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:var(--mut);margin:30px 0 11px;font-weight:700}
+.wrap{background:var(--surf);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.4)}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{text-align:right;padding:8px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+tr:last-child td{border-bottom:none}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--mut);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:var(--surf2)}
+th.s{cursor:pointer;user-select:none}th.s:hover{color:var(--fg)}
+th.act{color:var(--accent)}th.act:after{content:' \\25be'}
+tbody tr:hover{background:var(--surf2)}
+.bar{display:inline-block;height:7px;border-radius:4px;background:var(--accent);vertical-align:middle;margin-left:7px;opacity:.6}
+.out{font-size:10.5px;padding:2px 9px;border-radius:20px;font-weight:600}
+.cid{font-family:ui-monospace,Menlo,monospace;font-weight:600}
+.muted{color:var(--mut2)}
+.tid{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--mut2)}
+.acct{font-size:11px;color:var(--mut)}
+.empty{color:var(--mut2);padding:22px;text-align:center}
+</style></head><body>
+<h1><span class="mark"></span>bunion <span class="muted">· stats</span><a class="back" href="/">&larr; board</a></h1>
+<div class="tot" id="tot"></div>
+<h2>last 30 days</h2><div class="wrap"><table id="daily"><thead><tr><th>day</th><th>dispatched</th><th>shipped</th><th>tokens</th><th>deadlocks</th><th>caps</th></tr></thead><tbody></tbody></table></div>
+<h2>threads <span class="muted" style="text-transform:none;letter-spacing:0;font-weight:400">&mdash; click a column to rank best/worst</span></h2><div class="wrap"><table id="th"><thead><tr><th>ticket</th><th>outcome</th><th class="s" data-k="tokens">tokens</th><th class="s" data-k="cycle_ms">cycle</th><th class="s" data-k="reworks">reworks</th><th class="s" data-k="caps">cap/dl</th><th>account</th><th>thread</th></tr></thead><tbody></tbody></table></div>
+<script>
+const fmtTok=n=>{n=n||0;return n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)};
+const dur=ms=>{ms=ms||0;let m=Math.round(ms/60000);if(m<60)return m+'m';let h=Math.floor(m/60);return h+'h'+(m%60?' '+(m%60)+'m':'')};
+const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+const OC={'Done':'var(--purple)','Ready to ship':'var(--green)','Merged: In Staging':'var(--amber)','Verifying in Prod':'var(--accent)','Needs human':'#d9568c','QA blocked':'var(--red)'};
+const oc=s=>OC[s]||'var(--mut2)';
+const num=v=>typeof v==='number'?v:0;
+let DATA=null,K='tokens',DIR=-1;
+function thr(){const t=DATA.threads.slice().sort((a,b)=>{let x=a[K],y=b[K];return (typeof x==='string'?(x||'').localeCompare(y||''):num(x)-num(y))*DIR});
+ document.querySelector('#th tbody').innerHTML=t.length?t.map(r=>'<tr><td><a class="cid" href="https://linear.app/bevyl/issue/'+esc(r.identifier)+'" target="_blank" rel="noopener">'+esc(r.identifier)+'</a></td><td style="text-align:right"><span class="out" style="background:'+oc(r.outcome)+'22;color:'+oc(r.outcome)+'">'+esc(r.outcome||'—')+'</span></td><td>'+fmtTok(r.tokens)+'</td><td>'+dur(r.cycle_ms)+'</td><td>'+(r.reworks||0)+'</td><td>'+(((r.caps||0)+(r.deadlocks||0))||'')+'</td><td class="acct">'+esc((r.account||'').replace(/ .*/,'')||'—')+'</td><td class="tid">'+esc((r.thread_id||'').slice(0,12)||'—')+'</td></tr>').join(''):'<tr><td colspan="8" class="empty">no threads recorded yet</td></tr>';
+ document.querySelectorAll('#th th.s').forEach(h=>h.classList.toggle('act',h.dataset.k===K));}
+function daily(){const d=DATA.daily,mx=Math.max(1,...d.map(x=>num(x.tokens)));
+ document.querySelector('#daily tbody').innerHTML=d.length?d.map(r=>'<tr><td>'+esc(r.day)+'</td><td>'+(r.dispatched||0)+'</td><td style="color:var(--green)">'+(r.shipped||0)+'</td><td>'+fmtTok(r.tokens)+'<span class="bar" style="width:'+Math.round(num(r.tokens)/mx*70)+'px"></span></td><td'+(r.deadlocks?' style="color:var(--amber)"':'')+'>'+(r.deadlocks||0)+'</td><td'+(r.caps?' style="color:var(--red)"':'')+'>'+(r.caps||0)+'</td></tr>').join(''):'<tr><td colspan="6" class="empty">no activity recorded yet</td></tr>';}
+function render(){const T=DATA.totals||{};document.getElementById('tot').innerHTML=[['tickets',T.tickets],['events',T.events],['deadlocks',T.deadlocks],['caps',T.caps]].map(p=>'<div class="c"><b>'+(p[1]||0)+'</b><span>'+p[0]+'</span></div>').join('');daily();thr();}
+document.querySelectorAll('#th th.s').forEach(h=>h.onclick=()=>{const k=h.dataset.k;if(K===k)DIR=-DIR;else{K=k;DIR=-1}thr()});
+fetch('/stats.json',{cache:'no-store'}).then(r=>r.json()).then(d=>{DATA=d;render()}).catch(e=>{document.body.insertAdjacentHTML('beforeend','<p style="color:var(--red)">failed to load stats: '+e+'</p>')});
 </script></body></html>`

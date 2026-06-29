@@ -54,6 +54,7 @@ export interface Snapshot {
   secondsRunning: number // aggregate runtime seconds across all sessions incl. active ones (§13.3)
   roles: RoleItem[] // the pool — ambient roles rendered in the bottom dock
   columns: { name: string; c: string; states: string[]; inert?: boolean }[] // dashboard lanes from config (hot-reloaded); inert = no agent works these (parked/terminal). see WORKFLOW.md board.columns
+  terminalStates?: string[] // states intentionally without a column (Done/Canceled/Duplicate) — excluded from the unmapped catch-all so it only flags real surprises (renames)
   gatewayAccounts: string[] // LLM-account tracking: which ChatGPT account each worker routes gpt-5.5 through ("label ×count")
 }
 
@@ -501,8 +502,8 @@ function render(){
   var _first={};if(_motion)document.querySelectorAll('#board .card[data-id]').forEach(function(c){_first[c.getAttribute('data-id')]=c.getBoundingClientRect();});
   if(!items.length){board.innerHTML='<div class="empty">no '+esc(snap.scope||'dark-factory')+' tickets in scope</div>';}
   else{
-   const bk=COLS.map(()=>[]);var unmapped=[];
-   for(const r of items){const i=colIdx(effState(r));if(i>=0)bk[i].push(r);else unmapped.push(r);}  // unmapped (e.g. a renamed Linear state) → surfaced below, NEVER silently dropped
+   const bk=COLS.map(()=>[]);var unmapped=[];var term=(snap.terminalStates||[]).map(function(s){return s.toLowerCase()});
+   for(const r of items){const i=colIdx(effState(r));if(i>=0)bk[i].push(r);else if(term.indexOf(effState(r).toLowerCase())<0)unmapped.push(r);}  // unmapped = no column AND not an intentionally-hidden terminal state — a renamed state surfaces; Done/Canceled/Duplicate don't
    var html=COLS.map((col,i)=>colHtml(col,bk[i],now)).join('');
    if(unmapped.length){var us=[...new Set(unmapped.map(function(r){return effState(r)}))].join(', ');html+=colHtml({name:'&#9888; unmapped &mdash; '+esc(us),c:'#e0564f',states:[]},unmapped,now);}
    board.innerHTML=html;

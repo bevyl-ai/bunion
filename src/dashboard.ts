@@ -43,7 +43,7 @@ export interface Snapshot {
   scope: string
   cap: number
   items: BoardItem[] // the WHOLE board (every active+labeled ticket), not just the running ones
-  totalTokens: number // all-time tokens across every tracked ticket (bunion runs on one account: chatgpt-4)
+  totalTokens: number // all-time tokens across every tracked ticket
   totalInput: number
   totalOutput: number
   totalCached: number // cache-hit input tokens — the cheap part; cached/input is the hit rate
@@ -291,13 +291,6 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 .pri{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:middle}
 .pri.p1{background:#e5484d}.pri.p2{background:#e0843a}.pri.p3{background:#d9a62b}.pri.p4{background:#5b6675}
 .creason{margin-top:8px;font-size:11.5px;color:#eaa6a0;background:#e0564f12;border:1px solid #e0564f33;border-radius:7px;padding:6px 8px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.cacts{display:flex;gap:6px;margin-top:10px}
-.cbtn{flex:1;min-width:0;font:600 11px/1 inherit;color:var(--fg);background:var(--surf2);border:1px solid var(--line2);border-radius:7px;padding:6px 8px;cursor:pointer;transition:background .12s,border-color .12s;white-space:nowrap}
-.cbtn:hover{background:#2a2f3a;border-color:#3a4150}
-.cbtn.go{color:#9ec1ff;border-color:#5b8def44}.cbtn.go:hover{background:#5b8def1f}
-.cbtn.warn{color:#d9a62b;border-color:#d9a62b44}.cbtn.warn:hover{background:#d9a62b1a}
-.cbtn.danger{color:#eaa6a0;border-color:#e0564f44}.cbtn.danger:hover{background:#e0564f1a}
-.cbtn.busy{opacity:.5;pointer-events:none}
 .ctr{display:inline-flex;align-items:center;gap:6px;flex:none}
 .kebab{background:none;border:none;color:var(--mut2);font-size:15px;line-height:1;cursor:pointer;padding:1px 5px;border-radius:6px}
 .kebab:hover{background:var(--surf2);color:var(--fg)}
@@ -381,7 +374,7 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 .lg-skel{height:13px;border-radius:5px;background:var(--surf3);margin:11px 0;animation:skim 1.15s ease-in-out infinite alternate}
 .lg-skel.s2{width:82%}.lg-skel.s3{width:64%}.lg-skel.s4{width:90%}.lg-skel.s5{width:72%}
 @media(prefers-reduced-motion:no-preference){
- .cbtn:active,.mbtn:active{transform:scale(.97);opacity:.85}
+ .mbtn:active{transform:scale(.97);opacity:.85}
  .grantbtn:active,.runbtn:active{transform:scale(.95)}
  .pausebtn:active{transform:scale(.98)}
  .card.run{animation:runpulse 2.4s ease-in-out infinite}
@@ -404,7 +397,7 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
  <div id="mbanner" style="display:none"></div>
  <div id="mtokens" style="display:none"></div>
  <div id="logbody"></div>
- <div id="mchat"><textarea id="mmsg" rows="1" placeholder="Message the agent — it can answer, or act on steering (move state, update the plan)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea><button id="msend" onclick="sendChat()">Send</button></div>
+ <div id="mchat"><textarea id="mmsg" rows="1" aria-label="Message the agent" placeholder="Message the agent — it can answer or act on steering (move state, update the plan)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea><button id="msend" onclick="sendChat()">Send</button></div>
  <div id="mactions"></div>
 </div></div>
 <div id="actmenu"></div>
@@ -412,26 +405,22 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 <script>
 const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Requested':'#d99a2b','QA Verify':'#c79a3a','QA blocked':'#e0564f','Needs human':'#d9568c','Ready to ship':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
 const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=Math.floor(s/60);if(m<60)return m+'m '+(s%60)+'s';return Math.floor(m/60)+'h '+(m%60)+'m'};
-const dur=ms=>{let s=Math.max(0,Math.floor(ms/1000)),m=Math.floor(s/60);return String(m).padStart(2,'0')+':'+String(s%60).padStart(2,'0')};
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 const fmtTok=n=>{n=n||0;return n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(n>=1e8?0:1)+'M':n>=1e4?Math.round(n/1e3)+'k':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)};
-// API-equivalent $ at ~GPT-5 rates ($ per 1M tokens). Actual spend is the flat $200/mo Pro plan — this is the would-be cost / value extracted, not what you pay. Tweak the rates if the model differs.
-var COST_IN=5,COST_CACHED=0.5,COST_OUT=30,PLAN_MONTHLY=200;
+// API-equivalent $ at ~GPT-5.5 rates ($ per 1M tokens) — what this volume WOULD cost on the OpenAI API. Actual spend
+// is flat (the exe.dev plan + a ChatGPT subscription), NOT per-token, so this is value extracted, not a bill.
+var COST_IN=5,COST_CACHED=0.5,COST_OUT=30;
 function estCost(input,output,cached){var unc=Math.max(0,(input||0)-(cached||0));return (unc*COST_IN+(cached||0)*COST_CACHED+(output||0)*COST_OUT)/1e6;}
-function fmtCost(d){return d>=100?'$'+Math.round(d):d>=1?'$'+d.toFixed(1):'$'+d.toFixed(2);}
-// What the same compute costs on the flat plan. A $200/mo ChatGPT Pro (20x) plan is worth up to ~$14k/mo of
-// API-equivalent usage if fully consumed (tbreak / SemiAnalysis), so the plan prices compute at ~$200/$14000 of API.
-var PLAN_API_VALUE=14000;
-function planCost(input,output,cached){return estCost(input,output,cached)*PLAN_MONTHLY/PLAN_API_VALUE;}
+function fmtCost(d){return d>=10000?'$'+Math.round(d/1e3)+'k':d>=100?'$'+Math.round(d):d>=1?'$'+d.toFixed(1):'$'+d.toFixed(2);}
 const PRI={1:'Urgent',2:'High',3:'Medium',4:'Low'};
-var A_REWORK={a:'to-build',l:'Send to coding',c:'',t:'Move to In Progress so a fresh agent (re)writes the code and updates the PR'};
+var A_REWORK={a:'to-build',l:'Back to coding',c:'',t:'Move to In Progress so the agent resumes the thread, revises the code, and updates the PR'};
 function actionList(it){if(!it||it.state==='Done')return [];
- if(it.status==='running')return [{a:'restart',l:'Restart this agent',c:'danger',t:'Stop the current agent, wipe its workspace, and re-run this phase from scratch'},A_REWORK];
- if(it.state==='Needs human')return [{a:'bump',l:'Bump budget & reopen',c:'go',t:'Grant another token budget on top of the cap and re-open to In Progress (use for a ticket parked by the token cap)'},{a:'to-qa',l:'Re-run QA',c:'go',t:'Send back to QA Requested to re-verify'},A_REWORK];
- if(it.state==='Ready to ship')return [{a:'to-qa',l:'Re-verify before ship',c:'go',t:'Send back through QA before it ships'},A_REWORK];
- return [{a:'to-qa',l:'Run QA on it',c:'go',t:'Move to QA Requested and verify with a fresh QA agent'},A_REWORK];}
+ if(it.status==='running')return [{a:'restart',l:'Restart this agent',c:'danger',t:'Stop the current agent, wipe its workspace, and restart the ticket from scratch on a fresh thread'},A_REWORK];
+ if(it.state==='Needs human')return [{a:'bump',l:'Bump budget & reopen',c:'go',t:'Grant another token budget on top of the cap and re-open to In Progress (use for a ticket parked by the token cap)'},{a:'to-qa',l:'Back to QA',c:'go',t:'Send back to QA Requested so the agent re-verifies'},A_REWORK];
+ if(it.state==='Ready to ship')return [{a:'to-qa',l:'Re-verify',c:'go',t:'Send back to QA Requested for the agent to re-verify before shipping'},A_REWORK];
+ return [{a:'to-qa',l:'Send to QA',c:'go',t:'Move to QA Requested so the agent verifies the work'},A_REWORK];}
 function abtn(id,d){return '<button class="mbtn '+(d.c||'')+'" title="'+(d.t||'')+'" onclick="modalAct(\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>';}
-function kebab(it){return actionList(it).length?'<button class="kebab" data-id="'+it.identifier+'" onclick="toggleMenu(this,event)" title="actions">&#8943;</button>':'';}
+function kebab(it){return actionList(it).length?'<button class="kebab" data-id="'+it.identifier+'" onclick="toggleMenu(this,event)" title="actions" aria-label="Actions for '+it.identifier+'" aria-haspopup="menu">&#8943;</button>':'';}
 let COLS=[
  {name:'Planning',c:'#8b93a1',states:['Triage','Backlog','Todo']},
  {name:'In Progress',c:'#5b8def',states:['In Progress']},
@@ -462,7 +451,7 @@ function cardHtml(r,now){
  else status='<span class="ag">&#9203; queued</span>';
  const tot=r.enteredAt?'<span class="t-tot clk" title="total time in the factory">&#9201; '+ago((r.endedAt||now)-r.enteredAt)+'</span>':'';
  const tcst=r.tokens?estCost(r.tokens.phases.reduce(function(a,p){return a+p.input},0),r.tokens.phases.reduce(function(a,p){return a+p.output},0),r.tokens.phases.reduce(function(a,p){return a+p.cached},0)):0;
- const tk=r.tokens?'<span class="t-tok clk" title="'+fmtTok(r.tokens.total)+' tokens &middot; ~'+fmtCost(tcst)+' at API rates ($200/mo flat actual)">'+fmtTok(r.tokens.total)+' tok</span>':'<span class="t-tok"></span>';
+ const tk=r.tokens?'<span class="t-tok clk" title="'+fmtTok(r.tokens.total)+' tokens &middot; ~'+fmtCost(tcst)+' at API rates &middot; flat plan, not per-token">'+fmtTok(r.tokens.total)+' tok</span>':'<span class="t-tok"></span>';
  const pdot=(r.priority>=1&&r.priority<=4)?'<i class="pri p'+r.priority+'" title="'+PRI[r.priority]+' priority"></i>':'';
  const reason=((r.state==='QA blocked'||r.state==='Needs human')&&r.note)?'<div class="creason" title="why it is stuck">'+esc(r.note.slice(0,160))+'</div>':'';
  return '<div class="card'+(run?' run':'')+'" data-id="'+r.identifier+'" tabindex="0" aria-label="Open '+r.identifier+'">'+
@@ -488,8 +477,8 @@ function render(){
  function rlChip(rl){if(!rl||rl.usedPercent==null)return '';var pct=rl.usedPercent,col=pct>=95?'#e0564f':pct>=80?'#d99a2b':'#3fb27f',bg=pct>=95?'#e0564f22':pct>=80?'#d99a2b22':'';var label=Math.round(pct)+'% rl'+(rl.resetsInSeconds!=null?' ('+Math.round(rl.resetsInSeconds)+'s)':'');return '<span class="chip" title="rate-limit usage (Symphony §13.3)" style="'+(bg?'background:'+bg+';border-color:'+col+'44;':'')+'"><i style="background:'+col+'"></i><span style="color:'+col+'">'+label+'</span></span>';}
  // §13.3 secondsRunning: aggregate runtime across all sessions
  var sr=snap.secondsRunning||0,srH=Math.floor(sr/3600),srM=Math.floor((sr%3600)/60),srS=Math.floor(sr%60);
- var srStr=(srH?srH+'h ':'')+(srH||srM?String(srM).padStart(2,'0')+'m ':'')+String(srS).padStart(2,'0')+'s';
- stats.innerHTML=chip('#3fb27f',run,'running')+(q?chip('#7c8493',q,'queued'):'')+(rt?chip('#d99a2b',rt,'retrying'):'')+'<span class="cap">'+(snap.cap||0)+' slots</span>'+(snap.totalTokens?'<span class="cap" title="~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' at GPT-5.5 API rates &mdash; but actual spend is the flat $200/mo Pro plan, so this is the value extracted, not what you pay ('+fmtTok(snap.totalCached||0)+' of '+fmtTok(snap.totalInput||0)+' input cached)">&#931; '+fmtTok(snap.totalTokens)+' tok'+(snap.totalInput?' &middot; <b style="color:#3fb27f">'+Math.round(snap.totalCached/snap.totalInput*100)+'% cached</b>':'')+' &middot; <span title="At GPT-5.5 API rates this volume would cost ~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+'. A $'+PLAN_MONTHLY+'/mo Pro plan is worth up to ~$'+Math.round(PLAN_API_VALUE/1000)+'k/mo in API terms, so the same compute on the plan is ~'+fmtCost(planCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' &mdash; about 1/'+Math.round(PLAN_API_VALUE/PLAN_MONTHLY)+'th of API, and what you actually pay.">~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' api &middot; ~'+fmtCost(planCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' on plan</span></span>':'')+(sr?'<span class="cap" title="aggregate runtime across all sessions (Symphony §13.3 secondsRunning)">&#9201; '+srStr+'</span>':'')+((snap.gatewayAccounts&&snap.gatewayAccounts.length)?'<span class="cap" title="ChatGPT account each worker routes gpt-5.5 through (resolved live from each worker config); your ChatGPT subscriptions via the exe.dev gateway, not the OpenAI API">&#128273; '+snap.gatewayAccounts.map(function(a){return esc(a)}).join(', ')+'</span>':'')+rlChip(snap.rateLimits);
+ var srStr=(srH?srH+'h ':'')+(srH||srM?srM+'m':srS+'s');
+ stats.innerHTML=chip('#3fb27f',run,'running')+(q?chip('#7c8493',q,'queued'):'')+(rt?chip('#d99a2b',rt,'retrying'):'')+'<span class="cap">'+(snap.cap||0)+' slots</span>'+(snap.totalTokens?'<span class="cap" title="What this volume would cost at GPT-5.5 API rates. Actual spend is flat (the exe.dev plan + a ChatGPT subscription), not per-token — value extracted, not a bill.">&#931; '+fmtTok(snap.totalTokens)+' tok'+(snap.totalInput?' &middot; <b style="color:#3fb27f">'+Math.round(snap.totalCached/snap.totalInput*100)+'% cached</b>':'')+' &middot; ~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' at API rates</span>':'')+(sr?'<span class="cap" title="aggregate runtime across all sessions (Symphony §13.3 secondsRunning)">&#9201; '+srStr+'</span>':'')+((snap.gatewayAccounts&&snap.gatewayAccounts.length)?'<span class="cap" title="ChatGPT account each worker routes gpt-5.5 through (resolved live from each worker config); your ChatGPT subscriptions via the exe.dev gateway, not the OpenAI API">&#128273; via '+snap.gatewayAccounts.map(function(a){return esc(a)}).join(', ')+'</span>':'')+rlChip(snap.rateLimits);
  // Rebuild the board ONLY when structure changes (membership / state / status / pr); live fields tick in place.
  const sig=JSON.stringify(items.map(r=>[r.identifier,effState(r),r.status,r.host,r.prUrl,r.retryAttempt,effState(r)==='QA blocked'?(r.note||''):'']));
  if(sig!==lastSig){
@@ -552,7 +541,7 @@ function syncHead(){var role=(snap.roles||[]).find(x=>x.name===expandedId);if(ro
  else if(it&&it.note&&it.status!=='running'){ban.style.display='block';ban.className='note';ban.innerHTML=esc(it.note);}
  else{ban.style.display='none';}
  const tk=document.getElementById('mtokens');
- if(it&&it.tokens){var tcached=0,tinput=0,toutput=0;it.tokens.phases.forEach(function(p){tcached+=p.cached;tinput+=p.input;toutput+=p.output});var mc=estCost(tinput,toutput,tcached);tk.style.display='flex';tk.innerHTML='<span class="tklab">tokens</span>'+it.tokens.phases.map(function(p){return '<span class="tkph" title="input '+fmtTok(p.input)+' \\u00b7 output '+fmtTok(p.output)+' \\u00b7 cached '+fmtTok(p.cached)+' \\u00b7 ~'+fmtCost(estCost(p.input,p.output,p.cached))+' API-equiv"><b>'+esc(p.phase)+'</b> '+fmtTok(p.total)+'</span>';}).join('')+'<span class="tktot">&Sigma; '+fmtTok(it.tokens.total)+(tinput?' &middot; <b style="color:#3fb27f">'+fmtTok(tcached)+' cached</b>':'')+' &middot; <span title="at GPT-5.5 API rates vs the same compute on your $'+PLAN_MONTHLY+'/mo plan (~1/'+Math.round(PLAN_API_VALUE/PLAN_MONTHLY)+'th of API)">~'+fmtCost(mc)+' api &middot; ~'+fmtCost(planCost(tinput,toutput,tcached))+' on plan</span></span>';}
+ if(it&&it.tokens){var tcached=0,tinput=0,toutput=0;it.tokens.phases.forEach(function(p){tcached+=p.cached;tinput+=p.input;toutput+=p.output});var mc=estCost(tinput,toutput,tcached);tk.style.display='flex';tk.innerHTML='<span class="tklab">tokens</span>'+it.tokens.phases.map(function(p){return '<span class="tkph" title="input '+fmtTok(p.input)+' \\u00b7 output '+fmtTok(p.output)+' \\u00b7 cached '+fmtTok(p.cached)+' \\u00b7 ~'+fmtCost(estCost(p.input,p.output,p.cached))+' API-equiv"><b>'+esc(p.phase)+'</b> '+fmtTok(p.total)+'</span>';}).join('')+'<span class="tktot">&Sigma; '+fmtTok(it.tokens.total)+(tinput?' &middot; <b style="color:#3fb27f">'+fmtTok(tcached)+' cached</b>':'')+' &middot; <span title="what this ticket would cost at GPT-5.5 API rates; actual spend is flat, not per-token">~'+fmtCost(mc)+' at API rates</span></span>';}
  else{tk.style.display='none';}
  const ma=document.getElementById('mactions');if(it){ma.style.display='flex';ma.innerHTML=actionList(it).map(function(d){return abtn(it.identifier,d)}).join('')+'<button class="mbtn mmore" data-id="'+it.identifier+'" onclick="colMenu(this,event)" title="move this ticket to any column">&#8943;</button>';}else{ma.style.display='none';ma.innerHTML='';}}
 function skeletonHtml(){return '<div class="lg lg-skel"></div><div class="lg lg-skel s2"></div><div class="lg lg-skel s3"></div><div class="lg lg-skel s4"></div><div class="lg lg-skel s5"></div>';}

@@ -32,7 +32,7 @@ export interface Stats {
   close(): void
 }
 
-const SHIPPED = "('Ready to merge','Merged: In Staging','Done')"
+const SHIPPED = "('STG - Ready to merge','STG - Merged','Done')"
 const REWORK_FROM = "('QA Requested','QA Verify','QA blocked')"
 const ORDER: Record<string, string> = { tokens: 'tokens DESC', cycle: 'cycle_ms DESC', reworks: 'reworks DESC, tokens DESC', recent: 'last_ts DESC' }
 

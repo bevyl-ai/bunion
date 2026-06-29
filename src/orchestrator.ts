@@ -871,7 +871,7 @@ export async function start(workflowPath?: string): Promise<void> {
           }
         }
         const s = norm(i.state)
-        if ((s === 'qa blocked' || s === 'needs engineer' || s === 'ready to merge') && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
+        if ((s === 'qa blocked' || s === 'needs engineer' || s === 'stg - ready to merge') && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
           notesFetched.add(i.id)
           void fetchLatestNote(cfg, i.id).then((n) => n && summaries.set(i.identifier, n)).catch(() => {})
         }
@@ -924,7 +924,7 @@ export function deadlockReason(tokensSinceProgress: number, msSinceProgress: num
 
 // An operator chat turn: read-only, answer from the thread's own context. Terse so it doesn't crowd the history.
 function chatPrompt(msg: string): string {
-  return `The operator is messaging you directly about this ticket, with this thread's full context. You can ACT on their steering through Linear via \`linear_graphql\`: update the \`## Codex Workpad\` and move the ticket's status. Narrate what you do plainly (e.g. "ok — recording the simpler plan in the workpad and moving this to In Progress so the build picks it up"). When their steering means the code should change, capture the concrete change in the workpad and move the ticket to \`In Progress\` — do this even if it is parked in Ready to merge / QA blocked, because that re-enters it into the pipeline and the build agent resumes THIS thread to make the edits. Do NOT edit files, run commands, or push in this turn — only Linear. If the operator is just asking a question, answer it and change nothing. Operator:\n\n${msg}`
+  return `The operator is messaging you directly about this ticket, with this thread's full context. You can ACT on their steering through Linear via \`linear_graphql\`: update the \`## Codex Workpad\` and move the ticket's status. Narrate what you do plainly (e.g. "ok — recording the simpler plan in the workpad and moving this to In Progress so the build picks it up"). When their steering means the code should change, capture the concrete change in the workpad and move the ticket to \`In Progress\` — do this even if it is parked in STG - Ready to merge / QA blocked, because that re-enters it into the pipeline and the build agent resumes THIS thread to make the edits. Do NOT edit files, run commands, or push in this turn — only Linear. If the operator is just asking a question, answer it and change nothing. Operator:\n\n${msg}`
 }
 
 // An operator chat turn for a pool role — same read-only contract, framed as steering the role's standing focus.

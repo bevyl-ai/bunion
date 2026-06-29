@@ -417,7 +417,7 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 <div id="actmenu"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
-const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Requested':'#d99a2b','QA Verify':'#c79a3a','QA blocked':'#e0564f','Needs Engineer':'#d9568c','Ready to merge':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
+const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Requested':'#d99a2b','QA Verify':'#c79a3a','QA blocked':'#e0564f','Needs Engineer':'#d9568c','STG - Ready to merge':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
 const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=Math.floor(s/60);if(m<60)return m+'m '+(s%60)+'s';return Math.floor(m/60)+'h '+(m%60)+'m'};
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 const fmtTok=n=>{n=n||0;return n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(n>=1e8?0:1)+'M':n>=1e4?Math.round(n/1e3)+'k':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)};
@@ -431,7 +431,7 @@ var A_REWORK={a:'to-build',l:'Back to coding',c:'',t:'Move to In Progress so the
 function actionList(it){if(!it||it.state==='Done')return [];
  if(it.status==='running')return [{a:'restart',l:'Restart this agent',c:'danger',t:'Stop the current agent, wipe its workspace, and restart the ticket from scratch on a fresh thread'},A_REWORK];
  if(it.state==='Needs Engineer')return [{a:'bump',l:'Bump budget & reopen',c:'go',t:'Grant another token budget on top of the cap and re-open to In Progress (use for a ticket parked by the token cap)'},{a:'to-qa',l:'Back to QA',c:'go',t:'Send back to QA Requested so the agent re-verifies'},A_REWORK];
- if(it.state==='Ready to merge')return [{a:'to-qa',l:'Re-verify',c:'go',t:'Send back to QA Requested for the agent to re-verify before shipping'},A_REWORK];
+ if(it.state==='STG - Ready to merge')return [{a:'to-qa',l:'Re-verify',c:'go',t:'Send back to QA Requested for the agent to re-verify before shipping'},A_REWORK];
  return [{a:'to-qa',l:'Send to QA',c:'go',t:'Move to QA Requested so the agent verifies the work'},A_REWORK];}
 function abtn(id,d){return '<button class="mbtn '+(d.c||'')+'" title="'+(d.t||'')+'" onclick="modalAct(\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>';}
 function kebab(it){return actionList(it).length?'<button class="kebab" data-id="'+it.identifier+'" onclick="toggleMenu(this,event)" title="actions" aria-label="Actions for '+it.identifier+'" aria-haspopup="menu">&#8943;</button>':'';}
@@ -442,8 +442,8 @@ let COLS=[
  {name:'Verify QA',c:'#c79a3a',states:['QA Verify']},
  {name:'Blocked',c:'#e0564f',states:['QA blocked']},
  {name:'Needs Engineer',c:'#d9568c',states:['Needs Engineer'],inert:true},
- {name:'Ready',c:'#3fb27f',states:['Ready to merge'],inert:true},
- {name:'In Staging',c:'#e3b341',states:['Merged: In Staging'],inert:true},
+ {name:'Ready',c:'#3fb27f',states:['STG - Ready to merge'],inert:true},
+ {name:'In Staging',c:'#e3b341',states:['STG - Merged'],inert:true},
  {name:'Verifying prod',c:'#4a9eda',states:['Verifying in Prod']},
  {name:'Done',c:'#6b7280',states:['Done'],inert:true}];
 function colIdx(st){var l=(st||'').trim().toLowerCase();for(var i=0;i<COLS.length;i++)for(var j=0;j<COLS[i].states.length;j++)if(COLS[i].states[j].toLowerCase()===l)return i;return -1;}
@@ -460,7 +460,7 @@ function cardHtml(r,now){
  else if(r.status==='retrying') status='<span class="ag">&#8635; retry '+(r.retryDueAt?'in '+ago(r.retryDueAt-now):'soon')+'</span>';
  else if(r.state==='Needs Engineer') status='<span class="ag" style="color:#d9568c">&#9888; needs engineer</span>';
  else if(r.state==='Done') status='<span class="ag" style="color:#a371f7">&#10004; merged</span>';
- else if(r.state==='Ready to merge') status='<span class="ag" style="color:#3fb27f">&#10004; ready</span>';
+ else if(r.state==='STG - Ready to merge') status='<span class="ag" style="color:#3fb27f">&#10004; ready</span>';
  else if(r.status==='handoff') status='<span class="ag">&#10004; in review</span>';
  else status='<span class="ag">&#9203; queued</span>';
  const tot=r.enteredAt?'<span class="t-tot clk" title="total time in the factory">&#9201; '+ago((r.endedAt||now)-r.enteredAt)+'</span>':'';
@@ -501,9 +501,11 @@ function render(){
   var _first={};if(_motion)document.querySelectorAll('#board .card[data-id]').forEach(function(c){_first[c.getAttribute('data-id')]=c.getBoundingClientRect();});
   if(!items.length){board.innerHTML='<div class="empty">no '+esc(snap.scope||'dark-factory')+' tickets in scope</div>';}
   else{
-   const bk=COLS.map(()=>[]);
-   for(const r of items){const i=colIdx(effState(r));if(i>=0)bk[i].push(r);}  // post-merge states (In Staging/Verifying/Done) own columns; anything unmapped is skipped
-   board.innerHTML=COLS.map((col,i)=>colHtml(col,bk[i],now)).join('');
+   const bk=COLS.map(()=>[]);var unmapped=[];
+   for(const r of items){const i=colIdx(effState(r));if(i>=0)bk[i].push(r);else unmapped.push(r);}  // unmapped (e.g. a renamed Linear state) → surfaced below, NEVER silently dropped
+   var html=COLS.map((col,i)=>colHtml(col,bk[i],now)).join('');
+   if(unmapped.length){var us=[...new Set(unmapped.map(function(r){return effState(r)}))].join(', ');html+=colHtml({name:'&#9888; unmapped &mdash; '+esc(us),c:'#e0564f',states:[]},unmapped,now);}
+   board.innerHTML=html;
    if(_motion)flip(_first);
   }
  }
@@ -669,7 +671,7 @@ tbody tr:hover{background:var(--surf2)}
 const fmtTok=n=>{n=n||0;return n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)};
 const dur=ms=>{ms=ms||0;let m=Math.round(ms/60000);if(m<60)return m+'m';let h=Math.floor(m/60);return h+'h'+(m%60?' '+(m%60)+'m':'')};
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
-const OC={'Done':'var(--purple)','Ready to merge':'var(--green)','Merged: In Staging':'var(--amber)','Verifying in Prod':'var(--accent)','Needs Engineer':'#d9568c','QA blocked':'var(--red)'};
+const OC={'Done':'var(--purple)','STG - Ready to merge':'var(--green)','STG - Merged':'var(--amber)','Verifying in Prod':'var(--accent)','Needs Engineer':'#d9568c','QA blocked':'var(--red)'};
 const oc=s=>OC[s]||'var(--mut2)';
 const num=v=>typeof v==='number'?v:0;
 let DATA=null,K='tokens',DIR=-1;

@@ -258,6 +258,9 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 .chip{display:inline-flex;align-items:center;gap:6px;background:var(--surf);border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:12px;box-shadow:var(--sh1)}
 .chip i{width:7px;height:7px;border-radius:50%}
 .cap{color:var(--mut);font-size:12px;align-self:center}
+.search{margin-left:6px;background:var(--surf);border:1px solid var(--line);border-radius:8px;color:var(--fg);font:12.5px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:6px 11px;width:170px;outline:none;transition:width .15s,border-color .15s}
+.search:focus{border-color:var(--accent);width:230px}
+.search::placeholder{color:var(--mut2)}
 .clock{margin-left:auto;color:var(--mut2);font-size:12px;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace}
 .pausebtn{margin-left:12px;background:#15171e;border:1px solid #4a3a1a;color:#d99a2b;border-radius:8px;padding:5px 13px;font-size:12px;font-weight:700;cursor:pointer;letter-spacing:.2px;transition:background .15s,border-color .15s;white-space:nowrap}
 .pausebtn:hover{background:#1d1810;border-color:#d99a2b}
@@ -411,6 +414,7 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 <header>
  <div class="brand"><span class="mark"></span>bunion<span class="sub" id="scope"></span></div>
  <div class="stats" id="stats"></div>
+ <input id="search" class="search" type="search" placeholder="filter tickets&hellip;" oninput="setFilter(this.value)" aria-label="Filter tickets by id, title, host, or state">
  <span class="clock" id="clock"></span>
  <a href="/stats" target="_blank" rel="noopener" title="rollups + thread stats" style="margin-left:12px;color:var(--mut);font-size:12px;text-decoration:none;padding:5px 11px;border:1px solid var(--line);border-radius:8px;background:var(--surf);white-space:nowrap">&#128202; stats</a>
  <button id="pausebtn" class="pausebtn" onclick="postAction(this,'__pause__','toggle',event)">&#9208; Pause</button>
@@ -492,8 +496,11 @@ function cardHtml(r,now){
 function colHtml(col,arr,now){var inert=!!col.inert;return '<div class="col'+(inert?' inert':'')+'"><div class="colh"><i style="background:'+col.c+'"></i>'+col.name+(inert?'<span class="parked" title="the factory does not work these — they wait on a person, the release train, or are already done">parked</span>':'')+'<span class="ct">'+arr.length+'</span></div><div class="colcards">'+(arr.length?arr.map(r=>cardHtml(r,now)).join(''):'<div class="colempty">empty</div>')+'</div></div>';}
 function flip(first){document.querySelectorAll('#board .card[data-id]').forEach(function(c){var id=c.getAttribute('data-id'),f=first[id];if(!f)return;var l=c.getBoundingClientRect(),dx=f.left-l.left,dy=f.top-l.top;if(!dx&&!dy)return;c.classList.add('flipping');c.style.transition='none';c.style.transform='translate('+dx+'px,'+dy+'px)';requestAnimationFrame(function(){c.style.transition='transform .32s cubic-bezier(.2,.7,.2,1)';c.style.transform='';});c.addEventListener('transitionend',function h(){c.style.transition='';c.style.transform='';c.classList.remove('flipping');c.removeEventListener('transitionend',h);});});}
 let lastSig='';
+var filterQuery='';
+function setFilter(v){filterQuery=(v||'').trim().toLowerCase();render();}
 function render(){
  const items=snap.items||[];
+ const filtered=filterQuery?items.filter(function(r){return (r.identifier+' '+(r.title||'')+' '+(r.host||'')+' '+(r.state||'')).toLowerCase().indexOf(filterQuery)>=0}):items;
  var _byId={};items.forEach(function(r){_byId[r.identifier]=r});for(var _oid in optimisticOverrides){var _ov=optimisticOverrides[_oid],_it=_byId[_oid];if(!_it||_it.state===_ov.state||Date.now()>_ov.expiresAt)delete optimisticOverrides[_oid];}
  var effState=function(r){var o=optimisticOverrides[r.identifier];return o?o.state:r.state;};
  const run=items.filter(r=>r.status==='running').length,q=items.filter(r=>r.status==='queued').length,rt=items.filter(r=>r.status==='retrying').length;
@@ -507,15 +514,15 @@ function render(){
  var srStr=(srH?srH+'h ':'')+(srH||srM?srM+'m':srS+'s');
  stats.innerHTML=chip('#3fb27f',run,'running')+(q?chip('#7c8493',q,'queued'):'')+(rt?chip('#d99a2b',rt,'retrying'):'')+'<span class="cap">'+(snap.cap||0)+' slots</span>'+(snap.totalTokens?'<span class="cap" title="What this volume would cost at GPT-5.5 API rates. Actual spend is flat (the exe.dev plan + a ChatGPT subscription), not per-token — value extracted, not a bill.">&#931; '+fmtTok(snap.totalTokens)+' tok'+(snap.totalInput?' &middot; <b style="color:#3fb27f">'+Math.round(snap.totalCached/snap.totalInput*100)+'% cached</b>':'')+' &middot; ~'+fmtCost(estCost(snap.totalInput,snap.totalOutput,snap.totalCached))+' at API rates</span>':'')+(sr?'<span class="cap" title="aggregate runtime across all sessions (Symphony §13.3 secondsRunning)">&#9201; '+srStr+'</span>':'')+((snap.gatewayAccounts&&snap.gatewayAccounts.length)?'<span class="cap" title="ChatGPT account each worker routes gpt-5.5 through (resolved live from each worker config); your ChatGPT subscriptions via the exe.dev gateway, not the OpenAI API">&#128273; via '+snap.gatewayAccounts.map(function(a){return esc(a)}).join(', ')+'</span>':'')+rlChip(snap.rateLimits);
  // Rebuild the board ONLY when structure changes (membership / state / status / pr); live fields tick in place.
- const sig=JSON.stringify(items.map(r=>[r.identifier,effState(r),r.status,r.host,r.prUrl,r.retryAttempt,effState(r)==='QA blocked'?(r.note||''):'']));
+ const sig=JSON.stringify(filtered.map(r=>[r.identifier,effState(r),r.status,r.host,r.prUrl,r.retryAttempt,effState(r)==='QA blocked'?(r.note||''):''])) + '|' + filterQuery;
  if(sig!==lastSig){
   lastSig=sig;const now=Date.now();
   var _motion=!window.matchMedia('(prefers-reduced-motion:reduce)').matches;
   var _first={};if(_motion)document.querySelectorAll('#board .card[data-id]').forEach(function(c){_first[c.getAttribute('data-id')]=c.getBoundingClientRect();});
-  if(!items.length){board.innerHTML='<div class="empty">no '+esc(snap.scope||'dark-factory')+' tickets in scope</div>';}
+  if(!filtered.length){board.innerHTML='<div class="empty">'+(filterQuery?'no tickets match &ldquo;'+esc(filterQuery)+'&rdquo;':'no '+esc(snap.scope||'dark-factory')+' tickets in scope')+'</div>';}
   else{
    const bk=COLS.map(()=>[]);var unmapped=[];var term=(snap.terminalStates||[]).map(function(s){return s.toLowerCase()});
-   for(const r of items){const i=colIdx(effState(r));if(i>=0)bk[i].push(r);else if(term.indexOf(effState(r).toLowerCase())<0)unmapped.push(r);}  // unmapped = no column AND not an intentionally-hidden terminal state — a renamed state surfaces; Done/Canceled/Duplicate don't
+   for(const r of filtered){const i=colIdx(effState(r));if(i>=0)bk[i].push(r);else if(term.indexOf(effState(r).toLowerCase())<0)unmapped.push(r);}  // unmapped = no column AND not an intentionally-hidden terminal state — a renamed state surfaces; Done/Canceled/Duplicate don't
    var html=COLS.map((col,i)=>colHtml(col,bk[i],now)).join('');
    if(unmapped.length){var us=[...new Set(unmapped.map(function(r){return effState(r)}))].join(', ');html+=colHtml({name:'&#9888; unmapped &mdash; '+esc(us),c:'#e0564f',states:[]},unmapped,now);}
    board.innerHTML=html;

@@ -65,7 +65,7 @@ function apiErr(code: string, message: string, status: number): Response {
 
 // A tiny status server: GET /state.json is the live orchestrator snapshot; GET / is a self-contained page that
 // polls it and renders the board (kanban by pipeline stage) + a per-run log modal.
-export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string) => Promise<{ ok: boolean; msg?: string }>, onChat?: (id: string, text: string) => Promise<{ ok: boolean; reply?: string; msg?: string }>, getStats?: Stats): void {
+export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string) => Promise<{ ok: boolean; msg?: string }>, onChat?: (id: string, text: string) => Promise<{ ok: boolean; reply?: string; msg?: string }>, getStats?: Stats, getLive?: (id: string) => string): void {
   // Server-Sent Events push. Clients subscribe to /events (board) + /log-stream/<id> (transcript); a tight interval
   // diff-pushes so the dashboard reflects any change within ~150ms WITHOUT the client polling. /state.json + /transcript
   // stay live as the EventSource fallback (the exe.dev proxy could buffer SSE; the client degrades to polling cleanly).
@@ -85,16 +85,25 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
   }
   const logClients = new Map<string, Set<ReadableStreamDefaultController<Uint8Array>>>()
   const logLengths = new Map<string, number>()
+  const lastLive = new Map<string, string>() // last-pushed streaming partial per id — so we only re-push on change
   const pushLogs = (): void => {
     for (const [id, ctls] of logClients) {
-      if (ctls.size === 0) { logClients.delete(id); logLengths.delete(id); continue }
+      if (ctls.size === 0) { logClients.delete(id); logLengths.delete(id); lastLive.delete(id); continue }
       const lines = getLog(id)
       const prev = logLengths.get(id) ?? 0
-      if (lines.length === prev) continue
-      // A from-scratch run resets getLog(id) to [] (orchestrator) — shrink => re-seed the client with the full log.
-      const msg = lines.length < prev ? sse({ seed: true, lines }) : sse({ lines: lines.slice(prev) })
-      logLengths.set(id, lines.length)
-      for (const c of ctls) try { c.enqueue(msg) } catch { ctls.delete(c) }
+      if (lines.length !== prev) {
+        // A from-scratch run resets getLog(id) to [] (orchestrator) — shrink => re-seed the client with the full log.
+        const msg = lines.length < prev ? sse({ seed: true, lines }) : sse({ lines: lines.slice(prev) })
+        logLengths.set(id, lines.length)
+        for (const c of ctls) try { c.enqueue(msg) } catch { ctls.delete(c) }
+      }
+      // Realtime: push the agent's growing reply (ephemeral) whenever it changes; '' = the message committed → clear it.
+      const live = getLive ? getLive(id) : ''
+      if (live !== (lastLive.get(id) ?? '')) {
+        lastLive.set(id, live)
+        const msg = sse({ live })
+        for (const c of ctls) try { c.enqueue(msg) } catch { ctls.delete(c) }
+      }
     }
   }
   setInterval(() => { pushBoardNow(); pushLogs() }, 150)
@@ -365,6 +374,9 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 .lg{padding:0}
 .lg-turn{margin:18px 0 2px;color:#5b8def;font:700 10.5px/1 ui-monospace,Menlo,monospace;border-top:1px solid var(--line);padding-top:13px;letter-spacing:1.5px;text-transform:uppercase}
 .lg-msg{color:var(--fg);font-size:13px;line-height:1.62;margin:10px 0;padding:9px 13px;border-left:2px solid #3a9168;background:var(--surf2);border-radius:8px}
+.lg-live{color:var(--fg);font-size:13px;line-height:1.62;margin:10px 0;padding:9px 13px;border-left:2px solid #3a9168;background:var(--surf2);border-radius:8px;white-space:pre-wrap}
+.lg-cur{display:inline-block;width:6px;height:14px;margin-left:1px;background:#3a9168;vertical-align:text-bottom;animation:blink 1s step-start infinite}
+@keyframes blink{50%{opacity:0}}
 .lg-op{color:var(--fg);font-size:13px;line-height:1.62;margin:10px 0;padding:9px 13px;border-left:2px solid var(--accent);background:#5b8def14;border-radius:8px}
 .lg-op b{color:var(--accent2);font-weight:700;margin-right:7px;text-transform:uppercase;font-size:9.5px;letter-spacing:.7px}
 .lg-cmd{color:var(--mut2);font:11.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2.5px 0 2.5px 13px}
@@ -568,8 +580,9 @@ function closeModal(){expandedId=null;if(logEs){try{logEs.close()}catch(e){}logE
 function startLogStream(id){if(typeof EventSource==='undefined'){_logPoll=setInterval(function(){if(expandedId===id)pullLog()},1000);pullLog();return;}try{logEs=new EventSource('/log-stream/'+encodeURIComponent(id));}catch(e){_logPoll=setInterval(function(){if(expandedId===id)pullLog()},1000);pullLog();return;}
  logEs.onmessage=function(e){if(expandedId!==id)return;var j;try{j=JSON.parse(e.data)}catch(x){return;}var b=document.getElementById('logbody');var atEnd=b.scrollTop+b.clientHeight>=b.scrollHeight-60;
   if(j.seed){var ls=j.lines||[];logCount=ls.length;logCache.set(id,ls);b.innerHTML=(ls.length?ls.map(logHtml).join(''):(chatPending?'':'<div class="lg" style="color:var(--mut)">(no log yet)</div>'))+(chatPending?dotsHtml('agent is responding&hellip;'):'');}
-  else if(j.lines&&j.lines.length){logCount+=j.lines.length;var d=b.querySelector('.lg-typing');if(d)d.remove();b.insertAdjacentHTML('beforeend',j.lines.map(logHtml).join(''));if(chatPending)b.insertAdjacentHTML('beforeend',dotsHtml('agent is responding&hellip;'));}
-  if(atEnd||chatPending)b.scrollTop=b.scrollHeight;};
+  else if(j.lines&&j.lines.length){logCount+=j.lines.length;var d=b.querySelector('.lg-typing');if(d)d.remove();var lv0=b.querySelector('.lg-live');if(lv0)lv0.remove();b.insertAdjacentHTML('beforeend',j.lines.map(logHtml).join(''));if(chatPending)b.insertAdjacentHTML('beforeend',dotsHtml('agent is responding&hellip;'));}
+  else if('live' in j){var dt=b.querySelector('.lg-typing');if(dt)dt.remove();var lv=b.querySelector('.lg-live');if(!j.live){if(lv)lv.remove();}else{if(!lv){lv=document.createElement('div');lv.className='lg lg-live';b.appendChild(lv);}lv.innerHTML=esc(j.live)+'<span class="lg-cur"></span>';}}
+  if(atEnd||chatPending||('live' in j))b.scrollTop=b.scrollHeight;};
  logEs.onerror=function(){if(logEs){try{logEs.close()}catch(e){}logEs=null;}if(expandedId===id&&!_logPoll){_logPoll=setInterval(function(){if(expandedId===id)pullLog()},1000);pullLog();}};}
 async function postAction(btn,id,action,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
  var box=btn&&btn.parentNode;if(box)box.querySelectorAll('button').forEach(function(x){x.classList.add('busy')});

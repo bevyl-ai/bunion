@@ -322,8 +322,9 @@ export class AppServerSession {
     if (method === 'item/agentMessage/delta') {
       const id = String(params.itemId ?? '')
       const d = typeof params.textDelta === 'string' ? params.textDelta : ''
-      this.msgBuf.set(id, (this.msgBuf.get(id) ?? '') + d)
-      return
+      const acc = (this.msgBuf.get(id) ?? '') + d
+      this.msgBuf.set(id, acc)
+      return this.onEvent({ stream: acc }) // emit the growing reply for realtime display; item/completed commits the final `● ` line
     }
     if (method === 'item/completed') {
       const item = obj(params.item)

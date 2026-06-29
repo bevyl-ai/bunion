@@ -85,6 +85,7 @@ export async function start(workflowPath?: string): Promise<void> {
 
   const running = new Map<string, RunningEntry>()
   const pendingChat = new Map<string, string[]>() // issueId → operator msgs queued while the agent was mid-turn; drained into the next continuation turn
+  const livePartial = new Map<string, string>() // identifier → the agent's CURRENTLY-streaming reply text (ephemeral; cleared when the message commits as a `● ` log line)
   const claimed = new Set<string>()
   const retries = new Map<string, RetryTimer>()
   let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
@@ -291,7 +292,9 @@ export async function start(workflowPath?: string): Promise<void> {
         threadRecs.set(issue.id, { threadId: e.threadId, host })
         saveThreads()
       }
+      if (e.stream != null) livePartial.set(issue.identifier, e.stream)
       if (e.log != null) {
+        if (e.log.startsWith('● ')) livePartial.delete(issue.identifier) // the message committed → clear the live partial
         const arr = logs.get(issue.identifier)
         if (arr) {
           arr.push(e.log)
@@ -482,7 +485,8 @@ export async function start(workflowPath?: string): Promise<void> {
     saveLogs()
     const replies: string[] = []
     const chat = new AppServerSession(cfg, tools, (e) => {
-      if (e.log && e.log.startsWith('● ')) replies.push(e.log.slice(2))
+      if (e.stream != null) livePartial.set(logKey, e.stream)
+      if (e.log && e.log.startsWith('● ')) { replies.push(e.log.slice(2)); livePartial.delete(logKey) }
     })
     try {
       await chat.start(cwd, host)
@@ -490,12 +494,14 @@ export async function start(workflowPath?: string): Promise<void> {
       await chat.runTurn(threadId, cwd, prompt, label, { type: 'readOnly' })
     } catch (e) {
       chat.stop()
+      livePartial.delete(logKey)
       const m = e instanceof Error ? e.message : String(e)
       lg.push(`● (couldn't reach the agent: ${m})`)
       saveLogs()
       return { ok: false, msg: m }
     }
     chat.stop()
+    livePartial.delete(logKey) // safety: clear any residual streaming partial (normally cleared on the committed ● event)
     const reply = replies.join('\n\n').trim() || '(no reply)'
     lg.push(`● ${reply}`)
     if (lg.length > 600) lg.splice(0, lg.length - 600)
@@ -753,7 +759,7 @@ export async function start(workflowPath?: string): Promise<void> {
       log(`backfilled ${n} ticket thread(s) from worker rollouts`)
     }
   }
-  if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log, onAction, onChat, stats)
+  if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log, onAction, onChat, stats, (id) => livePartial.get(id) ?? '')
 
   // Start the pool — each role on its cadence, with a staggered first run shortly after startup. (Role config is read
   // at start; add/edit roles then restart.)

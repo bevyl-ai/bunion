@@ -136,6 +136,7 @@ export interface AgentEvent {
   threadId?: string // emitted once when the agent's codex thread is created or resumed, so the orchestrator persists it
   turnId?: string // codex turn id — composes session_id = `${threadId}-${turnId}` (Symphony §4.2 / §10.2)
   event?: string // structured event type: session_started, turn_completed, turn_failed, approval_auto_approved, … (§10.4)
+  stream?: string // EPHEMERAL growing agent-message text (realtime streaming); NOT persisted — item/completed commits the final `● ` log line
   ts?: string // ISO-8601 UTC timestamp of the event (§10.4)
   rateLimits?: RateLimits // latest coding-agent rate-limit snapshot, when codex reports one (§10.4 / §13.3)
 }

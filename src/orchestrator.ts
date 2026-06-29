@@ -620,7 +620,7 @@ export async function start(workflowPath?: string): Promise<void> {
         return { ok: true, msg: 'restarting fresh' }
       }
       if (action === 'to-qa' || action === 'to-build') {
-        const target = action === 'to-qa' ? 'QA Requested' : 'In Progress'
+        const target = action === 'to-qa' ? 'QA Testing' : 'In Progress'
         stopRun(issue.id) // stop the current turn but keep the pin + workspace + thread → the move resumes it
         await moveIssue(cfg, issue.id, target)
         notesFetched.delete(issue.id)
@@ -919,7 +919,7 @@ export async function start(workflowPath?: string): Promise<void> {
 }
 
 // A ticket is deadlocked when it keeps spending tokens/time without advancing to a pipeline state it hasn't
-// reached this lifecycle (e.g. oscillating In Progress ↔ QA Requested, or a fix that never lands). Returns a
+// reached this lifecycle (e.g. oscillating In Progress ↔ QA Testing, or a fix that never lands). Returns a
 // human-readable reason or null. Pure so it's unit-testable.
 export function deadlockReason(tokensSinceProgress: number, msSinceProgress: number, dl: Omit<Config['deadlock'], 'hardTokenCap'>): string | null {
   const mins = Math.round(msSinceProgress / 60_000)

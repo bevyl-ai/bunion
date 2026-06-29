@@ -434,7 +434,7 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 <div id="actmenu"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
-const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Requested':'#d99a2b','QA Verify':'#c79a3a','QA blocked':'#e0564f','Needs Engineer':'#d9568c','STG - Ready to merge':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
+const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Testing':'#d99a2b','QA Verify':'#c79a3a','QA blocked':'#e0564f','Needs Engineer':'#d9568c','STG - Ready to merge':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
 const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=Math.floor(s/60);if(m<60)return m+'m '+(s%60)+'s';return Math.floor(m/60)+'h '+(m%60)+'m'};
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 const fmtTok=n=>{n=n||0;return n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(n>=1e8?0:1)+'M':n>=1e4?Math.round(n/1e3)+'k':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)};
@@ -447,15 +447,15 @@ const PRI={1:'Urgent',2:'High',3:'Medium',4:'Low'};
 var A_REWORK={a:'to-build',l:'Back to coding',c:'',t:'Move to In Progress so the agent resumes the thread, revises the code, and updates the PR'};
 function actionList(it){if(!it||it.state==='Done')return [];
  if(it.status==='running')return [{a:'restart',l:'Restart this agent',c:'danger',t:'Stop the current agent, wipe its workspace, and restart the ticket from scratch on a fresh thread'},A_REWORK];
- if(it.state==='Needs Engineer')return [{a:'bump',l:'Bump budget & reopen',c:'go',t:'Grant another token budget on top of the cap and re-open to In Progress (use for a ticket parked by the token cap)'},{a:'to-qa',l:'Back to QA',c:'go',t:'Send back to QA Requested so the agent re-verifies'},A_REWORK];
- if(it.state==='STG - Ready to merge')return [{a:'to-qa',l:'Re-verify',c:'go',t:'Send back to QA Requested for the agent to re-verify before shipping'},A_REWORK];
- return [{a:'to-qa',l:'Send to QA',c:'go',t:'Move to QA Requested so the agent verifies the work'},A_REWORK];}
+ if(it.state==='Needs Engineer')return [{a:'bump',l:'Bump budget & reopen',c:'go',t:'Grant another token budget on top of the cap and re-open to In Progress (use for a ticket parked by the token cap)'},{a:'to-qa',l:'Back to QA',c:'go',t:'Send back to QA Testing so the agent re-verifies'},A_REWORK];
+ if(it.state==='STG - Ready to merge')return [{a:'to-qa',l:'Re-verify',c:'go',t:'Send back to QA Testing for the agent to re-verify before shipping'},A_REWORK];
+ return [{a:'to-qa',l:'Send to QA',c:'go',t:'Move to QA Testing so the agent verifies the work'},A_REWORK];}
 function abtn(id,d){return '<button class="mbtn '+(d.c||'')+'" title="'+(d.t||'')+'" onclick="modalAct(\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>';}
 function kebab(it){return actionList(it).length?'<button class="kebab" data-id="'+it.identifier+'" onclick="toggleMenu(this,event)" title="actions" aria-label="Actions for '+it.identifier+'" aria-haspopup="menu">&#8943;</button>':'';}
 let COLS=[
  {name:'Planning',c:'#8b93a1',states:['Triage','Backlog','Todo']},
  {name:'In Progress',c:'#5b8def',states:['In Progress']},
- {name:'QA check',c:'#d99a2b',states:['QA Requested']},
+ {name:'QA check',c:'#d99a2b',states:['QA Testing']},
  {name:'Verify QA',c:'#c79a3a',states:['QA Verify']},
  {name:'Blocked',c:'#e0564f',states:['QA blocked']},
  {name:'Needs Engineer',c:'#d9568c',states:['Needs Engineer'],inert:true},

@@ -9,7 +9,7 @@ tracker:
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project
   api_key: $LINEAR_API_KEY
   required_labels: [dark-factory]    # opt-in: only tickets carrying this label enter the factory
-  active_states: [Triage, Backlog, Todo, In Progress, QA Requested, QA Verify, QA blocked, Verifying in prod]   # STG - Ready to merge + "STG - Merged" + Needs Engineer are NOT active (humans / the release train move those)
+  active_states: [Triage, Backlog, Todo, In Progress, QA Testing, QA Verify, QA blocked, Verifying in prod]   # STG - Ready to merge + "STG - Merged" + Needs Engineer are NOT active (humans / the release train move those)
   terminal_states: [Done, Canceled, Cancelled, Duplicate, Needs Engineer]   # Needs Engineer = the factory stops + a person must decide
 polling:
   interval_ms: 30000              # poll every 30s (was 10s): 3x fewer Linear reads; the dashboard stays plenty fresh
@@ -18,7 +18,7 @@ polling:
 phases:                              # display + token-accounting labels only; ONE agent owns a ticket across them — crossing a phase is NOT a handoff
   plan: [Triage, Backlog, Todo]      # PLAN (clerk pass): any labeled ticket enters here — Todo isn't special
   build: [In Progress]               # BUILD: implement + PR + stupify review loop
-  qa: [QA Requested]                 # QA CHECK: independent verification + screenshot proof
+  qa: [QA Testing]                 # QA CHECK: independent verification + screenshot proof
   verify: [QA Verify]                # VERIFY QA: a 2nd, adversarial agent — did QA test the REAL scenario? is it proven safe?
   blocked: [QA blocked]              # BLOCKED: triage a stuck ticket — clear the meta-problem or escalate to a human
   verify_prod: [Verifying in prod]   # VERIFY:PROD: the train shipped it to prod — confirm it's live + healthy, then Done
@@ -74,7 +74,7 @@ board:                               # dashboard lanes (name + colour + the stat
   columns:
     - { name: Planning,       color: '#8b93a1', states: [Triage, Backlog, Todo] }
     - { name: In Progress,    color: '#5b8def', states: [In Progress] }
-    - { name: QA check,       color: '#d99a2b', states: [QA Requested] }
+    - { name: QA check,       color: '#d99a2b', states: [QA Testing] }
     - { name: Verify QA,      color: '#c79a3a', states: [QA Verify] }
     - { name: Blocked,        color: '#e0564f', states: [QA blocked] }
     - { name: Needs Engineer, color: '#d9568c', states: [Needs Engineer] }
@@ -117,7 +117,7 @@ agent:
   # an absent state falls back to the global cap, which still binds the total. Tune freely.
   max_concurrent_agents_by_state:
     In Progress: 6
-    QA Requested: 4
+    QA Testing: 4
     QA Verify: 3
     QA blocked: 3
   max_turns: 20
@@ -177,7 +177,7 @@ Linear tools (we are rate-limited — use sparingly): `linear_read` returns a ti
 - **Honor operator messages in this thread.** If the operator has messaged you earlier in this conversation, treat it as top-priority steering — address it this phase, above the default routine.
 - Prefix every GitHub comment you author with `[codex]`.
 - Minimal, in-scope changes that match the surrounding code. Out-of-scope finds → file a separate `Backlog` issue (clear title/acceptance criteria, same team, `related` link), don't widen scope.
-- Advance the ticket's Linear status as you clear each stage's bar (In Progress → QA Requested → QA Verify → STG - Ready to merge), and only when that bar is genuinely met.
+- Advance the ticket's Linear status as you clear each stage's bar (In Progress → QA Testing → QA Verify → STG - Ready to merge), and only when that bar is genuinely met.
 - Do every stage for real — don't skip one or rubber-stamp. When you reach the QA / verify stages, switch hats and check your OWN work as ruthlessly as an outside reviewer would; catching the bug you'd be tempted to wave through is the whole point of running them.
 - **Avoid loops and churn.** If this ticket is going in circles — you've already run this phase, or it keeps coming back with the same failure or blocker — don't re-run it: route it to `Needs Engineer` with a one-line why. Forward progress or escalate; never spin.
 - **Never hand-poll — use the `wait` tool.** It polls host-side and spends ZERO of your tokens. After a push, call `wait` — it waits for the whole **build gate** (CI checks AND stupify's review together) and returns ONE verdict to act on: PASS / CI_FAILED / CHANGES_REQUESTED / STUPIFY_FLAKED. For any other async wait (a deploy, a custom condition) use `wait { command, until: "exit_zero"|"stdout_matches", pattern }`. Looping `gh pr checks` / `gh api …` + `sleep` by hand burns tokens for nothing — never do it.
@@ -209,13 +209,13 @@ Implement the plan and get a clean, reviewed, green PR, then take it into the QA
 3. Validate: run the repo's checks (see the `push` skill) and the plan's validation items until green.
 4. `commit`, then `push` (open/update the PR, ensure the `bunion` label, attach the PR URL to the issue).
 5. **Build gate — call `wait`.** After the push, call the `wait` tool: it waits token-free for CI checks AND stupify's code review together, and handles the stupify matching (`<!-- stupify:<sha> -->` vs the latest CODE commit, [skip ci] commits, a stale `✅` vs a real re-review) for you. Act on its verdict:
-   - **PASS** (CI green + stupify `✅` on the latest code) + the acceptance criteria are met → move to `QA Requested` and verify it yourself in the QA stage.
+   - **PASS** (CI green + stupify `✅` on the latest code) + the acceptance criteria are met → move to `QA Testing` and verify it yourself in the QA stage.
    - **CI_FAILED** → fix the failing checks it lists, then `push` and `wait` again.
    - **CHANGES_REQUESTED** → stupify objected to the latest code (its words are in the result). Fix it in code — or, if you genuinely disagree, push back inline (`in_reply_to` the review-comment id) with justified `[codex]` reasoning — then `push` and `wait` again.
-   - **STUPIFY_FLAKED** (CI green but stupify never reviewed in time — slow/backlogged/down) → do NOT wedge the pipeline: note in the workpad that you proceeded without a stupify `✅` (reviewer unavailable) and move to `QA Requested`. A flaky reviewer never blocks build — your QA pass + the human merge are still gates. (Only a real `CHANGES_REQUESTED` keeps you in build; absence of a review does not.)
+   - **STUPIFY_FLAKED** (CI green but stupify never reviewed in time — slow/backlogged/down) → do NOT wedge the pipeline: note in the workpad that you proceeded without a stupify `✅` (reviewer unavailable) and move to `QA Testing`. A flaky reviewer never blocks build — your QA pass + the human merge are still gates. (Only a real `CHANGES_REQUESTED` keeps you in build; absence of a review does not.)
    - **PENDING** → CI is stuck past the wait window; investigate, or re-`wait` with a longer `timeout_seconds`.
 
-## QA CHECK — status `QA Requested` (the review/QA pass)
+## QA CHECK — status `QA Testing` (the review/QA pass)
 
 Now QA the change you just built. Switch hats and be your own toughest reviewer — you wrote this, so deliberately hunt the bug or gap you'd be tempted to wave through; don't rubber-stamp. This is a **verify** pass: don't touch product code here — if QA turns up a defect, you fix it back in the build stage (routing below).
 
@@ -239,11 +239,11 @@ You just QA'd this and moved it here. Before a human ever sees it, do one **quic
 2. Sanity-check your PROOF — a quick, skeptical read of whether the evidence you recorded is sufficient and on-target. Audit what you wrote; don't repeat every step — the question is whether the proof you left is enough, not whether you can reproduce it again:
    - Did your QA exercise the **real reported scenario**, or a stand-in? (synthetic data instead of the reported data, the wrong route/workspace, a happy path that sidesteps the actual bug, *a* screenshot that isn't the fixed behaviour.)
    - Is the proof **tied to THIS change** (the PR diff) and complete enough to convince a skeptic — the right before/after, the actual bug condition exercised, and the obvious edge/regression cases the change could break addressed? Or are there gaps?
-   - Your evidence is the QA steps + screenshot you recorded, the PR diff, and the checks — read them critically. If the proof is thin, off-target, or missing, that's a gap in your own QA pass → move back to `QA Requested` to fill it; don't try to reproduce it here.
+   - Your evidence is the QA steps + screenshot you recorded, the PR diff, and the checks — read them critically. If the proof is thin, off-target, or missing, that's a gap in your own QA pass → move back to `QA Testing` to fill it; don't try to reproduce it here.
 3. **Code-review gate — honor stupify's latest word.** A fix can reach you with an unaddressed code-review objection: the build gate can carry a stale `✅` forward over a "trivial"-looking commit that stupify actually re-reviewed and objected to. Read `gh api repos/$REPO/pulls/<N>/reviews` and find stupify's MOST RECENT review (from `exe-dev-github-integration[bot]`, tagged `<!-- stupify:<sha> -->`). **Latest review contains `✅` → gate met. Latest review describes problems with no `✅` (e.g. `oof…`, `one small drift trap 👇`) → that is an UNADDRESSED changes-request: route `DEFECT` below, no matter how clean the QA proof looks.** (Stupify never reviewed the latest code — absent/flaked — is not a block here; QA + the human merge remain gates.)
 4. Record your **`Verdict:`** line in the workpad (with how you verified — `QA INADEQUATE`/`DEFECT` must state the concrete reason), then route:
    - **VERIFIED** — the proof sufficiently shows the real scenario fixed, with the obvious edge/regression cases covered → move to `STG - Ready to merge`. **Do NOT merge.**
-   - **QA INADEQUATE** — the fix may be fine but your proof is insufficient, off-target, or proves the wrong thing → move back to `QA Requested` and produce the missing proof.
+   - **QA INADEQUATE** — the fix may be fine but your proof is insufficient, off-target, or proves the wrong thing → move back to `QA Testing` and produce the missing proof.
    - **DEFECT** — you found a real failure or regression, OR stupify's latest review is an unaddressed changes-request (step 3) → move back to `In Progress` and fix it in the build stage (record the exact repro / the stupify objection).
 
 ## BLOCKED — status `QA blocked` (triage a blocked ticket)
@@ -256,7 +256,7 @@ You hit a blocker during QA / verify and parked the ticket here. Now triage it: 
    - **Genuine human call** — a product/UX decision, an ambiguous or contradictory requirement, an external dependency, or something needing a real person's judgment or credentials you must not handle.
    - **Fail cheap on capability gaps.** If the blocker is a credential / token / account / tool the worker lacks and can't get via an *already-wired* approved path (an env var that is present, a registered `bevops task:run`, an existing skill), confirm that in ONE focused pass — do NOT burn turns hunting workarounds or probing for secrets. Escalate `NEEDS ENGINEER` immediately with the exact thing to provision. Spending many turns to rediscover "I don't have X" is the costly anti-pattern to avoid.
 3. Record your `Verdict:` line and route:
-   - **UNBLOCKED** — you cleared the meta-problem → move back to `QA Requested` and resume verifying (or to `In Progress` if it genuinely needs a code change, with a precise `[codex]` note of what). `Verdict: UNBLOCKED — <what you cleared and how>`.
+   - **UNBLOCKED** — you cleared the meta-problem → move back to `QA Testing` and resume verifying (or to `In Progress` if it genuinely needs a code change, with a precise `[codex]` note of what). `Verdict: UNBLOCKED — <what you cleared and how>`.
    - **NEEDS ENGINEER** — it truly requires a person → move to `Needs Engineer`. `Verdict: NEEDS ENGINEER — <the single concrete decision or action a person must take>`. Make the ask self-contained.
 
 ## VERIFY:PROD — status `Verifying in prod`

@@ -32,7 +32,7 @@ function continuationPrompt(turn: number, maxTurns: number, state: string): stri
 // One worker session for an issue: prep workspace → run turns on a single app-server thread up to max_turns,
 // refreshing the issue between turns and continuing while it stays active. The AGENT drives Linear/git/gh/merge.
 // `host` null = run locally; else the workspace, clone, and codex all live on that ssh worker (an exe.dev VM).
-export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null, getCachedIssue: (id: string) => Issue | null): AgentHandle {
+export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null, getCachedIssue: (id: string) => Issue | null, drainOperatorMsgs: () => string[]): AgentHandle {
   let session: AppServerSession | null = null
   let stopped = false
 
@@ -82,7 +82,9 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
       for (let turn = 1; ; turn++) {
         if (stopped) return { ok: false, error: 'terminated' }
         onEvent({ turn, log: `\n── turn ${turn} ──` })
-        const prompt = turn === 1 ? renderPrompt(cfg.promptTemplate, { attempt, issue: current, workpad }) : continuationPrompt(turn, cfg.agent.maxTurns, current.state)
+        const base = turn === 1 ? renderPrompt(cfg.promptTemplate, { attempt, issue: current, workpad }) : continuationPrompt(turn, cfg.agent.maxTurns, current.state)
+        const pending = drainOperatorMsgs() // operator messages queued via chat while this agent was mid-turn
+        const prompt = pending.length ? `${base}\n\n## Operator messages — sent live while you were working; address these now\n${pending.map((m) => `- ${m}`).join('\n')}` : base
         await session.runTurn(threadId, dir, prompt, `${current.identifier}: ${current.title}`)
         current = await fetchById(cfg, issue.id)
         if (!isActive(cfg, current.state)) break // reached a handoff state (Ready to ship / Needs human / Done) — this ticket is done

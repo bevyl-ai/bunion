@@ -71,7 +71,7 @@ const DEFAULT_COLUMNS: BoardColumn[] = [
   { name: 'QA check', color: '#d99a2b', states: ['QA Requested'] },
   { name: 'Verify QA', color: '#c79a3a', states: ['QA Verify'] },
   { name: 'Blocked', color: '#e0564f', states: ['QA blocked'] },
-  { name: 'Needs human', color: '#d9568c', states: ['Needs human'] },
+  { name: 'Needs engineer', color: '#d9568c', states: ['Needs human'] },
   { name: 'Ready', color: '#3fb27f', states: ['Ready to ship'] },
   { name: 'In Staging', color: '#e3b341', states: ['Merged: In Staging'] },
   { name: 'Verifying prod', color: '#4a9eda', states: ['Verifying in Prod'] },

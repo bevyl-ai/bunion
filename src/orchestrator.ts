@@ -84,6 +84,7 @@ export async function start(workflowPath?: string): Promise<void> {
   log(`default repo ${cfg.repo}${Object.keys(cfg.repos).length ? ` (+${Object.keys(cfg.repos).length} more via repo:<slug> labels)` : ` (repos:{} — route others with a repo:<slug> label)`}`)
 
   const running = new Map<string, RunningEntry>()
+  const pendingChat = new Map<string, string[]>() // issueId → operator msgs queued while the agent was mid-turn; drained into the next continuation turn
   const claimed = new Set<string>()
   const retries = new Map<string, RetryTimer>()
   let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
@@ -307,7 +308,7 @@ export async function start(workflowPath?: string): Promise<void> {
         saveTokens()
       }
       if (e.rateLimits) lastRateLimits = e.rateLimits // newest coding-agent rate-limit snapshot for the dashboard
-    }, threadRecs.get(issue.id)?.threadId ?? null, (id) => lastBoard.find((i) => i.id === id || i.identifier === id) ?? null)
+    }, threadRecs.get(issue.id)?.threadId ?? null, (id) => lastBoard.find((i) => i.id === id || i.identifier === id) ?? null, () => { const q = pendingChat.get(issue.id) ?? []; pendingChat.delete(issue.id); return q })
     void entry.handle.done.then(async (outcome) => {
       if (running.get(issue.id) !== entry) return // already terminated by reconcile
       running.delete(issue.id)
@@ -457,7 +458,7 @@ export async function start(workflowPath?: string): Promise<void> {
       rateLimits: lastRateLimits,
       secondsRunning: Math.round((endedRuntimeMs + [...running.values()].reduce((s, e) => s + (Date.now() - e.startedAt), 0)) / 1000),
       roles: cfg.roles.map(roleItem),
-      columns: cfg.boardColumns.map((c) => ({ name: c.name, c: c.color, states: c.states })),
+      columns: cfg.boardColumns.map((c) => ({ name: c.name, c: c.color, states: c.states, inert: !c.states.some((s) => isActive(s)) })),
     }
   }
   // One chat turn against a persisted thread (a ticket OR a pool role): resume it on its worker, run the operator's
@@ -515,7 +516,17 @@ export async function start(workflowPath?: string): Promise<void> {
     }
     const issue = lastBoard.find((i) => i.identifier === identifier)
     if (!issue) return { ok: false, msg: 'ticket not on the board' }
-    if (running.has(issue.id)) return { ok: false, msg: 'the agent is mid-run — chat once it hands off / is idle' }
+    if (running.has(issue.id)) {
+      // The agent owns the codex thread mid-turn — a concurrent chat turn would collide. Queue the message and inject
+      // it into the agent's next continuation turn; echo it to the transcript so the operator sees it landed.
+      const q = pendingChat.get(issue.id) ?? []
+      q.push(msg)
+      pendingChat.set(issue.id, q)
+      const lg = logs.get(identifier) ?? (logs.set(identifier, []).get(identifier)!)
+      lg.push(`○ ${msg}  ⟨queued — the agent reads this on its next turn⟩`)
+      saveLogs()
+      return { ok: true, msg: 'queued — the agent will pick it up on its next turn' }
+    }
     const rec = threadRecs.get(issue.id)
     if (!rec?.threadId) return { ok: false, msg: 'no thread yet — this ticket has not run' }
     // First-class ticket chat: give it the Linear tools so it can move state + update the workpad on the operator's steering.

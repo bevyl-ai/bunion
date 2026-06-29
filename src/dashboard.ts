@@ -53,7 +53,7 @@ export interface Snapshot {
   rateLimits: RateLimits | null // latest coding-agent rate-limit snapshot (Symphony §13.3), null until codex reports one
   secondsRunning: number // aggregate runtime seconds across all sessions incl. active ones (§13.3)
   roles: RoleItem[] // the pool — ambient roles rendered in the bottom dock
-  columns: { name: string; c: string; states: string[] }[] // dashboard lanes from config (hot-reloaded); see WORKFLOW.md board.columns
+  columns: { name: string; c: string; states: string[]; inert?: boolean }[] // dashboard lanes from config (hot-reloaded); inert = no agent works these (parked/terminal). see WORKFLOW.md board.columns
   gatewayAccounts: string[] // LLM-account tracking: which ChatGPT account each worker routes gpt-5.5 through ("label ×count")
 }
 
@@ -277,6 +277,10 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 .colh i{width:8px;height:8px;border-radius:50%}
 .colh .ct{margin-left:auto;color:var(--mut);font-weight:600;font-variant-numeric:tabular-nums;background:var(--surf2);border:1px solid var(--line);border-radius:20px;min-width:22px;text-align:center;padding:1px 7px;font-size:10.5px;letter-spacing:0}
 .colempty{color:#3a414e;font-size:11.5px;padding:16px 0;text-align:center;border:1px dashed var(--line);border-radius:10px}
+.col.inert{opacity:.82}
+.col.inert .colh{color:var(--mut2)}
+.col.inert .colh i{opacity:.4}
+.parked{font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mut2);background:var(--surf2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;margin-left:8px}
 .card{background:linear-gradient(180deg,var(--surf) 0%,#13151c 100%);border:1px solid var(--line);border-radius:12px;padding:12px 14px;cursor:pointer;overflow:hidden;box-shadow:var(--sh1);transition:transform .15s cubic-bezier(.2,.7,.2,1),border-color .15s,box-shadow .15s}
 .card:hover{border-color:var(--line3);box-shadow:var(--sh2);transform:translateY(-2px)}
 .card.run{border-left:2.5px solid var(--accent);padding-left:11.5px;background:linear-gradient(180deg,#171b24 0%,#13151c 100%);box-shadow:0 0 0 1px #5b8def1f,var(--sh2)}
@@ -437,11 +441,11 @@ let COLS=[
  {name:'QA check',c:'#d99a2b',states:['QA Requested']},
  {name:'Verify QA',c:'#c79a3a',states:['QA Verify']},
  {name:'Blocked',c:'#e0564f',states:['QA blocked']},
- {name:'Needs human',c:'#d9568c',states:['Needs human']},
- {name:'Ready',c:'#3fb27f',states:['Ready to ship']},
- {name:'In Staging',c:'#e3b341',states:['Merged: In Staging']},
+ {name:'Needs engineer',c:'#d9568c',states:['Needs human'],inert:true},
+ {name:'Ready',c:'#3fb27f',states:['Ready to ship'],inert:true},
+ {name:'In Staging',c:'#e3b341',states:['Merged: In Staging'],inert:true},
  {name:'Verifying prod',c:'#4a9eda',states:['Verifying in Prod']},
- {name:'Done',c:'#6b7280',states:['Done']}];
+ {name:'Done',c:'#6b7280',states:['Done'],inert:true}];
 function colIdx(st){var l=(st||'').trim().toLowerCase();for(var i=0;i<COLS.length;i++)for(var j=0;j<COLS[i].states.length;j++)if(COLS[i].states[j].toLowerCase()===l)return i;return -1;}
 function moveItems(it){if(!it)return [];var cur=colIdx(it.state);return COLS.map(function(col,i){return i===cur?null:{a:'move:'+col.states[0],l:'\\u2192 '+col.name,c:'',t:'Move this ticket to '+col.name};}).filter(Boolean);}
 let snap={items:[],cap:0,scope:''};
@@ -454,7 +458,7 @@ function cardHtml(r,now){
  let status;
  if(run) status='<span class="ag t-ago"><i class="dot" style="background:'+dc+'"></i>active '+ago(act)+'</span>';
  else if(r.status==='retrying') status='<span class="ag">&#8635; retry '+(r.retryDueAt?'in '+ago(r.retryDueAt-now):'soon')+'</span>';
- else if(r.state==='Needs human') status='<span class="ag" style="color:#d9568c">&#9888; needs human</span>';
+ else if(r.state==='Needs human') status='<span class="ag" style="color:#d9568c">&#9888; needs engineer</span>';
  else if(r.state==='Done') status='<span class="ag" style="color:#a371f7">&#10004; merged</span>';
  else if(r.state==='Ready to ship') status='<span class="ag" style="color:#3fb27f">&#10004; ready</span>';
  else if(r.status==='handoff') status='<span class="ag">&#10004; in review</span>';
@@ -472,7 +476,7 @@ function cardHtml(r,now){
   '<div class="cfoot">'+status+'<span class="meta">'+tk+tot+'</span></div>'+
  '</div>';
 }
-function colHtml(col,arr,now){return '<div class="col"><div class="colh"><i style="background:'+col.c+'"></i>'+col.name+'<span class="ct">'+arr.length+'</span></div><div class="colcards">'+(arr.length?arr.map(r=>cardHtml(r,now)).join(''):'<div class="colempty">empty</div>')+'</div></div>';}
+function colHtml(col,arr,now){var inert=!!col.inert;return '<div class="col'+(inert?' inert':'')+'"><div class="colh"><i style="background:'+col.c+'"></i>'+col.name+(inert?'<span class="parked" title="the factory does not work these — they wait on a person, the release train, or are already done">parked</span>':'')+'<span class="ct">'+arr.length+'</span></div><div class="colcards">'+(arr.length?arr.map(r=>cardHtml(r,now)).join(''):'<div class="colempty">empty</div>')+'</div></div>';}
 function flip(first){document.querySelectorAll('#board .card[data-id]').forEach(function(c){var id=c.getAttribute('data-id'),f=first[id];if(!f)return;var l=c.getBoundingClientRect(),dx=f.left-l.left,dy=f.top-l.top;if(!dx&&!dy)return;c.classList.add('flipping');c.style.transition='none';c.style.transform='translate('+dx+'px,'+dy+'px)';requestAnimationFrame(function(){c.style.transition='transform .32s cubic-bezier(.2,.7,.2,1)';c.style.transform='';});c.addEventListener('transitionend',function h(){c.style.transition='';c.style.transform='';c.classList.remove('flipping');c.removeEventListener('transitionend',h);});});}
 let lastSig='';
 function render(){

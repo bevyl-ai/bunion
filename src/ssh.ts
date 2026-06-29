@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 
 const homes = new Map<string, string>()
 
@@ -16,6 +16,27 @@ export function sshExec(host: string, command: string, timeoutMs = 180_000): { o
     maxBuffer: 16 * 1024 * 1024,
   })
   return { ok: r.status === 0 && r.error == null, out: (r.stdout ?? '') + (r.stderr ?? '') }
+}
+
+// Async command exec — host set → over ssh on that worker; host null → local shell. Uses spawn (NOT spawnSync) so a
+// long-running command (a `wait`-tool poll, `gh pr checks --watch`) never blocks the daemon's single-threaded event loop.
+export function execAsync(host: string | null, command: string, timeoutMs = 180_000): Promise<{ ok: boolean; out: string; code: number | null }> {
+  return new Promise((resolve) => {
+    const child = host ? spawn('ssh', [...SSH_OPTS, host, command], { timeout: timeoutMs }) : spawn('sh', ['-c', command], { timeout: timeoutMs })
+    let out = ''
+    let bytes = 0
+    const MAX = 8 * 1024 * 1024
+    const cap = (d: Buffer): void => {
+      if (bytes < MAX) {
+        out += d.toString('utf8')
+        bytes += d.length
+      }
+    }
+    child.stdout?.on('data', cap)
+    child.stderr?.on('data', cap)
+    child.on('close', (code) => resolve({ ok: code === 0, out, code }))
+    child.on('error', (e) => resolve({ ok: false, out: `${out}${e instanceof Error ? e.message : String(e)}`, code: null }))
+  })
 }
 
 // Copy a local directory's CONTENTS into a remote directory (the remote dir must already exist).

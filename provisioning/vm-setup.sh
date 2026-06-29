@@ -54,10 +54,12 @@ grep -q 'HOME/.profile' "$HOME/.bash_profile" 2>/dev/null || echo '[ -f "$HOME/.
 #      bevyl-github-media S3 bucket and returns a public URL to embed in the PR.
 #    printf 'export QA_USER=%s\nexport QA_PASS=%s\nexport AWS_ACCESS_KEY_ID=%s\nexport AWS_SECRET_ACCESS_KEY=%s\n' ... >> "$HOME/.profile"
 
-# 7. PostHog query creds for QA agents — production HogQL validation (e.g. ai_run trace-coverage alerts) needs a
-#    read key + project. Injected from the provisioning env when present; idempotent. Without these, such tickets
-#    dead-end on "Needs human: provide a PostHog query credential" (see BEV-3942).
-for k in POSTHOG_PERSONAL_API_KEY POSTHOG_PROJECT_ID POSTHOG_API_HOST NEXT_PUBLIC_POSTHOG_HOST; do
+# 7. Worker credentials, injected from the provisioning env when present (idempotent). Without a needed key, such
+#    tickets correctly dead-end on "Needs human: provide <KEY>". PostHog read key/project = production HogQL
+#    validation (BEV-3942); ELEVENLABS_API_KEY = live voiceover verification (BEV-3975).
+#    NOTE: high-privilege prod secrets (e.g. SUPABASE_SERVICE_ROLE_KEY, which bypasses RLS) are deliberately NOT
+#    injected here — they would hand unattended agents prod-DB god-mode. Add one only with explicit operator sign-off.
+for k in POSTHOG_PERSONAL_API_KEY POSTHOG_PROJECT_ID POSTHOG_API_HOST NEXT_PUBLIC_POSTHOG_HOST ELEVENLABS_API_KEY; do
   v="${!k:-}"
   if [ -n "$v" ] && ! grep -q "^export $k=" "$HOME/.profile" 2>/dev/null; then
     printf 'export %s=%s\n' "$k" "$v" >> "$HOME/.profile"

@@ -521,7 +521,7 @@ function tickLive(){
   const tk=card.querySelector('.t-tok');if(tk)tk.innerHTML=r.tokens?fmtTok(r.tokens.total)+' tok':'';
  });
 }
-function roleColor(n){n=(n||'').toLowerCase();return n==='mechanic'?'#d99a2b':n==='dreamer'?'#b88cd9':n==='journey'?'#3fb29e':'#5b8def';}
+function roleColor(n){n=(n||'').toLowerCase();return n==='mechanic'?'#d99a2b':n==='dreamer'?'#b88cd9':n==='user-advocate'?'#3fb29e':'#5b8def';}
 function pauseToggle(r){return r.paused?'<button class="runbtn" title="resume '+esc(r.name)+'" onclick="postAction(this,\\''+esc(r.name)+'\\',\\'pause\\',event)">&#9654; resume</button>':'<button class="pausebtn-r" title="pause '+esc(r.name)+' (stop its cadence runs)" onclick="postAction(this,\\''+esc(r.name)+'\\',\\'pause\\',event)">&#9208;</button>';}
 function roleCard(r){var live=r.status==='running',paused=!!r.paused,col=roleColor(r.name),dc=paused?'#5a6270':(live?'#3fb27f':'var(--mut2)');
  var cap=r.maxPerDay!=null?r.maxPerDay+(r.granted||0):null;var capped=cap!=null&&r.filedToday>=cap;

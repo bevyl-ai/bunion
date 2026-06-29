@@ -51,6 +51,7 @@ const TOKENS_FILE = join(STATE_DIR, 'tokens.json') // identifier → phase → t
 const LOGS_FILE = join(STATE_DIR, 'logs.json') // identifier → recent transcript lines
 const THREADS_FILE = join(STATE_DIR, 'threads.json') // issue.id / role:<name> → { threadId, host }
 const QUOTA_FILE = join(STATE_DIR, 'role-quota.json') // role name → { day, count } — daily ticket-filing cap, persisted
+const GRANTS_FILE = join(STATE_DIR, 'ticket-grants.json') // identifier → extra token budget granted on top of the hard cap, persisted
 const PAUSED_FILE = join(STATE_DIR, 'paused.json') // operator panic switch — { paused: bool }, persisted so a restart mid-incident stays paused
 
 // One codex thread per ticket / role, persisted (key → thread id + the worker holding its rollout) so the next
@@ -105,6 +106,11 @@ export async function start(workflowPath?: string): Promise<void> {
   const roleLast = new Map<string, number>() // role name → last completed run (ms)
   const roleQuota = new Map<string, QuotaRec>(Object.entries(readJson<Record<string, QuotaRec>>(QUOTA_FILE, {})))
   const saveQuota = throttledWriter(QUOTA_FILE, () => Object.fromEntries(roleQuota))
+  // Per-ticket token-budget grants (identifier → extra tokens on top of deadlock.hardTokenCap), persisted. The operator
+  // "bumps" a capped ticket to give it more headroom WITHOUT erasing its cumulative spend; effectiveCap folds it in.
+  const ticketGrants = new Map<string, number>(Object.entries(readJson<Record<string, number>>(GRANTS_FILE, {})))
+  const saveGrants = throttledWriter(GRANTS_FILE, () => Object.fromEntries(ticketGrants))
+  const effectiveCap = (identifier: string): number => cfg.deadlock.hardTokenCap + (ticketGrants.get(identifier) ?? 0)
   const countToday = (name: string): number => {
     const r = roleQuota.get(name)
     return r && r.day === utcDay() ? r.count : 0
@@ -538,6 +544,28 @@ export async function start(workflowPath?: string): Promise<void> {
     if (!issue) return { ok: false, msg: 'ticket not on the board' }
     const host = placement.get(issue.id) ?? null
     try {
+      if (action === 'bump') {
+        // Operator budget bump: grant another hard-cap's worth of headroom to THIS ticket (kept cumulative — its spend
+        // is not erased), so a ticket parked by the token cap can finish. effectiveCap folds the grant into the sweep.
+        const inc = cfg.deadlock.hardTokenCap
+        ticketGrants.set(identifier, (ticketGrants.get(identifier) ?? 0) + inc)
+        saveGrants()
+        const cap = effectiveCap(identifier)
+        log(`action: ${identifier} budget +${Math.round(inc / 1e6)}M → ${Math.round(cap / 1e6)}M cap (operator)`)
+        const s = norm(issue.state)
+        if (s === 'needs human' || s === 'qa blocked') {
+          // It was parked (likely by the cap) — re-open to In Progress with a fresh no-progress clock so it can use the
+          // new headroom; the thread resumes on the next dispatch.
+          stopRun(issue.id)
+          progress.delete(issue.id)
+          notesFetched.delete(issue.id)
+          summaries.delete(issue.identifier)
+          await moveIssue(cfg, issue.id, 'In Progress')
+          scheduleRetry(issue.id, issue.identifier, 1, true)
+          return { ok: true, msg: `+${Math.round(inc / 1e6)}M budget → re-opened to In Progress` }
+        }
+        return { ok: true, msg: `+${Math.round(inc / 1e6)}M budget (cap now ${Math.round(cap / 1e6)}M)` }
+      }
       if (action === 'restart') {
         terminate(issue.id, false)
         removeWorkspace(cfg, issue.identifier, host)
@@ -783,10 +811,11 @@ export async function start(workflowPath?: string): Promise<void> {
         progress.set(i.id, pr)
         if (isActive(i.state) && !isTerminal(i.state)) {
           const total = grandTotal(tokens, i.identifier)
-          if (total >= cfg.deadlock.hardTokenCap) {
-            // Absolute blast-radius cap: even a ticket that keeps reaching new states (which resets the no-progress
-            // clock) must never burn unbounded. Straight to Needs human — 200M is far past any honest ticket.
-            stuck.push({ issue: i, target: 'Needs human', reason: `burned ${Math.round(total / 1e6)}M tokens — hit the ${Math.round(cfg.deadlock.hardTokenCap / 1e6)}M hard per-ticket cap` })
+          const cap = effectiveCap(i.identifier)
+          if (total >= cap) {
+            // Absolute blast-radius cap (plus any operator budget bump): even a ticket that keeps reaching new states
+            // (which resets the no-progress clock) must never burn unbounded. Straight to Needs human.
+            stuck.push({ issue: i, target: 'Needs human', reason: `burned ${Math.round(total / 1e6)}M tokens — hit the ${Math.round(cap / 1e6)}M per-ticket cap` })
           } else {
             // No-progress deadlock: a ticket deadlocking while IN `QA blocked` means the triage itself is looping →
             // straight to Needs human. Anywhere else: 1st offense → QA blocked (let it triage), 2nd → Needs human.

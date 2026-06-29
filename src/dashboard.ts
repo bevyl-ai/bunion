@@ -426,7 +426,7 @@ const PRI={1:'Urgent',2:'High',3:'Medium',4:'Low'};
 var A_REWORK={a:'to-build',l:'Send to coding',c:'',t:'Move to In Progress so a fresh agent (re)writes the code and updates the PR'};
 function actionList(it){if(!it||it.state==='Done')return [];
  if(it.status==='running')return [{a:'restart',l:'Restart this agent',c:'danger',t:'Stop the current agent, wipe its workspace, and re-run this phase from scratch'},A_REWORK];
- if(it.state==='Needs human')return [{a:'to-qa',l:'Re-run QA',c:'go',t:'Send back to QA Requested to re-verify'},A_REWORK];
+ if(it.state==='Needs human')return [{a:'bump',l:'Bump budget & reopen',c:'go',t:'Grant another token budget on top of the cap and re-open to In Progress (use for a ticket parked by the token cap)'},{a:'to-qa',l:'Re-run QA',c:'go',t:'Send back to QA Requested to re-verify'},A_REWORK];
  if(it.state==='Ready to ship')return [{a:'to-qa',l:'Re-verify before ship',c:'go',t:'Send back through QA before it ships'},A_REWORK];
  return [{a:'to-qa',l:'Run QA on it',c:'go',t:'Move to QA Requested and verify with a fresh QA agent'},A_REWORK];}
 function abtn(id,d){return '<button class="mbtn '+(d.c||'')+'" title="'+(d.t||'')+'" onclick="modalAct(\\''+id+'\\',\\''+d.a+'\\',event)">'+d.l+'</button>';}

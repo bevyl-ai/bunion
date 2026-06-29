@@ -34,9 +34,7 @@ roles:                               # the pool — ambient agents on a clock, B
       1. Find what's broken. START with the **Factory state** block above — the brain's live errors / deadlocks /
          token burns + the stuck list, which you can't see from a worker; it's your primary signal for bunion's own
          health (a runaway burn, a repeating error, a wedged ticket). Then also check: red CI on `main`
-         (gh run list --branch main --limit 15), flaky/failing tests, stale or vulnerable dependencies, and PRODUCT
-         health in PostHog — you have HogQL via the env (POSTHOG_PERSONAL_API_KEY + POSTHOG_PROJECT_ID + POSTHOG_API_HOST):
-         query for new error spikes, broken funnels, or regressions in key events, and file what's concretely actionable.
+         (gh run list --branch main --limit 15), flaky/failing tests, stale or vulnerable dependencies.
       2. For each concrete, fixable problem, file ONE Linear ticket (team BEV), labeled BOTH `dark-factory` and `mechanic`, through the
          linear_graphql tool — clear title, acceptance criteria, sensible priority. DEDUPE first: search open issues;
          never file a duplicate or re-file something already queued.

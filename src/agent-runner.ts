@@ -25,8 +25,8 @@ function isActive(cfg: Config, state: string): boolean {
   return cfg.tracker.activeStates.some((s) => s.trim().toLowerCase() === n)
 }
 
-function continuationPrompt(turn: number, maxTurns: number): string {
-  return `Continuation guidance: the previous turn ended but the ticket is still in an active state, so work remains. This is continuation turn #${turn} of ${maxTurns}. Resume from the current workspace and workpad state; the thread already holds your prior instructions, so do not restate them. Keep advancing the workflow for this ticket and only stop when the ticket reaches a handoff state or you are truly blocked.`
+function continuationPrompt(turn: number, maxTurns: number, state: string): string {
+  return `Continuation — turn #${turn} of ${maxTurns}, same thread, same ticket. The ticket is now in \`${state}\`, so work the stage that matches that status from your original instructions. Resume from the workspace + workpad and what you've already done — don't restate or redo finished work. Keep carrying the ticket forward through its stages; stop only when it reaches a handoff state (Ready to ship / Needs human) or you're truly blocked.`
 }
 
 // One worker session for an issue: prep workspace → run turns on a single app-server thread up to max_turns,
@@ -75,20 +75,18 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
         log(`${issue.identifier}: thread resume failed (${e instanceof Error ? e.message : String(e)}); starting fresh`)
         threadId = await session.startThread(dir)
       }
-      onEvent({ threadId }) // report the resolved id so the orchestrator persists it for the next phase + chat
-      const startPhase = phaseOf(cfg, current.state)
+      onEvent({ threadId }) // report the resolved id so the orchestrator persists it for the next session + chat
       // Fetch the prior workpad ONCE and fold it into the dispatch prompt, so the agent starts with its notes instead
       // of spending turns + Linear reads pulling them back.
       const workpad = await fetchWorkpad(cfg, issue.id).catch(() => null)
       for (let turn = 1; ; turn++) {
         if (stopped) return { ok: false, error: 'terminated' }
         onEvent({ turn, log: `\n── turn ${turn} ──` })
-        const prompt = turn === 1 ? renderPrompt(cfg.promptTemplate, { attempt, issue: current, workpad }) : continuationPrompt(turn, cfg.agent.maxTurns)
+        const prompt = turn === 1 ? renderPrompt(cfg.promptTemplate, { attempt, issue: current, workpad }) : continuationPrompt(turn, cfg.agent.maxTurns, current.state)
         await session.runTurn(threadId, dir, prompt, `${current.identifier}: ${current.title}`)
         current = await fetchById(cfg, issue.id)
-        if (!isActive(cfg, current.state)) break // handed off to a downstream state — this worker is done
-        if (phaseOf(cfg, current.state) !== startPhase) break // crossed into a new phase — a FRESH agent runs it
-        if (turn >= cfg.agent.maxTurns) break // graceful cap; the orchestrator may dispatch a fresh worker
+        if (!isActive(cfg, current.state)) break // reached a handoff state (Ready to ship / Needs human / Done) — this ticket is done
+        if (turn >= cfg.agent.maxTurns) break // graceful per-session cap; the orchestrator resumes this same thread next poll if the ticket is still active
       }
       return { ok: true }
     } catch (e) {

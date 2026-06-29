@@ -1,8 +1,9 @@
 ---
 repo: bevyl-ai/bevyl.ai              # default repo — a ticket targets this unless it carries a `repo:<slug>` Linear label
                                      # mapped in `repos` below. Workers resolve it per-ticket via .bunion-repo (vm-setup.sh).
-repos: {}                            # additional repos keyed by the repo:<slug> label slug, e.g. { remover: bevyl-ai/remover }.
-                                     # Empty for now; add an entry + label a ticket `repo:<slug>` to drive another repo.
+repos:                               # additional repos keyed by the repo:<slug> Linear label — label a ticket repo:<slug> to route it
+  bunion: bevyl-ai/bunion            # the factory's own repo (self-hosting)
+  stupify: Octember/stupif.ai        # the code-reviewer (Octember org — the bevyl-web GH app/proxy must be granted access)
 tracker:
   kind: linear
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project

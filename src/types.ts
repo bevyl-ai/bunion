@@ -109,7 +109,7 @@ export interface Config {
   roles: Role[] // the pool — ambient roles run on a cadence beside the per-ticket pipeline
   worker: { sshHosts: string[]; maxPerHost: number } // [] = run agents locally; else fan out across these hosts
   codex: CodexConfig
-  deadlock: { tokens: number; stallMs: number; hardStallMs: number } // auto-block a ticket burning resources with no forward progress
+  deadlock: { tokens: number; stallMs: number; hardStallMs: number; hardTokenCap: number } // auto-stop a runaway: no-progress burn, OR an absolute per-ticket total-token ceiling
   dashboardPort: number | null // status dashboard HTTP port (server.port / BUNION_PORT); null = off
   boardColumns: BoardColumn[] // dashboard lanes (name + colour + states), from WORKFLOW.md board.columns; hot-reloaded
   repo: string // default GitHub repo (e.g. bevyl-ai/bevyl.ai); a ticket's repo:<slug> label can route elsewhere via repos

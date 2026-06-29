@@ -119,8 +119,9 @@ codex:
   read_timeout_ms: 15000                 # steady-state sync request/response timeout
   init_timeout_ms: 60000                 # codex cold-boot handshake — separate + generous; under shared-CPU load on a fresh
                                          # VM the initialize can exceed 15s, so a tight read timeout caused restart retry-storms
-deadlock:                                # a ticket looping without progress is auto-moved to `QA blocked` (the blocked phase triages it)
-  tokens: 20000000                       # 20M tokens spent with no NEW pipeline state reached (once stalled ≥ stall_ms) → blocked
+deadlock:                                # auto-stop a runaway ticket — two independent triggers, both terminate the agent:
+  hard_token_cap: 200000000              # ABSOLUTE per-ticket total-spend ceiling → `Needs human`, no matter how much "progress" it claims (the blast-radius cap)
+  tokens: 20000000                       # no-progress trigger: 20M tokens with no NEW pipeline state reached (once stalled ≥ stall_ms) → `QA blocked`, then `Needs human`
   stall_ms: 1800000                      # 30min — min time with no forward progress before the token rule trips
   hard_stall_ms: 5400000                 # 90min with no forward progress → blocked regardless of token spend. 2nd deadlock → `Needs human`
 ---

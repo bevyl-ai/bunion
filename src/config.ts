@@ -148,6 +148,7 @@ export function loadConfig(path?: string): Config {
       tokens: num(dl.tokens, 20_000_000), // tokens burned with no new pipeline state (within stallMs) → blocked
       stallMs: num(dl.stall_ms, 30 * 60_000), // ...with no forward progress for at least this long
       hardStallMs: num(dl.hard_stall_ms, 90 * 60_000), // OR this long with no progress, regardless of token spend
+      hardTokenCap: num(dl.hard_token_cap, 200_000_000), // absolute per-ticket total-spend ceiling → Needs human, regardless of progress (blast-radius cap)
     },
     dashboardPort: portRaw && Number.isFinite(Number(portRaw)) ? Number(portRaw) : null,
     boardColumns: parseColumns(obj(fm.board).columns),

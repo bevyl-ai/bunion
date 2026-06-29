@@ -777,11 +777,17 @@ export async function start(workflowPath?: string): Promise<void> {
         }
         progress.set(i.id, pr)
         if (isActive(i.state) && !isTerminal(i.state)) {
-          const reason = deadlockReason(grandTotal(tokens, i.identifier) - pr.tokensAtProgress, now - pr.since, cfg.deadlock)
-          // A ticket deadlocking while IN `QA blocked` means the blocked phase itself is looping — its burn used to be
-          // exempt from this sweep entirely (the runaway hole). The last automated stop has failed, so escalate it
-          // straight to Needs human. Anywhere else: 1st offense → QA blocked (let the blocked phase try), 2nd → Needs human.
-          if (reason) stuck.push({ issue: i, target: norm(i.state) === 'qa blocked' || deadlocked.has(i.id) ? 'Needs human' : 'QA blocked', reason })
+          const total = grandTotal(tokens, i.identifier)
+          if (total >= cfg.deadlock.hardTokenCap) {
+            // Absolute blast-radius cap: even a ticket that keeps reaching new states (which resets the no-progress
+            // clock) must never burn unbounded. Straight to Needs human — 200M is far past any honest ticket.
+            stuck.push({ issue: i, target: 'Needs human', reason: `burned ${Math.round(total / 1e6)}M tokens — hit the ${Math.round(cfg.deadlock.hardTokenCap / 1e6)}M hard per-ticket cap` })
+          } else {
+            // No-progress deadlock: a ticket deadlocking while IN `QA blocked` means the triage itself is looping →
+            // straight to Needs human. Anywhere else: 1st offense → QA blocked (let it triage), 2nd → Needs human.
+            const reason = deadlockReason(total - pr.tokensAtProgress, now - pr.since, cfg.deadlock)
+            if (reason) stuck.push({ issue: i, target: norm(i.state) === 'qa blocked' || deadlocked.has(i.id) ? 'Needs human' : 'QA blocked', reason })
+          }
         }
         const s = norm(i.state)
         if ((s === 'qa blocked' || s === 'needs human' || s === 'ready to ship') && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
@@ -826,7 +832,7 @@ export async function start(workflowPath?: string): Promise<void> {
 // A ticket is deadlocked when it keeps spending tokens/time without advancing to a pipeline state it hasn't
 // reached this lifecycle (e.g. oscillating In Progress ↔ QA Requested, or a fix that never lands). Returns a
 // human-readable reason or null. Pure so it's unit-testable.
-export function deadlockReason(tokensSinceProgress: number, msSinceProgress: number, dl: Config['deadlock']): string | null {
+export function deadlockReason(tokensSinceProgress: number, msSinceProgress: number, dl: Omit<Config['deadlock'], 'hardTokenCap'>): string | null {
   const mins = Math.round(msSinceProgress / 60_000)
   if (msSinceProgress >= dl.hardStallMs) return `stuck ${mins}min with no forward progress`
   if (tokensSinceProgress >= dl.tokens && msSinceProgress >= dl.stallMs)

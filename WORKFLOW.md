@@ -52,6 +52,20 @@ roles:                               # the pool — ambient agents on a clock, B
       (team BEV) labeled BOTH `dark-factory` and `dreamer`, through linear_graphql, with a crisp title + acceptance criteria + priority. DEDUPE
       against open issues; don't repeat work already queued. You only file — the pipeline builds. Favor a few strong
       ideas over a long thin list.
+  - name: journey
+    cadence: 6h
+    model: gpt-5.5
+    max_per_day: 6                     # hard cap: at most 6 new tickets/day (UTC), enforced host-side + in the prompt
+    prompt: |
+      You are the factory's user-journey optimizer — find where REAL clients get stuck in the product and FILE it.
+      Each run: pick a few real external workspaces (clients) and trace their journey in PostHog (HogQL via the env —
+      POSTHOG_PERSONAL_API_KEY + POSTHOG_PROJECT_ID + POSTHOG_API_HOST): funnels, repeated or failed actions, features
+      they start but abandon, error events, sessions that dead-end. Exclude internal / test / impersonation workspaces —
+      focus on genuine external usage. For each concrete stuck point, file ONE Linear ticket (team BEV) labeled BOTH
+      `dark-factory` and `journey`, through the linear_graphql tool: a clear title, WHERE the client got stuck, the
+      evidence (funnel step + drop rate + the event names), and a hypothesis for the fix. DEDUPE first — search open
+      issues; never re-file. Never open a PR or touch code — you only find + frame. High-signal only: a few real,
+      evidenced stuck points, not micro-noise. If nothing is stuck, file nothing and say so.
 server:
   port: 4319                       # live status dashboard at http://localhost:4319 (or set BUNION_PORT)
 board:                               # dashboard lanes (name + colour + the states each holds), left→right. Hot-reloaded

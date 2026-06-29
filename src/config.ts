@@ -151,6 +151,7 @@ export function loadConfig(path?: string): Config {
     },
     dashboardPort: portRaw && Number.isFinite(Number(portRaw)) ? Number(portRaw) : null,
     boardColumns: parseColumns(obj(fm.board).columns),
+    repo: str(fm.repo) ?? process.env.REPO ?? 'bevyl-ai/bevyl.ai', // the single repo bunion drives (also the workers' $REPO)
     promptTemplate: prompt,
     workflowPath,
   }

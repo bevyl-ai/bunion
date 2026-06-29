@@ -112,6 +112,7 @@ export interface Config {
   deadlock: { tokens: number; stallMs: number; hardStallMs: number } // auto-block a ticket burning resources with no forward progress
   dashboardPort: number | null // status dashboard HTTP port (server.port / BUNION_PORT); null = off
   boardColumns: BoardColumn[] // dashboard lanes (name + colour + states), from WORKFLOW.md board.columns; hot-reloaded
+  repo: string // the single GitHub repo bunion operates on (e.g. bevyl-ai/bevyl.ai); also exported to workers as $REPO
   promptTemplate: string
   workflowPath: string
 }

@@ -77,6 +77,7 @@ export async function start(workflowPath?: string): Promise<void> {
   process.on('unhandledRejection', (e) => warn(`unhandled rejection: ${e instanceof Error ? e.message : String(e)}`))
   let cfg = loadConfig(workflowPath)
   validateConfig(cfg)
+  log(`repo ${cfg.repo} (the only repo supported for now)`)
 
   const running = new Map<string, RunningEntry>()
   const claimed = new Set<string>()

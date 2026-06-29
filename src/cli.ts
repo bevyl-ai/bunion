@@ -58,7 +58,7 @@ async function main(): Promise<void> {
       try {
         const cfg = loadConfig()
         validateConfig(cfg)
-        console.log(`ok       WORKFLOW.md (scope=${cfg.tracker.team ?? cfg.tracker.projectSlug})`)
+        console.log(`ok       WORKFLOW.md (scope=${cfg.tracker.team ?? cfg.tracker.projectSlug}, repo=${cfg.repo})`)
       } catch (e) {
         console.log(`MISSING  WORKFLOW.md — ${e instanceof Error ? e.message : e}`)
       }

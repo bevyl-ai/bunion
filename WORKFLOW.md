@@ -1,4 +1,6 @@
 ---
+repo: bevyl-ai/bevyl.ai              # the ONE repo bunion operates on. Single-repo for now — every dark-factory ticket
+                                     # targets it, and the worker VMs export it as $REPO (see provisioning/vm-setup.sh).
 tracker:
   kind: linear
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project

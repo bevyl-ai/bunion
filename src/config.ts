@@ -72,7 +72,7 @@ const DEFAULT_COLUMNS: BoardColumn[] = [
   { name: 'Verify QA', color: '#c79a3a', states: ['QA Verify'] },
   { name: 'Blocked', color: '#e0564f', states: ['QA blocked'] },
   { name: 'Needs Engineer', color: '#d9568c', states: ['Needs Engineer'] },
-  { name: 'Ready', color: '#3fb27f', states: ['Ready to ship'] },
+  { name: 'Ready', color: '#3fb27f', states: ['Ready to merge'] },
   { name: 'In Staging', color: '#e3b341', states: ['Merged: In Staging'] },
   { name: 'Verifying prod', color: '#4a9eda', states: ['Verifying in Prod'] },
   { name: 'Done', color: '#6b7280', states: ['Done'] },
@@ -180,7 +180,7 @@ export function repoFor(cfg: Config, labels: string[]): string {
 }
 
 // Which pipeline phase a state belongs to. Unmapped states are their own phase, so crossing into one (e.g. a
-// build worker setting `Ready to ship`) still reads as a handoff. Matching ignores case + surrounding whitespace.
+// build worker setting `Ready to merge`) still reads as a handoff. Matching ignores case + surrounding whitespace.
 export function phaseOf(cfg: Config, state: string): string {
   const n = state.trim().toLowerCase()
   for (const [phase, states] of Object.entries(cfg.phases)) {

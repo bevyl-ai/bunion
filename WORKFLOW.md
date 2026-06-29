@@ -9,7 +9,7 @@ tracker:
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project
   api_key: $LINEAR_API_KEY
   required_labels: [dark-factory]    # opt-in: only tickets carrying this label enter the factory
-  active_states: [Triage, Backlog, Todo, In Progress, QA Requested, QA Verify, QA blocked, Verifying in prod]   # Ready to ship + "Merged: In Staging" + Needs Engineer are NOT active (humans / the release train move those)
+  active_states: [Triage, Backlog, Todo, In Progress, QA Requested, QA Verify, QA blocked, Verifying in prod]   # Ready to merge + "Merged: In Staging" + Needs Engineer are NOT active (humans / the release train move those)
   terminal_states: [Done, Canceled, Cancelled, Duplicate, Needs Engineer]   # Needs Engineer = the factory stops + a person must decide
 polling:
   interval_ms: 30000              # poll every 30s (was 10s): 3x fewer Linear reads; the dashboard stays plenty fresh
@@ -77,7 +77,7 @@ board:                               # dashboard lanes (name + colour + the stat
     - { name: Verify QA,      color: '#c79a3a', states: [QA Verify] }
     - { name: Blocked,        color: '#e0564f', states: [QA blocked] }
     - { name: Needs Engineer, color: '#d9568c', states: [Needs Engineer] }
-    - { name: Ready,          color: '#3fb27f', states: [Ready to ship] }
+    - { name: Ready,          color: '#3fb27f', states: [Ready to merge] }
     - { name: In Staging,     color: '#e3b341', states: ['Merged: In Staging'] }
     - { name: Verifying prod, color: '#4a9eda', states: [Verifying in Prod] }
     - { name: Done,           color: '#6b7280', states: [Done] }
@@ -176,7 +176,7 @@ Linear tools (we are rate-limited — use sparingly): `linear_read` returns a ti
 - **Honor operator messages in this thread.** If the operator has messaged you earlier in this conversation, treat it as top-priority steering — address it this phase, above the default routine.
 - Prefix every GitHub comment you author with `[codex]`.
 - Minimal, in-scope changes that match the surrounding code. Out-of-scope finds → file a separate `Backlog` issue (clear title/acceptance criteria, same team, `related` link), don't widen scope.
-- Advance the ticket's Linear status as you clear each stage's bar (In Progress → QA Requested → QA Verify → Ready to ship), and only when that bar is genuinely met.
+- Advance the ticket's Linear status as you clear each stage's bar (In Progress → QA Requested → QA Verify → Ready to merge), and only when that bar is genuinely met.
 - Do every stage for real — don't skip one or rubber-stamp. When you reach the QA / verify stages, switch hats and check your OWN work as ruthlessly as an outside reviewer would; catching the bug you'd be tempted to wave through is the whole point of running them.
 - **Avoid loops and churn.** If this ticket is going in circles — you've already run this phase, or it keeps coming back with the same failure or blocker — don't re-run it: route it to `Needs Engineer` with a one-line why. Forward progress or escalate; never spin.
 - **Never hand-poll — use the `wait` tool.** It polls host-side and spends ZERO of your tokens. After a push, call `wait` — it waits for the whole **build gate** (CI checks AND stupify's review together) and returns ONE verdict to act on: PASS / CI_FAILED / CHANGES_REQUESTED / STUPIFY_FLAKED. For any other async wait (a deploy, a custom condition) use `wait { command, until: "exit_zero"|"stdout_matches", pattern }`. Looping `gh pr checks` / `gh api …` + `sleep` by hand burns tokens for nothing — never do it.
@@ -241,7 +241,7 @@ You just QA'd this and moved it here. Before a human ever sees it, do one **quic
    - Your evidence is the QA steps + screenshot you recorded, the PR diff, and the checks — read them critically. If the proof is thin, off-target, or missing, that's a gap in your own QA pass → move back to `QA Requested` to fill it; don't try to reproduce it here.
 3. **Code-review gate — honor stupify's latest word.** A fix can reach you with an unaddressed code-review objection: the build gate can carry a stale `✅` forward over a "trivial"-looking commit that stupify actually re-reviewed and objected to. Read `gh api repos/$REPO/pulls/<N>/reviews` and find stupify's MOST RECENT review (from `exe-dev-github-integration[bot]`, tagged `<!-- stupify:<sha> -->`). **Latest review contains `✅` → gate met. Latest review describes problems with no `✅` (e.g. `oof…`, `one small drift trap 👇`) → that is an UNADDRESSED changes-request: route `DEFECT` below, no matter how clean the QA proof looks.** (Stupify never reviewed the latest code — absent/flaked — is not a block here; QA + the human merge remain gates.)
 4. Record your **`Verdict:`** line in the workpad (with how you verified — `QA INADEQUATE`/`DEFECT` must state the concrete reason), then route:
-   - **VERIFIED** — the proof sufficiently shows the real scenario fixed, with the obvious edge/regression cases covered → move to `Ready to ship`. **Do NOT merge.**
+   - **VERIFIED** — the proof sufficiently shows the real scenario fixed, with the obvious edge/regression cases covered → move to `Ready to merge`. **Do NOT merge.**
    - **QA INADEQUATE** — the fix may be fine but your proof is insufficient, off-target, or proves the wrong thing → move back to `QA Requested` and produce the missing proof.
    - **DEFECT** — you found a real failure or regression, OR stupify's latest review is an unaddressed changes-request (step 3) → move back to `In Progress` and fix it in the build stage (record the exact repro / the stupify objection).
 
@@ -273,9 +273,9 @@ The release train just fast-forwarded `prod` to include this ticket's change —
    - **REGRESSION** — live but it broke something in prod (you reproduced it or saw a clear new error spike) → move to `In Progress` with the exact prod symptom + repro, flagged as a prod regression.
    - **CANNOT VERIFY** — you genuinely lack the access/observability to confirm → move to `Needs Engineer` with the exact check a person must run.
 
-## Ready to ship / Needs Engineer / Done / Canceled / Duplicate
+## Ready to merge / Needs Engineer / Done / Canceled / Duplicate
 
-Not your job — stop and do nothing. A human merges `Ready to ship`; bunion does not auto-merge.
+Not your job — stop and do nothing. A human merges `Ready to merge`; bunion does not auto-merge.
 
 ## Guardrails
 

@@ -26,7 +26,7 @@ roles:                               # the pool — ambient agents on a clock, B
                                      # on its cadence with a persistent thread + its own model, FILING tickets (never
                                      # fixing). Add a row to add a role; the engine is generic — nothing else changes.
   - name: mechanic
-    cadence: 30m
+    cadence: 2h
     model: gpt-5.5                      # the gateway only serves gpt-5.5 today; gpt-5 / -codex return empty turns
     prompt: |
       You are the factory's mechanic — keep the repo (bevyl-ai/bevyl.ai) and the factory itself healthy by FILING the

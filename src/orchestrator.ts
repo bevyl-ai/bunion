@@ -54,6 +54,7 @@ const THREADS_FILE = join(STATE_DIR, 'threads.json') // issue.id / role:<name> �
 const QUOTA_FILE = join(STATE_DIR, 'role-quota.json') // role name → { day, count } — daily ticket-filing cap, persisted
 const GRANTS_FILE = join(STATE_DIR, 'ticket-grants.json') // identifier → extra token budget granted on top of the hard cap, persisted
 const PAUSED_FILE = join(STATE_DIR, 'paused.json') // operator panic switch — { paused: bool }, persisted so a restart mid-incident stays paused
+const ROLE_PAUSED_FILE = join(STATE_DIR, 'role-paused.json') // per-role pause — [name,…] poolers stopped independently of the global pause, persisted
 
 // One codex thread per ticket / role, persisted (key → thread id + the worker holding its rollout) so the next
 // phase and operator chat resume the same conversation, and a resume lands on the right worker after a restart.
@@ -94,6 +95,8 @@ export async function start(workflowPath?: string): Promise<void> {
   // daemon + dashboard stay up so you can watch + resume. Persisted, so a restart mid-incident does NOT un-pause.
   let paused = readJson<{ paused: boolean }>(PAUSED_FILE, { paused: false }).paused
   const savePaused = (v: boolean): void => writeJson(PAUSED_FILE, { paused: v })
+  const rolePaused = new Set<string>(readJson<string[]>(ROLE_PAUSED_FILE, [])) // pool roles the operator has individually paused
+  const saveRolePaused = (): void => writeJson(ROLE_PAUSED_FILE, [...rolePaused])
 
   // Persistent state under ~/.bunion, loaded once and re-saved (coalesced) as it changes, so numbers + transcripts
   // survive a daemon restart. `get` is read at write time, so callers just mutate then call save*().
@@ -527,6 +530,16 @@ export async function start(workflowPath?: string): Promise<void> {
       setPaused(!paused)
       return { ok: true, msg: paused ? 'factory paused' : 'factory resumed' }
     }
+    if (action === 'pause') {
+      // Per-role pause: stop THIS pool role's cadence runs independently of the global factory pause; persisted.
+      if (!cfg.roles.some((r) => r.name === identifier)) return { ok: false, msg: `unknown role: ${identifier}` }
+      if (rolePaused.has(identifier)) rolePaused.delete(identifier)
+      else rolePaused.add(identifier)
+      saveRolePaused()
+      const now = rolePaused.has(identifier)
+      log(`action: ${identifier} ${now ? 'paused' : 'resumed'} (operator)`)
+      return { ok: true, msg: `${identifier} ${now ? 'paused' : 'resumed'}` }
+    }
     if (action === 'grant') {
       // Operator top-up: extend a capped pool role by another day's allowance for today only (resets at UTC midnight).
       const role = cfg.roles.find((r) => r.name === identifier)
@@ -546,6 +559,7 @@ export async function start(workflowPath?: string): Promise<void> {
       const i = cfg.roles.findIndex((r) => r.name === identifier)
       if (i < 0) return { ok: false, msg: `unknown role: ${identifier}` }
       if (paused) return { ok: false, msg: 'factory is paused — resume first' }
+      if (rolePaused.has(identifier)) return { ok: false, msg: `${identifier} is paused — resume it first` }
       if (roleRunning.has(identifier)) return { ok: false, msg: `${identifier} is already running` }
       dispatchRole(cfg.roles[i]!, i, true)
       return { ok: true, msg: `${identifier} run started` }
@@ -646,6 +660,7 @@ export async function start(workflowPath?: string): Promise<void> {
   }
   const dispatchRole = (role: Role, i: number, force = false): void => {
     if (paused) return // operator panic switch — no role runs while paused
+    if (rolePaused.has(role.name)) return // this pooler is individually paused by the operator
     if (roleRunning.has(role.name)) return // last cadence's run still going — skip this tick
     const quota = makeQuota(role)
     if (!force && quota.remaining() <= 0) {
@@ -707,6 +722,7 @@ export async function start(workflowPath?: string): Promise<void> {
       filedToday: countToday(role.name),
       maxPerDay: role.maxPerDay,
       granted: grantedToday(role.name),
+      paused: rolePaused.has(role.name),
     }
   }
 

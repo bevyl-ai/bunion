@@ -38,6 +38,7 @@ export interface RoleItem {
   filedToday: number
   maxPerDay: number | null
   granted: number // operator top-up granted for today (adds to maxPerDay)
+  paused: boolean // operator paused THIS role (independent of the global factory pause)
 }
 
 export interface Snapshot {
@@ -329,6 +330,10 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 .dockrow{display:flex;gap:14px;flex-wrap:wrap}
 .rcard{flex:0 0 292px;max-width:360px;background:linear-gradient(180deg,var(--surf) 0%,#13151c 100%);border:1px solid var(--line);border-left:2.5px solid var(--accent);border-radius:12px;padding:13px 15px;cursor:pointer;box-shadow:var(--sh1);transition:transform .15s cubic-bezier(.2,.7,.2,1),border-color .15s,box-shadow .15s}
 .rcard:hover{transform:translateY(-2px);box-shadow:var(--sh2);border-color:var(--line3)}
+.rcard.paused{opacity:.6;border-style:dashed}
+.rcard.paused:hover{opacity:.82}
+.pausebtn-r{margin-left:6px;background:#1a1410;border:1px solid #4a3a1a;color:#d99a2b;border-radius:6px;padding:1px 7px;font-size:11px;font-weight:700;cursor:pointer}
+.pausebtn-r:hover{background:#221a10;border-color:#d99a2b}
 .rtop{display:flex;align-items:center;gap:8px}
 .rname{font-weight:650;font-size:13.5px;text-transform:capitalize;letter-spacing:.2px}
 .rmodel{font-size:10px;color:var(--mut2);font-family:ui-monospace,Menlo,monospace;background:var(--surf2);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px}
@@ -512,14 +517,15 @@ function tickLive(){
   const tk=card.querySelector('.t-tok');if(tk)tk.innerHTML=r.tokens?fmtTok(r.tokens.total)+' tok':'';
  });
 }
-function roleColor(n){n=(n||'').toLowerCase();return n==='mechanic'?'#d99a2b':n==='dreamer'?'#b88cd9':'#5b8def';}
-function roleCard(r){var live=r.status==='running',col=roleColor(r.name),dc=live?'#3fb27f':'var(--mut2)';
+function roleColor(n){n=(n||'').toLowerCase();return n==='mechanic'?'#d99a2b':n==='dreamer'?'#b88cd9':n==='journey'?'#3fb29e':'#5b8def';}
+function pauseToggle(r){return r.paused?'<button class="runbtn" title="resume '+esc(r.name)+'" onclick="postAction(this,\\''+esc(r.name)+'\\',\\'pause\\',event)">&#9654; resume</button>':'<button class="pausebtn-r" title="pause '+esc(r.name)+' (stop its cadence runs)" onclick="postAction(this,\\''+esc(r.name)+'\\',\\'pause\\',event)">&#9208;</button>';}
+function roleCard(r){var live=r.status==='running',paused=!!r.paused,col=roleColor(r.name),dc=paused?'#5a6270':(live?'#3fb27f':'var(--mut2)');
  var cap=r.maxPerDay!=null?r.maxPerDay+(r.granted||0):null;var capped=cap!=null&&r.filedToday>=cap;
- var stat=live?'working':(capped?'capped today':(r.lastRunAt?'last run '+ago(Date.now()-r.lastRunAt)+' ago':'idle'));
- var act=live?esc((r.activity||'working\\u2026').slice(0,120)):'<span style="color:var(--mut2)">'+(capped?'daily cap reached &middot; resumes at UTC midnight':'waiting for next run')+'</span>';
- return '<div class="rcard" data-role="'+esc(r.name)+'" style="border-left-color:'+col+'"><div class="rtop"><span class="rname" style="color:'+col+'">'+esc(r.name)+'</span>'+(r.model?'<span class="rmodel">'+esc(r.model)+'</span>':'')+'<span class="rstat"><i class="dot" style="background:'+dc+'"></i>'+stat+'</span>'+(live?'':'<button class="runbtn" title="run '+esc(r.name)+' now (skip the cadence wait)" onclick="postAction(this,\\''+esc(r.name)+'\\',\\'run\\',event)">&#9654; run</button>')+'</div><div class="ract">'+act+'</div><div class="rfoot">&#8635; every '+ago(r.cadenceMs)+(r.maxPerDay!=null?' &middot; <span style="color:'+(capped?'#d99a2b':'var(--mut2)')+'">'+r.filedToday+'/'+cap+' today'+((r.granted||0)>0?' (+'+r.granted+')':'')+'</span> <button class="grantbtn" title="grant '+esc(r.name)+' +'+r.maxPerDay+' tickets for today" onclick="postAction(this,\\''+esc(r.name)+'\\',\\'grant\\',event)">+'+r.maxPerDay+'</button>':'')+(r.tokens?' &middot; &#931; '+fmtTok(r.tokens)+' tok':'')+(r.host?' &middot; '+esc(r.host.replace(/\\.exe\\.xyz$/,'')):'')+'</div></div>';}
+ var stat=paused?'paused':(live?'working':(capped?'capped today':(r.lastRunAt?'last run '+ago(Date.now()-r.lastRunAt)+' ago':'idle')));
+ var act=paused?'<span style="color:var(--mut2)">paused by operator &middot; no cadence runs until resumed</span>':(live?esc((r.activity||'working\\u2026').slice(0,120)):'<span style="color:var(--mut2)">'+(capped?'daily cap reached &middot; resumes at UTC midnight':'waiting for next run')+'</span>');
+ return '<div class="rcard'+(paused?' paused':'')+'" data-role="'+esc(r.name)+'" style="border-left-color:'+col+'"><div class="rtop"><span class="rname" style="color:'+col+'">'+esc(r.name)+'</span>'+(r.model?'<span class="rmodel">'+esc(r.model)+'</span>':'')+'<span class="rstat"><i class="dot" style="background:'+dc+'"></i>'+stat+'</span>'+((live||paused)?'':'<button class="runbtn" title="run '+esc(r.name)+' now (skip the cadence wait)" onclick="postAction(this,\\''+esc(r.name)+'\\',\\'run\\',event)">&#9654; run</button>')+pauseToggle(r)+'</div><div class="ract">'+act+'</div><div class="rfoot">&#8635; every '+ago(r.cadenceMs)+(r.maxPerDay!=null?' &middot; <span style="color:'+(capped?'#d99a2b':'var(--mut2)')+'">'+r.filedToday+'/'+cap+' today'+((r.granted||0)>0?' (+'+r.granted+')':'')+'</span> <button class="grantbtn" title="grant '+esc(r.name)+' +'+r.maxPerDay+' tickets for today" onclick="postAction(this,\\''+esc(r.name)+'\\',\\'grant\\',event)">+'+r.maxPerDay+'</button>':'')+(r.tokens?' &middot; &#931; '+fmtTok(r.tokens)+' tok':'')+(r.host?' &middot; '+esc(r.host.replace(/\\.exe\\.xyz$/,'')):'')+'</div></div>';}
 var lastDockSig='';
-function renderDock(){var d=document.getElementById('dock');var roles=(snap.roles||[]);if(!roles.length){d.style.display='none';d.innerHTML='';lastDockSig='';return;}d.style.display='block';var sig=JSON.stringify(roles.map(function(r){return [r.name,r.status,r.activity,r.filedToday,r.granted,r.maxPerDay,r.lastRunAt,r.tokens,r.host,r.model]}));if(sig===lastDockSig)return;lastDockSig=sig;d.innerHTML='<div class="docklab">&#9670; the pool &middot; always-on</div><div class="dockrow">'+roles.map(roleCard).join('')+'</div>';}
+function renderDock(){var d=document.getElementById('dock');var roles=(snap.roles||[]);if(!roles.length){d.style.display='none';d.innerHTML='';lastDockSig='';return;}d.style.display='block';var sig=JSON.stringify(roles.map(function(r){return [r.name,r.status,r.activity,r.filedToday,r.granted,r.maxPerDay,r.lastRunAt,r.tokens,r.host,r.model,r.paused]}));if(sig===lastDockSig)return;lastDockSig=sig;d.innerHTML='<div class="docklab">&#9670; the pool &middot; always-on</div><div class="dockrow">'+roles.map(roleCard).join('')+'</div>';}
 function renderRoleHead(r){var live=r.status==='running';
  document.getElementById('mtitle').innerHTML='<span style="text-transform:capitalize;color:'+roleColor(r.name)+'">'+esc(r.name)+'</span> <span class="pill" style="color:var(--mut);background:#8b929e1a">pool role</span>'+(r.model?' <span class="pill" style="color:var(--mut2);background:#8b929e14;font-family:ui-monospace,Menlo,monospace">'+esc(r.model)+'</span>':'');
  var meta=['<span class="m">'+(live?'<i class="dot" style="background:#3fb27f"></i>working':'<i class="dot" style="background:var(--mut2)"></i>idle')+'</span>','<span class="m">&#8635; every '+ago(r.cadenceMs)+'</span>'];
@@ -562,6 +568,7 @@ async function postAction(btn,id,action,ev){if(ev){ev.stopPropagation();ev.preve
  var box=btn&&btn.parentNode;if(box)box.querySelectorAll('button').forEach(function(x){x.classList.add('busy')});
  var revert=null;
  if(id==='__pause__'&&action==='toggle'){var was=snap.paused;snap.paused=!snap.paused;render();revert=function(){snap.paused=was;render();};}
+ else if(action==='pause'){var rr=(snap.roles||[]).find(function(x){return x.name===id});if(rr){var wp=!!rr.paused;rr.paused=!rr.paused;lastDockSig='';renderDock();revert=function(){rr.paused=wp;lastDockSig='';renderDock();};}}
  else if(action.indexOf('move:')===0){var to=action.slice(5);optimisticOverrides[id]={state:to,expiresAt:Date.now()+5000};render();if(expandedId===id)syncHead();revert=function(){delete optimisticOverrides[id];render();if(expandedId===id)syncHead();};}
  var ok=false;
  try{var r=await (await fetch('/action',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:id,action:action})})).json();ok=!!(r&&r.ok);var sys=(id||'').indexOf('__')===0;showToast(ok?((sys?'':id+' &mdash; ')+(r.msg||'done')):('Failed: '+((r&&r.msg)||'error')),!ok);}catch(e){showToast('Action failed',true);}

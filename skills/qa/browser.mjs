@@ -15,8 +15,17 @@
 import { chromium } from 'playwright'
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { spawn } from 'node:child_process'
+import { dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const PORT_FILE = '/tmp/qa-browser.port'
+// BEV audit: PORT_FILE used to be one global `/tmp` path shared by every concurrent QA session on a VM — if two
+// tickets' agents both ran this skill at once, the second one's `ensure()` would happily reuse the FIRST one's
+// already-running browser (same port file, pings OK), silently sharing/hijacking one browser/page across two
+// unrelated tickets. Derive it from this script's OWN location instead: each ticket's workspace gets its own copy
+// of the skill (installSkills), so the script's resolved path is unique per ticket and stable across invocations
+// regardless of the agent's current working directory.
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
+const PORT_FILE = `/tmp/qa-browser-${SCRIPT_DIR.replace(/[^a-zA-Z0-9]/g, '_')}.port`
 const [cmd, ...args] = process.argv.slice(2)
 
 if (cmd === 'serve') await serve()
@@ -29,14 +38,22 @@ async function serve() {
   const consoleErrors = []
   page.on('console', (m) => m.type() === 'error' && consoleErrors.push(m.text()))
   page.on('pageerror', (e) => consoleErrors.push(String(e)))
+  // BEV audit: this process is spawned detached + unref'd with nothing watching it. If the QA session ends without
+  // an explicit `close` call (the common case — the agent finishes its turn and moves on) or its workspace gets
+  // pruned out from under it, nothing ever reaps it — it was accumulating as a permanent chromium+bun zombie across
+  // the fleet. Self-exit after IDLE_MS with no requests; generous enough to never interrupt a real QA session.
+  const IDLE_MS = 30 * 60_000
+  let lastActivity = Date.now()
+  const idleCheck = setInterval(() => { if (Date.now() - lastActivity > IDLE_MS) browser.close().finally(() => process.exit(0)) }, 60_000)
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
     async fetch(req) {
+      lastActivity = Date.now()
       const { cmd, args } = await req.json()
       let res
       try { res = Response.json(await handle(page, consoleErrors, cmd, args)) } catch (e) { res = Response.json({ error: e instanceof Error ? e.message : String(e) }) }
-      if (cmd === 'close') setTimeout(() => { browser.close().finally(() => process.exit(0)) }, 50)
+      if (cmd === 'close') { clearInterval(idleCheck); setTimeout(() => { browser.close().finally(() => process.exit(0)) }, 50) }
       return res
     },
   })

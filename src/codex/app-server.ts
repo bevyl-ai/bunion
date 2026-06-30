@@ -46,9 +46,12 @@ export class AppServerSession {
     // §10.3: stderr is diagnostic only — route it to a separate log path so it never contaminates the JSON parse.
     proc.stderr?.on('data', (d: Buffer) => this.onStderr(d))
     proc.on('exit', (code, signal) => {
-      // §10.6: differentiate a clean zero-exit from a crash so the orchestrator can categorize the failure.
+      // §10.6: a clean zero-exit (codex itself terminated normally, with nothing pending) gets its OWN code —
+      // distinct from `port_exit` (a real crash/abnormal exit) — so it does NOT count toward the orchestrator's
+      // worker-setup-failure streak (WORKER_SETUP_CODES); bunion's own `stop()` always SIGKILLs, so this branch is
+      // never the intentional end-of-session shutdown, only codex deciding to exit on its own.
       const err = code === 0 && !signal
-        ? new CategorizedError('port_exit', `codex app-server exited (0)`)
+        ? new CategorizedError('codex_clean_exit', `codex app-server exited (0)`)
         : new CategorizedError('port_exit', `codex app-server exited (${code ?? signal})`)
       this.failAll(err)
     })

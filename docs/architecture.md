@@ -106,7 +106,7 @@ In Progress ↔ QA Requested, or a fix that never lands). `deadlockReason` (pure
 - `deadlock.tokens` burned **and** stalled at least `deadlock.stall_ms`.
 
 A tripped ticket is auto-moved to `QA blocked` (the unblocker phase triages it) with an explanatory comment, or
-straight to `Needs human` if it already deadlocked once this lifecycle.
+straight to `Needs Engineer` if it already deadlocked once this lifecycle.
 
 ## Worker placement (the VM pool)
 

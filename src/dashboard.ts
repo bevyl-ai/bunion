@@ -112,13 +112,17 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
     port,
     // §13.7 says SHOULD bind loopback by default UNLESS configured otherwise. This deployment is reached only through
     // the exe.dev share-proxy (the access boundary), which connects from outside loopback, so it binds all interfaces.
-    async fetch(req) {
+    async fetch(req, server) {
       const url = new URL(req.url)
       const noStore = { headers: { 'cache-control': 'no-store' } }
       const sseHeaders = { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' }
 
       // SSE board stream — full snapshot on connect, then the snapshot on every structural change (pushBoardNow).
       if (url.pathname === '/events') {
+        server.timeout(req, 0) // BEV audit: Bun's default 10s idle timeout otherwise kills a long-lived SSE
+        // connection the moment nothing changes for 10s, producing a recurring unstructured "request timed out"
+        // stderr warning every ~10-30min in daemon.log with no correlation to a real problem — disable it for
+        // this connection specifically (the abort listener below still cleans up on a real disconnect).
         const stream = new ReadableStream<Uint8Array>({
           start(c) {
             boardClients.add(c)
@@ -130,6 +134,7 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
       }
       // SSE per-ticket transcript stream — seeds the full log on connect, then pushes appended lines (pushLogs).
       if (url.pathname.startsWith('/log-stream/')) {
+        server.timeout(req, 0) // see /events above — same long-lived SSE connection, same idle-timeout exemption
         const id = decodeURIComponent(url.pathname.slice('/log-stream/'.length))
         const stream = new ReadableStream<Uint8Array>({
           start(c) {

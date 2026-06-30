@@ -132,10 +132,14 @@ function injectCreateAsUser(query: string, variables: Record<string, unknown>, n
 // §10.5: count how many top-level operation definitions a GraphQL document contains. We detect named operations
 // (query/mutation/subscription followed by optional name) and anonymous shorthand queries (a bare `{`). A single
 // anonymous `{` is one definition; everything else increments the counter via the keyword scan.
-function countGraphqlOperations(query: string): number {
-  // Strip block comments (""" … """) and line comments (# …) to avoid false positives inside strings.
+export function countGraphqlOperations(query: string): number {
+  // Strip block strings (""" … """), regular string VALUES ("…", escape-aware), and line comments (# …) before
+  // scanning for keywords — otherwise a comment/workpad body inlined as a string argument that happens to contain
+  // the English word "query"/"mutation"/"subscription" (e.g. "fixed the slow query") false-positives this as a
+  // multi-operation document and rejects an otherwise-valid single-operation call.
   const stripped = query
     .replace(/"""[\s\S]*?"""/g, '') // block strings
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""') // regular string values (escape-aware) — collapse, don't fully delete, so a string like "query" alone doesn't merge two real keywords together
     .replace(/#[^\n]*/g, '') // line comments
   // Exclude the keyword when it's a variable ($query) or an argument/field NAME (query:) — only operation definitions count.
   const keywords = (stripped.match(/(?<!\$)\b(query|mutation|subscription)\b(?!\s*:)/g) ?? []).length

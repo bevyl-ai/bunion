@@ -88,7 +88,7 @@ compound into slowdowns — across live tickets, or to dump/tail one ticket's lo
 
 ## Troubleshooting
 
-- **A ticket loops without progressing** → the deadlock sweep auto-moves it to `QA blocked` (then `Needs human`
+- **A ticket loops without progressing** → the deadlock sweep auto-moves it to `QA blocked` (then `Needs Engineer`
   on a repeat) with an explanatory comment. Tune the `deadlock.*` knobs if it trips too eagerly/late.
 - **`thread resume failed … starting fresh` in the logs** → the rollout was gone or codex skewed; the session
   recovered with a fresh thread (it loses prior in-thread context, not the workpad). Expected after a codex

@@ -51,7 +51,12 @@ grep -q 'HOME/.profile' "$HOME/.bash_profile" 2>/dev/null || echo '[ -f "$HOME/.
 # 6. QA secrets, set in the env — NOT committed here:
 #    - preview sign-in (authed routes): QA_USER + QA_PASS (a test account); browser.mjs login uses them.
 #    - screenshot proof upload: AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY; shot.mjs PUTs to the
-#      bevyl-github-media S3 bucket and returns a public URL to embed in the PR.
+#      bevyl-github-media S3 bucket (under qa-screenshots/ only) and returns a public URL to embed in the PR.
+#      BEV audit: workers used to share the brain's general-purpose AWS key (full account-wide scope) for this
+#      single PutObject call. Use a DEDICATED, narrowly-scoped credential instead — IAM user
+#      `bunion-qa-screenshot-uploader`, inline policy `qa-screenshot-put-only` grants ONLY
+#      s3:PutObject on arn:aws:s3:::bevyl-github-media/qa-screenshots/* (no delete, no other prefix, no other
+#      bucket/service) — so a compromised/leaked worker can do nothing with it beyond writing QA screenshots.
 #    printf 'export QA_USER=%s\nexport QA_PASS=%s\nexport AWS_ACCESS_KEY_ID=%s\nexport AWS_SECRET_ACCESS_KEY=%s\n' ... >> "$HOME/.profile"
 
 # 7. Worker credentials, injected from the provisioning env when present (idempotent). Without a needed key, such

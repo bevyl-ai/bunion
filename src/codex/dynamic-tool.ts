@@ -56,6 +56,16 @@ export function linearGraphqlTool(cfg: Config, phase?: string | null, quota?: Ro
       if (isCreate && quota && quota.remaining() <= 0) {
         return fail(`daily_ticket_quota_reached: today's limit of ${quota.limit} new tickets for this role is reached — do not create more issues today; stop filing.`)
       }
+      // BEV-3973: idempotent role filing — a code-level backstop (the prompt's "dedupe first" is best-effort) so a
+      // role re-run, or a second role, can't file an exact-title duplicate. Fail-safe: any check error falls through
+      // to the create, so a flaky dedup read never blocks a legitimate file.
+      if (quota != null && /\bissueCreate\b/.test(query)) {
+        const title = createTitle(query, variables)
+        if (title) {
+          const dup = await findOpenDuplicate(cfg, token, title)
+          if (dup) return fail(`duplicate_issue_skipped: an open issue with this exact title already exists (${dup}). Don't file a duplicate — add to ${dup} if you have more, or pick a genuinely different item.`)
+        }
+      }
       // Stamp the phase name onto new comments (only when acting as the app, and only if the agent didn't set one).
       if (appToken && actorName && /\bcommentCreate\b/.test(query) && !hasCreateAsUser(query, variables)) {
         ;({ query, variables } = injectCreateAsUser(query, variables, actorName))
@@ -80,6 +90,30 @@ export function linearGraphqlTool(cfg: Config, phase?: string | null, quota?: Ro
 function inputObj(variables: Record<string, unknown>): Record<string, unknown> {
   const i = variables.input
   return i && typeof i === 'object' && !Array.isArray(i) ? (i as Record<string, unknown>) : {}
+}
+
+// BEV-3973: find an OPEN (non-canceled) issue with this EXACT title in the configured team/project — so a role's
+// issueCreate can be skipped as a duplicate. Best-effort: any error returns null so a real file is never blocked.
+async function findOpenDuplicate(cfg: Config, token: string, title: string): Promise<string | null> {
+  const filter: Record<string, unknown> = { title: { eq: title }, state: { type: { neq: 'canceled' } } }
+  if (cfg.tracker.team) filter.team = { key: { eq: cfg.tracker.team } }
+  if (cfg.tracker.projectSlug) filter.project = { slugId: { eq: cfg.tracker.projectSlug } }
+  try {
+    const r = await graphql(cfg, `query Dup($filter: IssueFilter) { issues(first: 1, filter: $filter) { nodes { identifier } } }`, { filter }, token)
+    if (!r.httpOk) return null
+    const id = (r.body as { data?: { issues?: { nodes?: { identifier?: string }[] } } }).data?.issues?.nodes?.[0]?.identifier
+    return typeof id === 'string' ? id : null
+  } catch {
+    return null
+  }
+}
+
+// Pull the title out of an issueCreate — from variables.input.title, else an inlined `title: "…"` in the query text.
+function createTitle(query: string, variables: Record<string, unknown>): string {
+  const t = inputObj(variables).title
+  if (typeof t === 'string') return t.trim()
+  const m = query.match(/title\s*:\s*"((?:[^"\\]|\\.)*)"/)
+  return m ? m[1]!.replace(/\\(.)/g, '$1').trim() : ''
 }
 
 function hasCreateAsUser(query: string, variables: Record<string, unknown>): boolean {

@@ -40,3 +40,11 @@ test('a triple-quoted block string is still stripped (pre-existing behavior pres
   const q = 'mutation { commentCreate(input: { issueId: "abc", body: """a query inside a block string mutation""" }) { success } }'
   expect(countGraphqlOperations(q)).toBe(1)
 })
+
+// BEV re-audit (LOW): an escaped \""" inside a GraphQL block string is a literal embedded """, not the closer —
+// without honoring that escape, the block-string strip closes early, leaving the rest of the block string (and any
+// keyword inside it) exposed to the scan. Same false-positive failure class as the fix above, different trigger.
+test('an escaped triple-quote inside a block string does not prematurely end it and expose a later keyword', () => {
+  const q = 'mutation { commentCreate(input: { issueId: "abc", body: """a query \\"""mutation\\""" inside a block string mutation""" }) { success } }'
+  expect(countGraphqlOperations(q)).toBe(1)
+})

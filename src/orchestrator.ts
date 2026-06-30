@@ -9,7 +9,7 @@ import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
 import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment, recentAuthFailures } from './linear'
 import { log, recentLogs, warn } from './log'
-import { readJson, throttledWriter, writeJson } from './persist'
+import { flushAllPending, readJson, throttledWriter, writeJson } from './persist'
 import { remoteHome, sshExec } from './ssh'
 import { backfillThreads } from './thread-backfill'
 import { foldDelta, grandTotal, phaseBreakdown, totals, zeroCounts, type TokenTally } from './tokens'
@@ -60,6 +60,12 @@ const WORKER_SETUP_STREAK_LIMIT = 3
 export function resolveTokenBase(landedThreadId: string, resumingThreadId: string | null, priorTokenBase: TokenCounts | null): TokenCounts {
   return landedThreadId === resumingThreadId && priorTokenBase ? priorTokenBase : zeroCounts()
 }
+// BEV re-audit: a flat +hardTokenCap grant left a wildly-over-cap ticket (e.g. one corrupted into the billions by
+// the now-fixed token-accounting bug) just as capped as before — silently. Size the grant to clear the CURRENT
+// deficit, plus one full cap's worth of real working headroom on top. Pure + exported so it's unit-testable.
+export function capClearIncrement(currentTotal: number, currentEffectiveCap: number, hardTokenCap: number): number {
+  return Math.max(0, currentTotal - currentEffectiveCap) + hardTokenCap
+}
 const LOG_TICKETS = 60 // most-recent tickets whose transcript we keep in memory + persist
 const STATE_DIR = join(homedir(), '.bunion')
 const TOKENS_FILE = join(STATE_DIR, 'tokens.json') // identifier → phase → token counts
@@ -95,6 +101,12 @@ function utcDay(): string {
 export async function start(workflowPath?: string): Promise<void> {
   // Unattended daemon: a stray rejection (flaky VM, transient API error) must never take the whole factory down.
   process.on('unhandledRejection', (e) => warn(`unhandled rejection: ${e instanceof Error ? e.message : String(e)}`))
+  // BEV re-audit: systemd sends SIGTERM on every `systemctl restart`/`stop` — force every debounced throttledWriter
+  // (tokens/threads/logs/grants/quota/roleLast) out to disk before exiting, so a restart inside the up-to-3s
+  // coalescing window can never silently lose the most recent write.
+  for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+    process.on(sig, () => { flushAllPending(); process.exit(0) })
+  }
   let cfg = loadConfig(workflowPath)
   validateConfig(cfg)
   log(`default repo ${cfg.repo}${Object.keys(cfg.repos).length ? ` (+${Object.keys(cfg.repos).length} more via repo:<slug> labels)` : ` (repos:{} — route others with a repo:<slug> label)`}`)
@@ -140,6 +152,11 @@ export async function start(workflowPath?: string): Promise<void> {
   const ticketGrants = new Map<string, number>(Object.entries(readJson<Record<string, number>>(GRANTS_FILE, {})))
   const saveGrants = throttledWriter(GRANTS_FILE, () => Object.fromEntries(ticketGrants))
   const effectiveCap = (identifier: string): number => cfg.deadlock.hardTokenCap + (ticketGrants.get(identifier) ?? 0)
+  // BEV re-audit: a flat +hardTokenCap grant is fine for a ticket just barely over cap, but USELESS for one that's
+  // wildly over it (e.g. a ticket whose total reached the billions, pre-dating the deadlock cap or some other
+  // anomaly) — granting +200M to a 6B-token ticket leaves it just as capped as before, silently. Size the grant to
+  // actually clear the current deficit, plus one full cap's worth of real working headroom on top.
+  const capClearIncrementFor = (identifier: string): number => capClearIncrement(grandTotal(tokens, identifier), effectiveCap(identifier), cfg.deadlock.hardTokenCap)
   // BEV audit: `bump` is the only action that grants headroom before reopening a cap-tripped ticket — but
   // to-qa/to-build/move: ALSO reopen a Needs Engineer ticket into an active state (the dashboard offers them right
   // there next to Bump), and none of them touch ticketGrants. The ticket's total is still >= the un-bumped cap, so
@@ -149,7 +166,7 @@ export async function start(workflowPath?: string): Promise<void> {
   const grantIfCapped = (identifier: string, issue: Issue): void => {
     if (norm(issue.state) !== 'needs engineer') return
     if (grandTotal(tokens, identifier) < effectiveCap(identifier)) return
-    const inc = cfg.deadlock.hardTokenCap
+    const inc = capClearIncrementFor(identifier)
     ticketGrants.set(identifier, (ticketGrants.get(identifier) ?? 0) + inc)
     saveGrants()
     log(`action: ${identifier} budget +${Math.round(inc / 1e6)}M (auto, reopening a capped ticket)`)
@@ -647,9 +664,10 @@ export async function start(workflowPath?: string): Promise<void> {
     const host = placement.get(issue.id) ?? null
     try {
       if (action === 'bump') {
-        // Operator budget bump: grant another hard-cap's worth of headroom to THIS ticket (kept cumulative — its spend
-        // is not erased), so a ticket parked by the token cap can finish. effectiveCap folds the grant into the sweep.
-        const inc = cfg.deadlock.hardTokenCap
+        // Operator budget bump: grant enough headroom to actually clear this ticket's current deficit (plus one
+        // full cap's worth of real working room), kept cumulative — its spend is not erased. BEV re-audit: a flat
+        // +hardTokenCap used to require dozens of repeated clicks to unstick a ticket that was wildly over cap.
+        const inc = capClearIncrementFor(identifier)
         ticketGrants.set(identifier, (ticketGrants.get(identifier) ?? 0) + inc)
         saveGrants()
         const cap = effectiveCap(identifier)

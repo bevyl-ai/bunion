@@ -138,7 +138,9 @@ export function countGraphqlOperations(query: string): number {
   // the English word "query"/"mutation"/"subscription" (e.g. "fixed the slow query") false-positives this as a
   // multi-operation document and rejects an otherwise-valid single-operation call.
   const stripped = query
-    .replace(/"""[\s\S]*?"""/g, '') // block strings
+    .replace(/"""(?:\\"""|[\s\S])*?"""/g, '') // block strings — GraphQL escapes a literal """ inside one as \"""; without
+    // honoring that escape, an embedded \""" closes the match early, leaving the REST of the block string (and any
+    // keyword inside it) unstripped and exposed to the scan below (BEV re-audit)
     .replace(/"(?:[^"\\]|\\.)*"/g, '""') // regular string values (escape-aware) — collapse, don't fully delete, so a string like "query" alone doesn't merge two real keywords together
     .replace(/#[^\n]*/g, '') // line comments
   // Exclude the keyword when it's a variable ($query) or an argument/field NAME (query:) — only operation definitions count.

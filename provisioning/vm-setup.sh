@@ -30,6 +30,11 @@ git config --global url."https://bevyl-web.int.exe.xyz/".insteadOf "https://gith
 #     which is fine: the bevyl stupify reviewer is configured to review the factory's app-authored PRs
 #     (its inScope gates on the `bunion` label, and it posts COMMENT reviews — which GitHub allows even
 #     app-on-its-own-PR). See stupify-octember-stupify / stupify-bevyl-ai-bevyl-ai ~/.stupify/review-sweep.ts.
+# BEV re-audit: ~/.profile ends up holding real secrets (QA_PASS, the scoped AWS key, ELEVENLABS_API_KEY, etc. —
+# see step 6/7 below) but nothing ever set its mode, so it inherited whatever umask happened to be in effect —
+# 600 on some VMs, world-readable 644 on others. Force it closed BEFORE the first secret-bearing line is ever
+# appended, and again at the end (idempotent either way) so re-running this script also repairs a drifted VM.
+touch "$HOME/.profile" && chmod 600 "$HOME/.profile"
 grep -q 'GH_HOST=' "$HOME/.profile" 2>/dev/null || echo 'export GH_HOST=bevyl-web.int.exe.xyz' >> "$HOME/.profile"
 
 # 3. The repo's toolchain. The base image ships codex + gh + python3 but NO bun/node, and the
@@ -70,5 +75,9 @@ for k in POSTHOG_PERSONAL_API_KEY POSTHOG_PROJECT_ID POSTHOG_API_HOST NEXT_PUBLI
     printf 'export %s=%s\n' "$k" "$v" >> "$HOME/.profile"
   fi
 done
+
+# Re-tighten in case anything along the way (a `>>` to a non-existent file, etc.) left it loose — idempotent, so
+# re-running this script on an already-provisioned VM also repairs a drifted one.
+chmod 600 "$HOME/.profile" 2>/dev/null || true
 
 echo "bunion-vm-setup done"

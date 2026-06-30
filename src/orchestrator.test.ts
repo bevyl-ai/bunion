@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { deadlockReason, resolveTokenBase } from './orchestrator'
+import { capClearIncrement, deadlockReason, resolveTokenBase } from './orchestrator'
 import { zeroCounts } from './tokens'
 
 const dl = { tokens: 20_000_000, stallMs: 30 * 60_000, hardStallMs: 90 * 60_000 }
@@ -53,4 +53,23 @@ test('a failed resume that falls back to a NEW thread starts at zero, not the ol
 
 test('a resume we intended but have no persisted total for yet starts at zero (no prior session ever folded)', () => {
   expect(resolveTokenBase('thread-A', 'thread-A', null)).toEqual(zeroCounts())
+})
+
+// BEV re-audit (HIGH): a flat +hardTokenCap grant left a wildly-over-cap ticket just as capped as before — silently.
+// These prove the fix: the grant always clears the current deficit, not just a fixed amount.
+test('a ticket just barely over cap gets exactly one full cap worth of headroom', () => {
+  // 201M total, 200M cap → 1M over → grant = 1M + 200M = 201M, new effective cap = 401M (well clear of 201M)
+  expect(capClearIncrement(201_000_000, 200_000_000, 200_000_000)).toBe(201_000_000)
+})
+
+test('a wildly-over-cap ticket (the bug this fixes) gets a grant proportional to its real deficit', () => {
+  // 6.3B total, 200M cap → 6.1B over → the old flat +200M would leave it just as capped; the fix clears it
+  const inc = capClearIncrement(6_300_000_000, 200_000_000, 200_000_000)
+  const newCap = 200_000_000 + inc
+  expect(newCap).toBeGreaterThan(6_300_000_000) // genuinely unstuck, not just nominally bumped
+})
+
+test('a ticket with prior grants already folded into its cap still gets sized off the CURRENT effective cap, not the base', () => {
+  // already granted once (cap=400M), now at 450M → 50M over → grant = 50M + 200M = 250M
+  expect(capClearIncrement(450_000_000, 400_000_000, 200_000_000)).toBe(250_000_000)
 })

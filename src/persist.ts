@@ -24,6 +24,15 @@ export function writeJson(path: string, value: unknown): void {
   }
 }
 
+// BEV re-audit: a throttled write debounced up to `ms` (default 3s) was never forced out on a clean shutdown — a
+// daemon restart inside that window silently lost the most recent write (e.g. a thread's lastTokenBase, dropping
+// it back to the safe-but-imprecise zero-reseed path on its next resume). Every throttledWriter registers its
+// flush here so a shutdown handler can force them all out synchronously before the process exits.
+const pending: (() => void)[] = []
+export function flushAllPending(): void {
+  for (const flush of pending) flush()
+}
+
 // A coalescing writer for a hot-path state file: writes at most once per `ms` — immediately when idle, then once
 // more on the trailing edge so the latest value always lands. `get` is read at write time, so callers just mutate
 // their state and call the returned function; there are no stale snapshots and no per-file debounce bookkeeping.
@@ -31,13 +40,15 @@ export function throttledWriter(path: string, get: () => unknown, ms = 3000): ()
   let lastWrite = 0
   let timer: ReturnType<typeof setTimeout> | null = null
   const flush = (): void => {
+    if (timer) { clearTimeout(timer); timer = null }
     lastWrite = Date.now()
     writeJson(path, get())
   }
+  pending.push(flush)
   return () => {
     if (timer) return
     const wait = lastWrite + ms - Date.now()
     if (wait <= 0) flush()
-    else timer = setTimeout(() => { timer = null; flush() }, wait)
+    else timer = setTimeout(flush, wait)
   }
 }

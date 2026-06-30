@@ -46,6 +46,12 @@ interface RetryTimer {
 
 const CONTINUATION_MS = 1000
 const FAILURE_BASE_MS = 10_000
+// BEV-3969/3971: worker/workspace-infra failure classes — distinct from a normal mid-turn hiccup (turn_timeout,
+// turn_failed). A single hit is ambiguous (cold VM, version skew, or the stale-workspace case ensureWorkspace now
+// self-heals) so these still retry normally; only a STREAK on the same ticket (the self-heal didn't fix it — a
+// dead/unreachable worker, codex crash-looping) is worth waking a human for.
+const WORKER_SETUP_CODES = new Set(['invalid_workspace_cwd', 'response_timeout', 'port_exit'])
+const WORKER_SETUP_STREAK_LIMIT = 3
 const LOG_TICKETS = 60 // most-recent tickets whose transcript we keep in memory + persist
 const STATE_DIR = join(homedir(), '.bunion')
 const TOKENS_FILE = join(STATE_DIR, 'tokens.json') // identifier → phase → token counts
@@ -150,6 +156,9 @@ export async function start(workflowPath?: string): Promise<void> {
   // a second one escalates past the blocked phase straight to a human.
   const progress = new Map<string, { since: number; tokensAtProgress: number; seen: Set<string> }>()
   const deadlocked = new Set<string>()
+  // BEV-3969/3971: consecutive WORKER_SETUP_CODES failures per ticket — reset on success or a non-setup code;
+  // escalated to Needs Engineer once it hits WORKER_SETUP_STREAK_LIMIT (ensureWorkspace's self-heal gets first crack).
+  const setupFailureStreaks = new Map<string, number>()
 
   // One rolling transcript per ticket (LRU). NOT cleared on re-dispatch, so operator chat + prior phases survive a
   // continuation/handoff; `restart` clears it for a from-scratch run. `touchLog` marks a ticket most-recent and
@@ -318,24 +327,31 @@ export async function start(workflowPath?: string): Promise<void> {
       endedRuntimeMs += Date.now() - entry.startedAt // fold this session's wall-clock into the aggregate runtime (§13.3)
       const sid = sessionId()
       if (outcome.ok) {
+        setupFailureStreaks.delete(issue.id)
         scheduleRetry(issue.id, issue.identifier, 1, true) // re-check & continue while active
         log(`✓ ${issue.identifier} session done${sid ? ` session=${sid}` : ''}`) // §13.1
         stats.record({ identifier: issue.identifier, kind: 'session_done', threadId: threadRecs.get(issue.id)?.threadId, host: entry.host, totalTokens: grandTotal(tokens, issue.identifier), account: acct(entry.host) })
       } else {
         const code = outcome.code
         // §10.6: a genuinely-missing codex binary is non-transient — retrying forever won't fix it; route to Needs
-        // human so an operator can diagnose. Ambiguous codes (invalid_workspace_cwd etc.) may be transient
-        // version-skew, so they keep retrying via the normal backoff rather than parking.
-        const isSetupFailure = code === 'codex_not_found'
-        warn(`✗ ${issue.identifier}: ${(outcome.error ?? '').slice(0, 200)}${sid ? ` session=${sid}` : ''}${code ? ` code=${code}` : ''}`) // §13.1
+        // human so an operator can diagnose. A WORKER_SETUP_CODES hit is individually ambiguous (cold VM, version
+        // skew, or a stale workspace ensureWorkspace now self-heals) so it retries normally — UNLESS it's now the
+        // Nth in a row on this same ticket, meaning the self-heal didn't fix it either.
+        const isWorkerSetupCode = !!code && WORKER_SETUP_CODES.has(code)
+        const streak = isWorkerSetupCode ? (setupFailureStreaks.get(issue.id) ?? 0) + 1 : 0
+        if (isWorkerSetupCode) setupFailureStreaks.set(issue.id, streak)
+        else setupFailureStreaks.delete(issue.id)
+        const isSetupFailure = code === 'codex_not_found' || streak >= WORKER_SETUP_STREAK_LIMIT
+        warn(`✗ ${issue.identifier}: ${(outcome.error ?? '').slice(0, 200)}${sid ? ` session=${sid}` : ''}${code ? ` code=${code}` : ''}${streak > 1 ? ` streak=${streak}` : ''}`) // §13.1
         if (isSetupFailure) {
-          log(`setup failure ${issue.identifier} (${code}) → Needs Engineer`)
+          log(`setup failure ${issue.identifier} (${code}${streak > 1 ? ` x${streak}` : ''}) → Needs Engineer`)
           try {
             await moveIssue(cfg, issue.id, 'Needs Engineer')
-            await postComment(cfg, issue.id, `## ⚠️ Setup failure — needs operator\nThe factory cannot run this ticket: \`${code}\`.\n\n> ${(outcome.error ?? '').slice(0, 400)}\n\nManual intervention required before it can retry.`)
+            await postComment(cfg, issue.id, `## ⚠️ Setup failure — needs operator\nThe factory cannot run this ticket: \`${code}\`${streak >= WORKER_SETUP_STREAK_LIMIT ? ` (${streak} consecutive worker-setup failures — recreating the workspace did not resolve it)` : ''}.\n\n> ${(outcome.error ?? '').slice(0, 400)}\n\nManual intervention required before it can retry.`)
           } catch (e) {
             warn(`setup failure move ${issue.identifier}: ${e instanceof Error ? e.message : String(e)}`)
           }
+          setupFailureStreaks.delete(issue.id)
           release(issue.id) // release the claim/pin AFTER the move lands, so the next poll can't re-dispatch it mid-move
         } else {
           const next = entry.retryAttempt > 0 ? entry.retryAttempt + 1 : 1
@@ -883,7 +899,7 @@ export async function start(workflowPath?: string): Promise<void> {
           void fetchLatestNote(cfg, i.id).then((n) => n && summaries.set(i.identifier, n)).catch(() => {})
         }
       }
-      for (const id of [...progress.keys()]) if (!board.some((i) => i.id === id)) { progress.delete(id); deadlocked.delete(id) }
+      for (const id of [...progress.keys()]) if (!board.some((i) => i.id === id)) { progress.delete(id); deadlocked.delete(id); setupFailureStreaks.delete(id) }
       // Deadlock sweep: no forward progress + resource burn → move to the blocked state (the blocked phase triages it),
       // or to Needs Engineer if it already deadlocked once. Await the move so it isn't re-dispatched below this poll.
       for (const { issue, target, reason } of stuck) {

@@ -1,0 +1,53 @@
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { ensureWorkspace } from './workspace'
+import type { Config } from './types'
+
+let root: string
+let cfg: Config
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'bunion-ws-test-'))
+  cfg = { workspaceRoot: root } as Config
+})
+
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true })
+})
+
+test('fresh ticket → created, fresh dir with no .git', () => {
+  const r = ensureWorkspace(cfg, 'BEV-1', null)
+  expect(r.created).toBe(true)
+  expect(existsSync(r.dir)).toBe(true)
+})
+
+test('a valid existing checkout (.git present) → reused, NOT recreated', () => {
+  const first = ensureWorkspace(cfg, 'BEV-2', null)
+  mkdirSync(join(first.dir, '.git'), { recursive: true }) // simulate a completed clone
+  writeFileSync(join(first.dir, 'marker.txt'), 'keep me')
+  const second = ensureWorkspace(cfg, 'BEV-2', null)
+  expect(second.created).toBe(false)
+  expect(existsSync(join(second.dir, 'marker.txt'))).toBe(true) // proves it was NOT wiped
+})
+
+// BEV-3970/3971: a worktree's cwd can go stale out from under a running ticket — the directory survives but its
+// `.git` is gone (the underlying main checkout was reset/reclaimed). Reusing that dir blindly is exactly what
+// produced `invalid_workspace_cwd` forever; ensureWorkspace must instead treat it as needing recreation.
+test('a directory with NO .git (stale/broken worktree) → wiped and recreated, not silently reused', () => {
+  const first = ensureWorkspace(cfg, 'BEV-3', null)
+  writeFileSync(join(first.dir, 'stale-leftover.txt'), 'from a dead worktree')
+  const second = ensureWorkspace(cfg, 'BEV-3', null)
+  expect(second.created).toBe(true)
+  expect(existsSync(join(second.dir, 'stale-leftover.txt'))).toBe(false) // proves it WAS wiped
+})
+
+test('a non-directory at the path → replaced with a fresh dir', () => {
+  const dir = join(root, 'BEV-4')
+  mkdirSync(root, { recursive: true })
+  writeFileSync(dir, 'not a directory')
+  const r = ensureWorkspace(cfg, 'BEV-4', null)
+  expect(r.created).toBe(true)
+  expect(existsSync(join(r.dir, '.git'))).toBe(false)
+})

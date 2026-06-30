@@ -32,18 +32,24 @@ function workspaceDir(cfg: Config, identifier: string, host: Host): string {
   return dir
 }
 
-// Existing dir → reuse (created=false, after_create does NOT re-run). A non-dir at the path is replaced.
+// Existing dir → reuse (created=false, after_create does NOT re-run), but ONLY if it still has a `.git` entry (a
+// FILE for a worktree, a DIR for a full clone). BEV-3970/3971: a worktree's cwd can go stale out from under a
+// running ticket — the underlying main checkout got reset/reclaimed, leaving an orphaned directory whose `.git`
+// pointer is dangling (or the dir survives with no `.git` at all) — and codex then fails to start a thread in it
+// (`invalid_workspace_cwd`). Treating a `.git`-less directory exactly like a missing one makes every dispatch
+// self-healing: the next attempt wipes it and re-runs after_create (a fresh clone), instead of retrying forever
+// against the same broken cwd.
 export function ensureWorkspace(cfg: Config, identifier: string, host: Host): { dir: string; created: boolean } {
   const dir = workspaceDir(cfg, identifier, host)
   if (host) {
     const root = dir.slice(0, dir.lastIndexOf('/'))
-    const r = sshExec(host, `mkdir -p ${shq(root)} && { [ -d ${shq(dir)} ] && echo BUNION_REUSE || { rm -rf ${shq(dir)}; mkdir -p ${shq(dir)} && echo BUNION_CREATED; }; }`)
+    const r = sshExec(host, `mkdir -p ${shq(root)} && { [ -e ${shq(dir)}/.git ] && echo BUNION_REUSE || { rm -rf ${shq(dir)}; mkdir -p ${shq(dir)} && echo BUNION_CREATED; }; }`)
     if (!r.ok) throw new Error(`ensureWorkspace on ${host}: ${r.out.trim().slice(-300)}`)
     return { dir, created: r.out.includes('BUNION_CREATED') }
   }
   mkdirSync(cfg.workspaceRoot, { recursive: true })
   if (existsSync(dir)) {
-    if (statSync(dir).isDirectory()) return { dir, created: false }
+    if (statSync(dir).isDirectory() && existsSync(join(dir, '.git'))) return { dir, created: false }
     rmSync(dir, { recursive: true, force: true })
   }
   mkdirSync(dir, { recursive: true })

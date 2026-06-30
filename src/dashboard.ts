@@ -56,6 +56,7 @@ export interface Snapshot {
   columns: { name: string; c: string; states: string[]; inert?: boolean }[] // dashboard lanes from config (hot-reloaded); inert = no agent works these (parked/terminal). see WORKFLOW.md board.columns
   terminalStates?: string[] // states intentionally without a column (Done/Canceled/Duplicate) — excluded from the unmapped catch-all so it only flags real surprises (renames)
   gatewayAccounts: string[] // LLM-account tracking: which ChatGPT account each worker routes gpt-5.5 through ("label ×count")
+  pollHealth?: { failureStreak: number; lastError: string | null; lastOkAt: number | null } // BEV-4025: consecutive Linear-poll failures — a banner fires once this streak is actionable, so a hung poll isn't silently invisible
 }
 
 // §13.7.2: JSON error envelope for /api/v1/* responses.
@@ -506,7 +507,12 @@ function render(){
  var effState=function(r){var o=optimisticOverrides[r.identifier];return o?o.state:r.state;};
  const run=items.filter(r=>r.status==='running').length,q=items.filter(r=>r.status==='queued').length,rt=items.filter(r=>r.status==='retrying').length;
  scope.textContent=snap.scope||'';
- var pb=document.getElementById('pausebtn'),pbn=document.getElementById('pausebanner');if(pb){if(snap.paused){pb.className='pausebtn on';pb.innerHTML='&#9654; Resume';pbn.className='show';pbn.innerHTML='<span class="pb-dot"></span><b>FACTORY PAUSED</b> &middot; dispatch halted, agents stopped &mdash; click Resume to continue';}else{pb.className='pausebtn';pb.innerHTML='&#9208; Pause';pbn.className='';}}
+ var pb=document.getElementById('pausebtn'),pbn=document.getElementById('pausebanner'),ph=snap.pollHealth;
+ if(pb){
+  if(snap.paused){pb.className='pausebtn on';pb.innerHTML='&#9654; Resume';pbn.className='show';pbn.innerHTML='<span class="pb-dot"></span><b>FACTORY PAUSED</b> &middot; dispatch halted, agents stopped &mdash; click Resume to continue';}
+  else if(ph&&ph.failureStreak>=3){pb.className='pausebtn';pb.innerHTML='&#9208; Pause';pbn.className='show';pbn.innerHTML='<span class="pb-dot"></span><b>LINEAR POLLING FAILING</b> &middot; '+ph.failureStreak+' consecutive failures'+(ph.lastError?' &mdash; '+esc(ph.lastError.slice(0,140)):'')+(ph.lastOkAt?' &middot; board last updated '+ago(Date.now()-ph.lastOkAt)+' ago, may be stale':'')+'.';}
+  else{pb.className='pausebtn';pb.innerHTML='&#9208; Pause';pbn.className='';}
+ }
  const chip=(col,n,lab)=>'<span class="chip"><i style="background:'+col+'"></i>'+n+' '+lab+'</span>';
  // §13.3 rate-limit chip: amber ≥80%, red ≥95%; resetsIn countdown when known
  function rlChip(rl){if(!rl||rl.usedPercent==null)return '';var pct=rl.usedPercent,col=pct>=95?'#e0564f':pct>=80?'#d99a2b':'#3fb27f',bg=pct>=95?'#e0564f22':pct>=80?'#d99a2b22':'';var label=Math.round(pct)+'% rl'+(rl.resetsInSeconds!=null?' ('+Math.round(rl.resetsInSeconds)+'s)':'');return '<span class="chip" title="rate-limit usage (Symphony §13.3)" style="'+(bg?'background:'+bg+';border-color:'+col+'44;':'')+'"><i style="background:'+col+'"></i><span style="color:'+col+'">'+label+'</span></span>';}

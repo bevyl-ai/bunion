@@ -95,6 +95,11 @@ export async function start(workflowPath?: string): Promise<void> {
   const claimed = new Set<string>()
   const retries = new Map<string, RetryTimer>()
   let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
+  // BEV-4025: poll health, surfaced on the dashboard — a Linear poll failure used to only `warn()` to the daemon log
+  // (operator-invisible) and silently keep `lastBoard` stale forever with no on-screen signal it was happening.
+  let pollFailureStreak = 0
+  let lastPollError: string | null = null
+  let lastPollOkAt: number | null = null
   const gatewayHost = new Map<string, string>() // worker host → its codex base_url's llm-integration hostname (resolved once; display-only LLM-account tracking)
   let tokenSeq = 0
   let lastRateLimits: RateLimits | null = null // most recent codex rate-limit snapshot (Symphony §13.3 / §4.1.8)
@@ -479,6 +484,7 @@ export async function start(workflowPath?: string): Promise<void> {
       roles: cfg.roles.map(roleItem),
       columns: cfg.boardColumns.map((c) => ({ name: c.name, c: c.color, states: c.states, inert: !c.states.some((s) => isActive(s)) })),
       terminalStates: cfg.tracker.terminalStates,
+      pollHealth: { failureStreak: pollFailureStreak, lastError: lastPollError, lastOkAt: lastPollOkAt },
     }
   }
   // One chat turn against a persisted thread (a ticket OR a pool role): resume it on its worker, run the operator's
@@ -839,8 +845,13 @@ export async function start(workflowPath?: string): Promise<void> {
         // One labeled query is the whole board (active + handed-off). For an unlabeled config, fall back to the
         // active-states query. Either way, narrow host-side to the opt-in set.
         board = (cfg.tracker.requiredLabels.length ? await fetchBoard(cfg) : await fetchCandidates(cfg)).filter(isRoutable)
+        pollFailureStreak = 0
+        lastPollError = null
+        lastPollOkAt = Date.now()
       } catch (e) {
-        warn(`poll: ${e instanceof Error ? e.message : e}`)
+        pollFailureStreak++
+        lastPollError = e instanceof Error ? e.message : String(e)
+        warn(`poll: ${lastPollError}${pollFailureStreak > 1 ? ` (streak ${pollFailureStreak})` : ''}`)
         await sleep(cfg.pollIntervalMs)
         continue
       }

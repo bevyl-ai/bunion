@@ -434,7 +434,7 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 <div id="actmenu"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
-const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Testing':'#d99a2b','QA Verify':'#c79a3a','QA blocked':'#e0564f','Needs Engineer':'#d9568c','STG - Ready to merge':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
+const SC=s=>({'Triage':'#7c8493','Backlog':'#7c8493','Todo':'#7c8493','In Progress':'#5b8def','QA Requested':'#d9a441','QA Testing':'#d99a2b','QA Verify':'#c79a3a','QA blocked':'#e0564f','Needs Engineer':'#d9568c','STG - Ready to merge':'#3fb27f','Done':'#a371f7'}[s]||'#7c8493');
 const ago=ms=>{let s=Math.max(0,Math.floor(ms/1000));if(s<60)return s+'s';let m=Math.floor(s/60);if(m<60)return m+'m '+(s%60)+'s';return Math.floor(m/60)+'h '+(m%60)+'m'};
 const esc=s=>(s||'').replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
 const fmtTok=n=>{n=n||0;return n>=1e9?(n/1e9).toFixed(2)+'B':n>=1e6?(n/1e6).toFixed(n>=1e8?0:1)+'M':n>=1e4?Math.round(n/1e3)+'k':n>=1e3?(n/1e3).toFixed(1)+'k':String(n)};
@@ -455,6 +455,7 @@ function kebab(it){return actionList(it).length?'<button class="kebab" data-id="
 let COLS=[
  {name:'Planning',c:'#8b93a1',states:['Triage','Backlog','Todo']},
  {name:'In Progress',c:'#5b8def',states:['In Progress']},
+ {name:'QA Requested',c:'#d9a441',states:['QA Requested'],inert:true},
  {name:'QA check',c:'#d99a2b',states:['QA Testing']},
  {name:'Verify QA',c:'#c79a3a',states:['QA Verify']},
  {name:'Blocked',c:'#e0564f',states:['QA blocked']},

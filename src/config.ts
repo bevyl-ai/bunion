@@ -68,6 +68,7 @@ function parseCadence(v: unknown): number {
 const DEFAULT_COLUMNS: BoardColumn[] = [
   { name: 'Planning', color: '#8b93a1', states: ['Triage', 'Backlog', 'Todo'] },
   { name: 'In Progress', color: '#5b8def', states: ['In Progress'] },
+  { name: 'QA Requested', color: '#d9a441', states: ['QA Requested'] },
   { name: 'QA check', color: '#d99a2b', states: ['QA Testing'] },
   { name: 'Verify QA', color: '#c79a3a', states: ['QA Verify'] },
   { name: 'Blocked', color: '#e0564f', states: ['QA blocked'] },

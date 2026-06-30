@@ -26,14 +26,13 @@ function isActive(cfg: Config, state: string): boolean {
   return cfg.tracker.activeStates.some((s) => s.trim().toLowerCase() === n)
 }
 
-// A continuation turn re-renders the FULL current workflow prompt (not a thin pointer back to turn 1's text) —
-// turn 1's render is the agent's only copy of the instructions, and a continuation that just says "work the stage
-// that matches" relies on the agent's OWN memory of whatever WORKFLOW.md said when ITS thread started. WORKFLOW.md
-// is hot-reloaded, but a long-lived thread never re-reads it — so an operator edit (a renamed Linear state, a
-// changed phase rule) silently never reaches an in-flight ticket; it just keeps citing the stale name forever.
-// Re-rendering means a hot-reloaded edit takes effect on this ticket's very next turn instead of never.
-function continuationPreamble(turn: number, maxTurns: number): string {
-  return `Continuation — turn #${turn} of ${maxTurns}, same thread, same ticket. The instructions below are the CURRENT live workflow — they may have changed since your last turn (e.g. a renamed status); defer to THIS version over anything you remember from earlier in this conversation. Resume from the workspace + workpad and what you've already done — don't restate or redo finished work. Work the stage matching the ticket's CURRENT status below; stop only when it reaches a handoff state (STG - Ready to merge / Needs Engineer) or you're truly blocked.\n\n---\n\n`
+// Symphony §6.2/§7.1: a continuation turn sends only continuation guidance to the existing thread — NOT the
+// original task prompt, which is already present in thread history. (An earlier version of this re-rendered the
+// full prompt every turn, theorizing stale turn-1 memory explained agents drifting to a renamed Linear state; the
+// real Linear issue history refuted that — e.g. BEV-4017 used the correct state name twice in the SAME thread,
+// then drifted 4 minutes later, which isn't consistent with "stuck on turn-1 memory." Reverted to match spec.)
+function continuationPrompt(turn: number, maxTurns: number, state: string): string {
+  return `Continuation — turn #${turn} of ${maxTurns}, same thread, same ticket. The ticket is now in \`${state}\`, so work the stage that matches that status from your original instructions. Resume from the workspace + workpad and what you've already done — don't restate or redo finished work. Keep carrying the ticket forward through its stages; stop only when it reaches a handoff state (STG - Ready to merge / Needs Engineer) or you're truly blocked.`
 }
 
 // One worker session for an issue: prep workspace → run turns on a single app-server thread up to max_turns,
@@ -89,8 +88,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
       for (let turn = 1; ; turn++) {
         if (stopped) return { ok: false, error: 'terminated' }
         onEvent({ turn, log: `\n── turn ${turn} ──` })
-        const rendered = renderPrompt(cfg.promptTemplate, { attempt, issue: current, workpad }) // every turn, not just turn 1 — see continuationPreamble
-        const base = turn === 1 ? rendered : continuationPreamble(turn, cfg.agent.maxTurns) + rendered
+        const base = turn === 1 ? renderPrompt(cfg.promptTemplate, { attempt, issue: current, workpad }) : continuationPrompt(turn, cfg.agent.maxTurns, current.state)
         const pending = drainOperatorMsgs() // operator messages queued via chat while this agent was mid-turn
         const prompt = pending.length ? `${base}\n\n## Operator messages — sent live while you were working; address these now\n${pending.map((m) => `- ${m}`).join('\n')}` : base
         await session.runTurn(threadId, dir, prompt, `${current.identifier}: ${current.title}`)

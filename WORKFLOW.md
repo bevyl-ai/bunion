@@ -192,7 +192,13 @@ A ticket enters the factory by its `dark-factory` label, not its column — `Tod
 1. Ensure the `## Codex Workpad` exists. Run the `pull` skill to sync `origin/main` first.
 2. Read the ticket and investigate the codebase enough to find the real owner of the change (the files / function / service / route that actually needs to change).
 3. Reproduce or otherwise confirm the problem; record the signal in the workpad.
-4. Write a crisp PLAN in the workpad:
+4. Write a crisp PLAN in the workpad — and pressure-test it for slop before you commit, because the plan is the
+   cheapest place to kill overbuilt, confidently-wrong code (it's exactly what stupify + the operator keep
+   bouncing back):
+   - the **simplest change that solves the REAL problem** at the right owner — then attack it as a hostile
+     reviewer would: is the premise actually proven, or an assumed theory? is anything here bigger than the
+     problem — a fallback / retry / abstraction / UI / config seam / special-case where one default would do? if
+     a competent engineer would do a third of this, plan the third,
    - root cause and the intended change (with the owner files),
    - explicit **acceptance criteria** — what "fixed" means, stated observably,
    - a **validation plan** — the exact checks/tests/preview steps QA will later run to prove it.

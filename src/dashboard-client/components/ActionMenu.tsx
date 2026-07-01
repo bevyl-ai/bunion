@@ -7,7 +7,7 @@ export interface MenuRequest {
   anchor: DOMRect
 }
 
-// Outside-click, scroll, and resize dismissal is handled by global listeners in DashboardApp, not here — this
+// Outside-click and resize dismissal is handled by global listeners in DashboardApp, not here — this
 // component only positions and renders the menu for a given request.
 export function ActionMenu({ request, onAction, onClose }: { request: MenuRequest | null; onAction: (id: string, action: string) => void; onClose: () => void }) {
   const ref = useRef<HTMLDivElement | null>(null)

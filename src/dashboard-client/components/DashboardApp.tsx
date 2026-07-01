@@ -59,14 +59,11 @@ export function DashboardApp() {
       const t = e.target as HTMLElement
       if (!t.closest('#actmenu') && !t.closest('.kebab') && !t.closest('.mmore')) closeMenu()
     }
-    const onScroll = (): void => closeMenu()
     const onResize = (): void => closeMenu()
     document.addEventListener('click', onDocClick)
-    window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', onResize)
     return () => {
       document.removeEventListener('click', onDocClick)
-      window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', onResize)
     }
   }, [])

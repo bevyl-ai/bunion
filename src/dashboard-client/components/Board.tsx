@@ -1,7 +1,5 @@
 import { useMemo, useRef } from 'preact/hooks'
 import { colIdx } from '../lib/actions'
-import { HUMAN_NOTE_STATES } from '../lib/format'
-import { useFlip } from '../lib/useFlip'
 import type { BoardColumn, BoardItem } from '../lib/types'
 import { Column } from './Column'
 import { JumpBar } from './JumpBar'
@@ -57,36 +55,15 @@ export function Board({
     return { buckets: bk, unmapped }
   }, [cols, filtered, effState, terminalStates])
 
-  // Structural signature: rebuild only on membership/state/status/pr/QA-note changes; live field ticks never
-  // touch this, so the FLIP hook + full column re-render is skipped for per-second updates.
-  const sig = useMemo(() => {
-    const key = filtered.map((r) => {
-      const st = effState(r.identifier, r.state)
-      return [r.identifier, st, r.status, r.host, r.prUrl, r.retryAttempt, HUMAN_NOTE_STATES.has(st) ? r.note || '' : ''].join('')
-    })
-    return key.join('') + '|' + filterQuery
-  }, [filtered, effState, filterQuery])
-
-  useFlip(boardRef, sig)
-
   const counts = cols.map((_, i) => buckets[i]!.length)
 
+  // Native, instant horizontal jump to a column — no smooth-scroll, no animation. Cards snap into place via
+  // Preact's normal reconciliation on the next render.
   const jumpTo = (index: number): void => {
     const board = boardRef.current
     const el = colRefs.current.get(index)
     if (!board || !el) return
-    const target = el.offsetLeft - 16
-    const before = board.scrollLeft
-    board.scrollTo({ left: target, behavior: 'smooth' })
-    // Chromium suspends the compositor-driven smooth-scroll animation on a backgrounded/hidden tab, so a
-    // click landing while the tab isn't visible can silently no-op. Verify shortly after that the scroll
-    // actually progressed and snap instantly as a fallback if it didn't — belt-and-suspenders, does not
-    // change the smooth-scroll behavior a normal focused/visible tab sees.
-    setTimeout(() => {
-      if (Math.abs(board.scrollLeft - before) < 1 && Math.abs(board.scrollLeft - target) > 1) {
-        board.scrollTo({ left: target, behavior: 'instant' as ScrollBehavior })
-      }
-    }, 200)
+    board.scrollLeft = el.offsetLeft - 16
   }
 
   const unmappedNames = unmapped.length ? [...new Set(unmapped.map((r) => effState(r.identifier, r.state)))].join(', ') : ''

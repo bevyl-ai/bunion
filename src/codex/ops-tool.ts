@@ -44,11 +44,13 @@ const SERVICES: Record<string, OpsService> = {
   datadog: {
     base: () => `https://api.${process.env.DD_SITE || 'datadoghq.com'}`,
     auth: () => {
-      const api = process.env.DD_API_KEY
-      const app = process.env.DD_APPLICATION_KEY || process.env.DD_APP_KEY // both spellings are common in the wild
+      // DATADOG_* first: that's the spelling in the brain's secrets.env (and the operator's ~/.bevyl/.env); the
+      // DD_* forms are accepted as the other spelling common in the wild.
+      const api = process.env.DATADOG_API_KEY || process.env.DD_API_KEY
+      const app = process.env.DATADOG_APPLICATION_KEY || process.env.DD_APPLICATION_KEY || process.env.DD_APP_KEY
       return api && app ? { 'dd-api-key': api, 'dd-application-key': app } : null
     },
-    envHint: 'DD_API_KEY + DD_APPLICATION_KEY',
+    envHint: 'DATADOG_API_KEY + DATADOG_APPLICATION_KEY',
     allow: [
       ['GET', '/api/v1/monitor'], // list monitors + /api/v1/monitor/:id
       ['GET', '/api/v1/dashboard'], // list dashboards + /api/v1/dashboard/:id

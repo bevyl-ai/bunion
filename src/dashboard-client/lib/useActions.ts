@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
+import { useCallback, useRef, useState } from 'preact/hooks'
 import { DANGER_CONFIRM } from './actions'
 import type { Snapshot } from './types'
 
@@ -33,33 +33,16 @@ export function useActions(
   const snapRef = useRef(snap)
   snapRef.current = snap
 
-  // Sweep expired/superseded overrides whenever the snapshot's items change, the 1s clock ticks, or an override
-  // is added/removed. An override clears once the real item shows the target state, once it expires (5s), or if
-  // the item vanished. Re-running right after this effect's own setOverrides call is harmless: the swept map has
-  // nothing left to remove on that pass, so `changed` comes back false and the loop settles immediately.
-  useEffect(() => {
-    if (Object.keys(overrides).length === 0) return
-    const byId = new Map(snap.items.map((i) => [i.identifier, i]))
-    let changed = false
-    const next: Record<string, OptimisticOverride> = {}
-    for (const id in overrides) {
-      const ov = overrides[id]!
-      const it = byId.get(id)
-      if (!it || it.state === ov.state || Date.now() > ov.expiresAt) {
-        changed = true
-        continue
-      }
-      next[id] = ov
-    }
-    if (changed) setOverrides(next)
-  }, [snap.items, now, overrides])
-
+  // An override is "live" only until the real state catches up (actual === target), it expires (5s), or the item
+  // vanishes. Rather than a state-syncing effect that sweeps the map on every snapshot/clock change, decide
+  // liveness at read time in effState — the 1s `now` tick already re-renders, so an expired override reverts on
+  // the next tick. Stale keys are pruned opportunistically when a new move override is added (see postAction).
   const effState = useCallback(
     (identifier: string, actual: string): string => {
       const o = overrides[identifier]
-      return o ? o.state : actual
+      return o && now < o.expiresAt && actual !== o.state ? o.state : actual
     },
-    [overrides],
+    [overrides, now],
   )
 
   // Not memoized: every caller (DashboardApp's handleAction and friends) already wraps this in its own
@@ -84,7 +67,14 @@ export function useActions(
       }
     } else if (action.indexOf('move:') === 0) {
       const to = action.slice(5)
-      setOverrides((o) => ({ ...o, [id]: { state: to, expiresAt: Date.now() + 5000 } }))
+      const at = Date.now()
+      // Drop any already-expired overrides while we add this one, so the map can't accumulate stale keys.
+      setOverrides((o) => {
+        const next: Record<string, OptimisticOverride> = {}
+        for (const k in o) if (at < o[k]!.expiresAt) next[k] = o[k]!
+        next[id] = { state: to, expiresAt: at + 5000 }
+        return next
+      })
       revert = () =>
         setOverrides((o) => {
           const next = { ...o }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 
 // Cache is module-level (not per-hook-instance) so hover-prefetch and the modal itself share one store.
 const logCache = new Map<string, string[]>()
@@ -34,6 +34,18 @@ export function useLogStream(id: string | null): LogStreamState {
   const [lines, setLines] = useState<string[]>(() => (id ? logCache.get(id) ?? [] : []))
   const [live, setLive] = useState('')
   const [loaded, setLoaded] = useState<boolean>(() => !!(id && logCache.has(id)))
+
+  // The modal is never unmounted between tickets/roles, so a changed `id` doesn't reset this hook's state on
+  // its own -- without this, closing one ticket's transcript and opening another briefly paints the old one
+  // under the new header until the effect below runs (which happens after paint). Reset synchronously during
+  // render instead, so a stale transcript never has a frame to appear in.
+  const lastId = useRef(id)
+  if (lastId.current !== id) {
+    lastId.current = id
+    setLines(id ? logCache.get(id) ?? [] : [])
+    setLive('')
+    setLoaded(!!(id && logCache.has(id)))
+  }
 
   useEffect(() => {
     if (!id) return

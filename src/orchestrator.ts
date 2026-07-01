@@ -213,11 +213,13 @@ export async function start(workflowPath?: string): Promise<void> {
   // continuation/handoff; `restart` clears it for a from-scratch run. `touchLog` marks a ticket most-recent and
   // evicts the oldest past the cap.
   const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
-  // BEV ergonomics audit: pure recency eviction let a ticket that's actively awaiting operator attention
-  // (Factory - Needs Engineer / QA - blocked) lose its ENTIRE transcript just because other tickets churned more recently on
-  // a busy board — the dashboard then shows "(no log yet)", indistinguishable from "never ran," on exactly the
-  // tickets an operator most needs history on (BEV-3869: 75h stuck, 6.31B tokens of real history, 0 cached lines).
-  const PROTECTED_LOG_STATES = new Set(['factory - needs engineer', 'qa - blocked'])
+  // BEV ergonomics audit: pure recency eviction let a ticket that's actively awaiting a person (any human-action
+  // lane) lose its ENTIRE transcript just because other tickets churned more recently on a busy board — the
+  // dashboard then shows "(no log yet)", indistinguishable from "never ran," on exactly the tickets a person most
+  // needs history on (BEV-3869: 75h stuck, 6.31B tokens of real history, 0 cached lines). Protect every lane a
+  // human acts on: the escalations (Needs Engineer / QA - blocked) and the review gates (QA - Requested /
+  // Factory - UI review / Factory - can't verify).
+  const PROTECTED_LOG_STATES = new Set(['factory - needs engineer', 'qa - blocked', 'qa - requested', 'factory - ui review', "factory - can't verify"])
   const touchLog = (identifier: string): void => {
     const prev = logs.get(identifier) ?? []
     logs.delete(identifier)
@@ -1032,7 +1034,10 @@ export async function start(workflowPath?: string): Promise<void> {
           }
         }
         const s = norm(i.state)
-        if ((s === 'qa - blocked' || s === 'factory - needs engineer' || s === 'stg - ready to merge') && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
+        // Hydrate the human-facing note (latest Codex Workpad) for every lane a person acts on, so the card shows
+        // the reason (why blocked / what to decide / the prod check to run / QA proof) even after the transient
+        // transcript is evicted. Covers the escalations + all the human-review gates.
+        if ((s === 'qa - blocked' || s === 'factory - needs engineer' || s === 'stg - ready to merge' || s === 'qa - requested' || s === 'factory - ui review' || s === "factory - can't verify") && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
           notesFetched.add(i.id)
           void fetchLatestNote(cfg, i.id).then((n) => n && summaries.set(i.identifier, n)).catch(() => {})
         }

@@ -15,13 +15,13 @@ export function dur(ms: number | null | undefined): string {
 
 // Literal hex, not var(--color-x): callers append an alpha suffix (oc(x) + '22') to build the badge background,
 // and "var(--color-x)22" is not a valid CSS color -- that silently dropped the background tint for every outcome
-// except Needs Engineer (the one entry that was already a literal) since this table's first version.
+// except Factory - Needs Engineer (the one entry that was already a literal) since this table's first version.
 const OC: Record<string, string> = {
   Done: '#a371f7',
   'STG - Ready to merge': '#3fb27f',
   'STG - Merged': '#d99a2b',
   'Verifying in Prod': '#5b8def',
-  'Needs Engineer': '#d9568c',
-  'QA blocked': '#e0564f',
+  'Factory - Needs Engineer': '#d9568c',
+  'QA - blocked': '#e0564f',
 }
 export const oc = (s: string | null | undefined): string => (s && OC[s]) || '#5a6270'

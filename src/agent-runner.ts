@@ -32,7 +32,7 @@ function isActive(cfg: Config, state: string): boolean {
 // real Linear issue history refuted that — e.g. BEV-4017 used the correct state name twice in the SAME thread,
 // then drifted 4 minutes later, which isn't consistent with "stuck on turn-1 memory." Reverted to match spec.)
 function continuationPrompt(turn: number, maxTurns: number, state: string): string {
-  return `Continuation — turn #${turn} of ${maxTurns}, same thread, same ticket. The ticket is now in \`${state}\`, so work the stage that matches that status from your original instructions. Resume from the workspace + workpad and what you've already done — don't restate or redo finished work. Keep carrying the ticket forward through its stages; stop only when it reaches a handoff state (STG - Ready to merge / Needs Engineer) or you're truly blocked.`
+  return `Continuation — turn #${turn} of ${maxTurns}, same thread, same ticket. The ticket is now in \`${state}\`, so work the stage that matches that status from your original instructions. Resume from the workspace + workpad and what you've already done — don't restate or redo finished work. Keep carrying the ticket forward through its stages; stop when you reach a handoff you don't own — mainly \`QA - Requested\` (a human QA-tests and merges from there; NEVER move a ticket past it) or \`Factory - Needs Engineer\` — or the verify:prod stage lands it at \`Done\` / \`Factory - can't verify\`, or you're truly blocked.`
 }
 
 // One worker session for an issue: prep workspace → run turns on a single app-server thread up to max_turns,
@@ -93,7 +93,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
         const prompt = pending.length ? `${base}\n\n## Operator messages — sent live while you were working; address these now\n${pending.map((m) => `- ${m}`).join('\n')}` : base
         await session.runTurn(threadId, dir, prompt, `${current.identifier}: ${current.title}`)
         current = await fetchById(cfg, issue.id)
-        if (!isActive(cfg, current.state)) break // reached a handoff state (STG - Ready to merge / Needs Engineer / Done) — this ticket is done
+        if (!isActive(cfg, current.state)) break // reached a handoff state (STG - Ready to merge / Factory - Needs Engineer / Done) — this ticket is done
         if (turn >= cfg.agent.maxTurns) break // graceful per-session cap; the orchestrator resumes this same thread next poll if the ticket is still active
       }
       return { ok: true }

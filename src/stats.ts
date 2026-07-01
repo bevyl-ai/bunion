@@ -33,7 +33,10 @@ export interface Stats {
 }
 
 const SHIPPED = "('STG - Ready to merge','STG - Merged','Done')"
-const REWORK_FROM = "('QA Testing','QA Verify','QA blocked')"
+// Every post-build state a bounce back to In Progress counts as a rework from: the agent QA loop (QA - Testing /
+// QA - blocked), the human review gates (QA - Requested / Factory - UI review send-backs), and prod regressions
+// (Verifying in Prod / Factory - can't verify → In Progress). Keep in sync with the WORKFLOW.md route targets.
+const REWORK_FROM = "('QA - Testing','QA - blocked','QA - Requested','Factory - UI review','Verifying in Prod','Factory - can''t verify')"
 const ORDER: Record<string, string> = { tokens: 'tokens DESC', cycle: 'cycle_ms DESC', reworks: 'reworks DESC, tokens DESC', recent: 'last_ts DESC' }
 
 export function openStats(path: string = join(homedir(), '.bunion', 'stats.db')): Stats {

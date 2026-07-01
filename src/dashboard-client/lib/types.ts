@@ -94,14 +94,15 @@ export interface Snapshot {
 export const DEFAULT_COLUMNS: BoardColumn[] = [
   { name: 'Planning', c: '#8b93a1', states: ['Triage', 'Backlog', 'Todo'] },
   { name: 'In Progress', c: '#5b8def', states: ['In Progress'] },
-  { name: 'QA Requested', c: '#d9a441', states: ['QA Requested'], inert: true },
-  { name: 'QA check', c: '#d99a2b', states: ['QA Testing'] },
-  { name: 'Verify QA', c: '#c79a3a', states: ['QA Verify'] },
-  { name: 'Blocked', c: '#e0564f', states: ['QA blocked'] },
-  { name: 'Needs Engineer', c: '#d9568c', states: ['Needs Engineer'], inert: true },
+  { name: 'QA check', c: '#d99a2b', states: ['QA - Testing'] },
+  { name: 'Blocked', c: '#e0564f', states: ['QA - blocked'] },
+  { name: 'QA - Requested', c: '#d9a441', states: ['QA - Requested'], inert: true },
+  { name: 'Factory - UI review', c: '#b88cd9', states: ['Factory - UI review'], inert: true },
   { name: 'Ready', c: '#3fb27f', states: ['STG - Ready to merge'], inert: true },
   { name: 'In Staging', c: '#e3b341', states: ['STG - Merged'], inert: true },
   { name: 'Verifying prod', c: '#4a9eda', states: ['Verifying in Prod'] },
+  { name: "Factory - can't verify", c: '#e0864f', states: ["Factory - can't verify"], inert: true },
+  { name: 'Factory - Needs Engineer', c: '#d9568c', states: ['Factory - Needs Engineer'], inert: true },
   { name: 'Done', c: '#6b7280', states: ['Done'], inert: true },
 ]
 

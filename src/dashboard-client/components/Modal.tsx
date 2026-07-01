@@ -211,10 +211,10 @@ function ModalSub({ item, role }: { item: BoardItem | null; role: RoleItem | nul
 function ModalBanner({ item, isRole }: { item: BoardItem | null; isRole: boolean }) {
   const base = 'mt-[11px] mx-4 mb-0 px-3 py-[9px] rounded-[9px] text-[12.5px] leading-[1.5]'
   if (isRole || !item) return <div id="mbanner" style={{ display: 'none' }} />
-  if (item.state === 'Needs Engineer') {
+  if (item.state === 'Factory - Needs Engineer') {
     return (
       <div id="mbanner" class={`${base} bg-[#e0564f18] border border-[#e0564f44] text-danger-text`}>
-        <b class="text-danger">⚠ Needs Engineer</b> — {item.note || 'open the workpad in Linear for the decision needed'}
+        <b class="text-danger">⚠ Factory - Needs Engineer</b> — {item.note || 'open the workpad in Linear for the decision needed'}
       </div>
     )
   }

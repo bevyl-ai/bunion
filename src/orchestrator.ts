@@ -66,7 +66,9 @@ export function resolveTokenBase(landedThreadId: string, resumingThreadId: strin
 export function capClearIncrement(currentTotal: number, currentEffectiveCap: number, hardTokenCap: number): number {
   return Math.max(0, currentTotal - currentEffectiveCap) + hardTokenCap
 }
-const LOG_TICKETS = 60 // most-recent tickets whose transcript we keep in memory + persist
+const LOG_TICKETS = 200 // most-recent tickets whose transcript we keep in memory + persist — BEV ergonomics audit:
+// 60 was comfortably smaller than a single day's board (81+ items and growing); bumped with real headroom.
+// touchLog's eviction is also now state-aware (see below), so this is a backstop, not the primary defense.
 const STATE_DIR = join(homedir(), '.bunion')
 const TOKENS_FILE = join(STATE_DIR, 'tokens.json') // identifier → phase → token counts
 const LOGS_FILE = join(STATE_DIR, 'logs.json') // identifier → recent transcript lines
@@ -211,13 +213,25 @@ export async function start(workflowPath?: string): Promise<void> {
   // continuation/handoff; `restart` clears it for a from-scratch run. `touchLog` marks a ticket most-recent and
   // evicts the oldest past the cap.
   const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
+  // BEV ergonomics audit: pure recency eviction let a ticket that's actively awaiting operator attention
+  // (Needs Engineer / QA blocked) lose its ENTIRE transcript just because other tickets churned more recently on
+  // a busy board — the dashboard then shows "(no log yet)", indistinguishable from "never ran," on exactly the
+  // tickets an operator most needs history on (BEV-3869: 75h stuck, 6.31B tokens of real history, 0 cached lines).
+  const PROTECTED_LOG_STATES = new Set(['needs engineer', 'qa blocked'])
   const touchLog = (identifier: string): void => {
     const prev = logs.get(identifier) ?? []
     logs.delete(identifier)
     logs.set(identifier, prev)
     if (logs.size > LOG_TICKETS) {
-      const oldest = logs.keys().next().value
-      if (oldest && oldest !== identifier) logs.delete(oldest)
+      // Evict the oldest-touched ticket that ISN'T one a human still needs to look at, not just the literal
+      // oldest — walk in touch order (Map preserves insertion order) and skip protected states.
+      for (const id of logs.keys()) {
+        if (id === identifier) continue
+        const state = norm(lastBoard.find((i) => i.identifier === id)?.state ?? '')
+        if (PROTECTED_LOG_STATES.has(state)) continue
+        logs.delete(id)
+        break
+      }
     }
   }
 

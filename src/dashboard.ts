@@ -303,6 +303,10 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 .card{background:linear-gradient(180deg,var(--surf) 0%,#13151c 100%);border:1px solid var(--line);border-radius:12px;padding:12px 14px;cursor:pointer;overflow:hidden;box-shadow:var(--sh1);transition:transform .15s cubic-bezier(.2,.7,.2,1),border-color .15s,box-shadow .15s}
 .card:hover{border-color:var(--line3);box-shadow:var(--sh2);transform:translateY(-2px)}
 .card.run{border-left:2.5px solid var(--accent);padding-left:11.5px;background:linear-gradient(180deg,#171b24 0%,#13151c 100%);box-shadow:0 0 0 1px #5b8def1f,var(--sh2)}
+.card.ne-hot{border-left:2.5px solid #ff5c5c;padding-left:11.5px;animation:ne-pulse 2.2s ease-in-out infinite}
+.ag.ne-hot{color:#ff5c5c;font-weight:700}
+.t-tok.tok-stale{color:#e0a020;font-weight:600}
+@keyframes ne-pulse{0%,100%{box-shadow:0 0 0 1px #ff5c5c22,var(--sh1)}50%{box-shadow:0 0 0 1px #ff5c5c66,0 0 14px #ff5c5c33,var(--sh1)}}
 .ctop{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .cid{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;font-weight:650;letter-spacing:-.2px;color:var(--fg)}
 .pill{font-size:10px;font-weight:700;padding:2.5px 9px;border-radius:20px;white-space:nowrap;letter-spacing:.2px}
@@ -471,7 +475,7 @@ let COLS=[
  {name:'Verifying prod',c:'#4a9eda',states:['Verifying in Prod']},
  {name:'Done',c:'#6b7280',states:['Done'],inert:true}];
 function colIdx(st){var l=(st||'').trim().toLowerCase();for(var i=0;i<COLS.length;i++)for(var j=0;j<COLS[i].states.length;j++)if(COLS[i].states[j].toLowerCase()===l)return i;return -1;}
-function moveItems(it){if(!it)return [];var cur=colIdx(it.state);return COLS.map(function(col,i){return i===cur?null:{a:'move:'+col.states[0],l:'\\u2192 '+col.name,c:'',t:'Move this ticket to '+col.name};}).filter(Boolean);}
+function moveItems(it){if(!it)return [];var cur=colIdx(it.state);return COLS.map(function(col,i){if(i===cur)return null;if(col.name==='QA Requested')return null;/* human-owned Linear state — never a valid manual target, mirrors the agent-side ban in WORKFLOW.md */return {a:'move:'+col.states[0],l:'\\u2192 '+col.name,c:'',t:'Move this ticket to '+col.name};}).filter(Boolean);}
 let snap={items:[],cap:0,scope:''};
 var optimisticOverrides={};var logCache=new Map();var logEs=null,_logPoll=null,_pollFallback=null,logCount=0;
 async function pull(){try{snap=await (await fetch('/state.json',{cache:'no-store'})).json();if(snap.columns&&snap.columns.length)COLS=snap.columns;}catch(e){}render()}
@@ -480,19 +484,27 @@ function cardHtml(r,now){
  const act=now-r.lastActivity,dc=act<30000?'#3fb27f':act<120000?'#d99a2b':'#e0564f';
  const pr=r.prUrl?'<a class="pr" href="'+r.prUrl+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">#'+(r.prUrl.split("/pull/")[1]||"")+'</a>':'';
  let status;
+ // BEV ergonomics audit: Needs Engineer sat at the same visual weight whether it had been ignored 5 minutes or 5
+ // days — no escalation signal at all. Tier it: 1-2d = amber, 2d+ = hot red + a pulsing card border, so the truly
+ // neglected ones are impossible to miss (also sorted oldest-first within the column — see render()).
+ const neDays=(r.state==='Needs Engineer'&&r.enteredAt)?((r.endedAt||now)-r.enteredAt)/86400000:0;
  if(run) status='<span class="ag t-ago"><i class="dot" style="background:'+dc+'"></i>active '+ago(act)+'</span>';
  else if(r.status==='retrying') status='<span class="ag">&#8635; retry '+(r.retryDueAt?'in '+ago(r.retryDueAt-now):'soon')+'</span>';
- else if(r.state==='Needs Engineer') status='<span class="ag" style="color:#d9568c">&#9888; needs engineer</span>';
+ else if(r.state==='Needs Engineer') status=neDays>=2?'<span class="ag ne-hot">&#9888;&#9888; needs engineer &middot; '+neDays.toFixed(1)+'d ignored</span>':neDays>=1?'<span class="ag" style="color:#e0a020">&#9888; needs engineer &middot; '+neDays.toFixed(1)+'d</span>':'<span class="ag" style="color:#d9568c">&#9888; needs engineer</span>';
  else if(r.state==='Done') status='<span class="ag" style="color:#a371f7">&#10004; merged</span>';
  else if(r.state==='STG - Ready to merge') status='<span class="ag" style="color:#3fb27f">&#10004; ready</span>';
  else if(r.status==='handoff') status='<span class="ag">&#10004; in review</span>';
  else status='<span class="ag">&#9203; queued</span>';
  const tot=r.enteredAt?'<span class="t-tot clk" title="total time in the factory">&#9201; '+ago((r.endedAt||now)-r.enteredAt)+'</span>':'';
  const tcst=r.tokens?estCost(r.tokens.phases.reduce(function(a,p){return a+p.input},0),r.tokens.phases.reduce(function(a,p){return a+p.output},0),r.tokens.phases.reduce(function(a,p){return a+p.cached},0)):0;
- const tk=r.tokens?'<span class="t-tok clk" title="'+fmtTok(r.tokens.total)+' tokens &middot; ~'+fmtCost(tcst)+' at API rates &middot; flat plan, not per-token">'+fmtTok(r.tokens.total)+' tok</span>':'<span class="t-tok"></span>';
+ // BEV ergonomics audit: a token total this large (2026-06-30 or earlier) is far more likely to be pre-fix
+ // double-counting scar tissue (db510f7 fixed the accounting bug — see project memory) than a real single-ticket
+ // spend even after several legitimate cap-clear grants; flag it plainly instead of presenting it as trustworthy.
+ const tokStale=(r.tokens&&r.tokens.total>=1e9);
+ const tk=r.tokens?'<span class="t-tok clk'+(tokStale?' tok-stale':'')+'" title="'+fmtTok(r.tokens.total)+' tokens &middot; ~'+fmtCost(tcst)+' at API rates &middot; flat plan, not per-token'+(tokStale?' &middot; \\u26a0 likely inflated by pre-fix accounting bug (see db510f7) \\u2014 do not trust this number at face value':'')+'">'+(tokStale?'&#9888; ':'')+fmtTok(r.tokens.total)+' tok</span>':'<span class="t-tok"></span>';
  const pdot=(r.priority>=1&&r.priority<=4)?'<i class="pri p'+r.priority+'" title="'+PRI[r.priority]+' priority"></i>':'';
  const reason=((r.state==='QA blocked'||r.state==='Needs Engineer')&&r.note)?'<div class="creason" title="why it is stuck">'+esc(r.note.slice(0,160))+'</div>':'';
- return '<div class="card'+(run?' run':'')+'" data-id="'+r.identifier+'" tabindex="0" aria-label="Open '+r.identifier+'">'+
+ return '<div class="card'+(run?' run':'')+(neDays>=2?' ne-hot':'')+'" data-id="'+r.identifier+'" tabindex="0" aria-label="Open '+r.identifier+'">'+
   '<div class="ctop"><span class="cid">'+pdot+r.identifier+'</span><span class="ctr">'+pr+kebab(r)+'</span></div>'+
   '<div class="ctitle">'+esc(r.title)+'</div>'+
   (run?'<div class="cact t-act">turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,70))+'</div>':'')+
@@ -535,6 +547,8 @@ function render(){
   else{
    const bk=COLS.map(()=>[]);var unmapped=[];var term=(snap.terminalStates||[]).map(function(s){return s.toLowerCase()});
    for(const r of filtered){const i=colIdx(effState(r));if(i>=0)bk[i].push(r);else if(term.indexOf(effState(r).toLowerCase())<0)unmapped.push(r);}  // unmapped = no column AND not an intentionally-hidden terminal state — a renamed state surfaces; Done/Canceled/Duplicate don't
+   var neIdx=COLS.findIndex(function(c){return c.name==='Needs Engineer'});
+   if(neIdx>=0)bk[neIdx].sort(function(a,b){return (a.enteredAt||0)-(b.enteredAt||0)});  // most-neglected (oldest) first — the ones actually being ignored belong at the top, not buried by insertion order
    var html=COLS.map((col,i)=>colHtml(col,bk[i],now)).join('');
    if(unmapped.length){var us=[...new Set(unmapped.map(function(r){return effState(r)}))].join(', ');html+=colHtml({name:'&#9888; unmapped &mdash; '+esc(us),c:'#e0564f',states:[]},unmapped,now);}
    board.innerHTML=html;
@@ -552,7 +566,7 @@ function tickLive(){
   const tt=card.querySelector('.t-tot');if(tt&&r.enteredAt)tt.innerHTML='&#9201; '+ago((r.endedAt||now)-r.enteredAt);
   const ag=card.querySelector('.t-ago');if(ag){const act=now-r.lastActivity,dc=act<30000?'#3fb27f':act<120000?'#d99a2b':'#e0564f';ag.innerHTML='<i class="dot" style="background:'+dc+'"></i>active '+ago(act)}
   const ac=card.querySelector('.t-act');if(ac)ac.innerHTML='turn '+(r.turn||0)+' &middot; '+esc((r.activity||'').slice(0,72));
-  const tk=card.querySelector('.t-tok');if(tk)tk.innerHTML=r.tokens?fmtTok(r.tokens.total)+' tok':'';
+  const tk=card.querySelector('.t-tok');if(tk)tk.innerHTML=r.tokens?((r.tokens.total>=1e9?'&#9888; ':'')+fmtTok(r.tokens.total)+' tok'):'';  // keep in sync with cardHtml's tok-stale threshold, or this per-second tick silently erases the warning icon
  });
 }
 function roleColor(n){n=(n||'').toLowerCase();return n==='mechanic'?'#d99a2b':n==='dreamer'?'#b88cd9':n==='user-advocate'?'#3fb29e':'#5b8def';}
@@ -603,7 +617,14 @@ function startLogStream(id){if(typeof EventSource==='undefined'){_logPoll=setInt
   else if('live' in j){var dt=b.querySelector('.lg-typing');if(dt)dt.remove();var lv=b.querySelector('.lg-live');if(!j.live){if(lv)lv.remove();}else{if(!lv){lv=document.createElement('div');lv.className='lg lg-live';b.appendChild(lv);}lv.innerHTML=esc(j.live)+'<span class="lg-cur"></span>';}}
   if(atEnd||chatPending||('live' in j))b.scrollTop=b.scrollHeight;};
  logEs.onerror=function(){if(logEs){try{logEs.close()}catch(e){}logEs=null;}if(expandedId===id&&!_logPoll){_logPoll=setInterval(function(){if(expandedId===id)pullLog()},1000);pullLog();}};}
+var DANGER_CONFIRM={
+ 'restart':'Permanently wipe this ticket\\'s workspace and thread history \\u2014 ALL context is lost and cannot be recovered. Continue?',
+ 'move:Done':'Mark this ticket Done directly? This does NOT merge or deploy anything \\u2014 it only changes the label, and dashboards/stats will count it as shipped even though nothing actually happened. Only do this if you verified it shipped some other way.',
+ 'move:STG - Merged':'Mark this ticket merged/in-staging directly? This does NOT actually merge the PR \\u2014 it only changes the label, and stats will count it as shipped even though nothing happened on GitHub. Continue only if you already merged it yourself.',
+ 'move:Verifying in Prod':'Mark this ticket live in production directly? This does NOT deploy anything \\u2014 it only changes the label. Continue only if you know it is genuinely live.',
+};
 async function postAction(btn,id,action,ev){if(ev){ev.stopPropagation();ev.preventDefault();}
+ if(DANGER_CONFIRM[action]&&!confirm(id+': '+DANGER_CONFIRM[action]))return;
  var box=btn&&btn.parentNode;if(box)box.querySelectorAll('button').forEach(function(x){x.classList.add('busy')});
  var revert=null;
  if(id==='__pause__'&&action==='toggle'){var was=snap.paused;snap.paused=!snap.paused;render();revert=function(){snap.paused=was;render();};}

@@ -278,10 +278,16 @@ function workpadReason(workpad: string): string | null {
 
 // The reason to surface for a blocked ticket on the dashboard: ONLY the worker's own `Verdict:` line from its
 // workpad. Never a human comment or other chatter — if there's no workpad verdict yet, show nothing.
+// BEV ergonomics audit: the `## Codex Workpad` is ONE persistent comment edited in place over a ticket's life
+// (never re-posted) — but Linear's `comments(last: N)` connection orders by CREATION time, not by when a comment
+// was last edited. A ticket that deadlocks/auto-blocks repeatedly posts a fresh system comment each time, so the
+// workpad's (old) creation timestamp gets pushed out of a narrow window even though its CONTENT was just updated —
+// exactly the failure mode that left BEV-3869 (30+ transitions, several auto-block comments) with no note shown at
+// all. Widened well past what any real ticket's auto-block comment count should exceed.
 export async function fetchLatestNote(cfg: Config, issueId: string): Promise<string | null> {
   const d = await query<{ issue: { comments: { nodes: { body: string }[] } } | null }>(
     cfg,
-    `query Note($id: String!) { issue(id: $id) { comments(last: 8) { nodes { body } } } }`,
+    `query Note($id: String!) { issue(id: $id) { comments(last: 40) { nodes { body } } } }`,
     { id: issueId },
   )
   const raw = (d.issue?.comments.nodes ?? []).map((n) => n.body).filter(Boolean)

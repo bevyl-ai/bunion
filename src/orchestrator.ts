@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { startAgent, type AgentHandle } from './agent-runner'
-import { startRole, type RoleHandle } from './role-runner'
+import { roleWorkspaceKey, startRole, type RoleHandle } from './role-runner'
 import { AppServerSession } from './codex/app-server'
 import { linearGraphqlTool, linearReadTool } from './codex/dynamic-tool'
 import { loadConfig, phaseOf, validateConfig } from './config'
@@ -65,6 +65,32 @@ export function resolveTokenBase(landedThreadId: string, resumingThreadId: strin
 // deficit, plus one full cap's worth of real working headroom on top. Pure + exported so it's unit-testable.
 export function capClearIncrement(currentTotal: number, currentEffectiveCap: number, hardTokenCap: number): number {
   return Math.max(0, currentTotal - currentEffectiveCap) + hardTokenCap
+}
+// BEV-4061: the keep-list computation behind the periodic VM workspace prune (§8.6), pure + exported so it's
+// unit-testable. The sweep deletes any ~/.bunion/workspaces dir NOT on its host's list, so an omission here IS a
+// deletion — exactly how pool-role checkouts (`role-<name>`) were being destroyed: they were never on the list, and
+// a reused role workspace's top-level mtime goes stale even while codex works INSIDE it, so the sweep rm -rf'd a
+// running mechanic's cwd out from under its shell commands, sidestepping the BEV-3970/3971 start-of-run self-heal
+// entirely. Roles are now protected exactly like tickets: kept on the host we believe holds the checkout, or on
+// EVERY host when there's no record (never dispatched / no persisted thread — the same safe fallback board tickets get).
+export function pruneKeepByHost(
+  hosts: string[],
+  pinned: Array<{ identifier: string; host: string }>, // live runs + scheduled retries — keep on their pinned worker
+  board: Array<{ identifier: string; host: string | null }>, // every open ticket; host=null → no record
+  roles: Array<{ name: string; host: string | null }>, // configured pool roles; host = live run's, else the persisted thread's
+): Map<string, string[]> {
+  const keepByHost = new Map<string, string[]>()
+  const keep = (h: string, id: string): void => {
+    keepByHost.set(h, [...(keepByHost.get(h) ?? []), id])
+  }
+  const spread = (id: string, host: string | null): void => {
+    if (host) keep(host, id)
+    else for (const h of hosts) keep(h, id)
+  }
+  for (const p of pinned) keep(p.host, p.identifier)
+  for (const b of board) spread(b.identifier, b.host)
+  for (const r of roles) spread(roleWorkspaceKey(r.name), r.host)
+  return keepByHost
 }
 const LOG_TICKETS = 200 // most-recent tickets whose transcript we keep in memory + persist — BEV ergonomics audit:
 // 60 was comfortably smaller than a single day's board (81+ items and growing); bumped with real headroom.
@@ -917,14 +943,11 @@ export async function start(workflowPath?: string): Promise<void> {
   const pruneWorkspaces = (): void => {
     const hosts = cfg.worker.sshHosts
     if (hosts.length === 0) return
-    const keepByHost = new Map<string, string[]>()
-    const keep = (h: string, id: string): void => {
-      keepByHost.set(h, [...(keepByHost.get(h) ?? []), id])
-    }
-    for (const e of running.values()) if (e.host) keep(e.host, e.issue.identifier)
+    const pinned: Array<{ identifier: string; host: string }> = []
+    for (const e of running.values()) if (e.host) pinned.push({ identifier: e.issue.identifier, host: e.host })
     for (const [id, r] of retries) {
       const h = placement.get(id)
-      if (h) keep(h, r.identifier)
+      if (h) pinned.push({ identifier: r.identifier, host: h })
     }
     // After a restart `running`/`retries`/`placement` are all empty (in-memory only) — but threadRecs.host is
     // PERSISTED (threads.json) and already used elsewhere to land a resume back on the worker holding the rollout,
@@ -933,11 +956,11 @@ export async function start(workflowPath?: string): Promise<void> {
     // every one of the 8 workers (an 8x multiplier) for as long as it stayed open — Factory - Needs Engineer/Ready can sit
     // for days. Only tickets we genuinely have no host record for (never dispatched, or pre-date host tracking)
     // still get the broad protect-everywhere fallback.
-    for (const i of lastBoard) {
-      const h = placement.get(i.id) ?? threadRecs.get(i.id)?.host ?? null
-      if (h) keep(h, i.identifier)
-      else for (const hh of hosts) keep(hh, i.identifier)
-    }
+    const board = lastBoard.map((i) => ({ identifier: i.identifier, host: placement.get(i.id) ?? threadRecs.get(i.id)?.host ?? null }))
+    // BEV-4061: pool roles keep ONE persistent checkout each (`role-<name>`), reused across cadence runs — it must
+    // survive between (and especially DURING) runs, or the mechanic's next pass starts from a vanished cwd.
+    const roles = cfg.roles.map((r) => ({ name: r.name, host: roleRunning.get(r.name)?.host ?? threadRecs.get(`role:${r.name}`)?.host ?? null }))
+    const keepByHost = pruneKeepByHost(hosts, pinned, board, roles)
     for (const host of hosts) {
       const list = `${(keepByHost.get(host) ?? []).join(' ')} SMOKE CLONETEST`
       const cmd = `for d in ~/.bunion/workspaces/*/; do [ -d "$d" ] || continue; id=$(basename "$d"); case " ${list} " in *" $id "*) continue;; esac; [ -z "$(find "$d" -maxdepth 0 -mmin -20 2>/dev/null)" ] && rm -rf "$d"; done`

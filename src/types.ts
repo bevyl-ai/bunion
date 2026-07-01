@@ -101,6 +101,18 @@ export interface BoardColumn {
   states: string[]
 }
 
+// The factory's own GitHub App identity (bevyl-dark-factory[bot]). When configured, local-mode agents commit + open
+// PRs as this bot instead of the operator: the daemon mints an installation token from the private key and injects it
+// as GH_TOKEN, and each workspace's git author is set to the bot. null = unset → agents use the ambient gh/git identity
+// (the operator locally, or the exe.dev proxy bot on VMs — VM auth is unchanged by this).
+export interface GithubAppConfig {
+  appId: string
+  installationId: string
+  privateKeyPath: string // path to the app's .pem on the daemon host
+  botName: string // git author name, e.g. "bevyl-dark-factory[bot]"
+  botEmail: string // git author email, e.g. "<bot-user-id>+bevyl-dark-factory[bot]@users.noreply.github.com"
+}
+
 export interface Config {
   tracker: TrackerConfig
   pollIntervalMs: number
@@ -116,6 +128,7 @@ export interface Config {
   boardColumns: BoardColumn[] // dashboard lanes (name + colour + states), from WORKFLOW.md board.columns; hot-reloaded
   repo: string // default GitHub repo (e.g. bevyl-ai/bevyl.ai); a ticket's repo:<slug> label can route elsewhere via repos
   repos: Record<string, string> // slug -> owner/name; a Linear repo:<slug> label routes that ticket to the mapped repo
+  github: GithubAppConfig | null // the factory's GitHub App bot identity for commits + PRs; null = use ambient gh/git
   promptTemplate: string
   workflowPath: string
 }

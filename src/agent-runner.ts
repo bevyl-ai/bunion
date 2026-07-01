@@ -4,7 +4,7 @@ import { linearGraphqlTool, linearReadTool } from './codex/dynamic-tool'
 import { waitTool } from './codex/wait-tool'
 import { fetchById, fetchWorkpad } from './linear'
 import { log } from './log'
-import { ensureWorkspace, installSkills, removeWorkspace, runHook } from './workspace'
+import { configureGitBot, ensureWorkspace, installSkills, removeWorkspace, runHook } from './workspace'
 import { renderPrompt } from './workflow'
 import { CategorizedError } from './types'
 import type { AgentEvent, Config, Issue } from './types'
@@ -56,6 +56,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
         }
       }
       if (ws.created) installSkills(dir, host)
+      if (ws.created) configureGitBot(cfg, dir, host) // author commits + auth pushes as the factory bot (local mode; no-op unless a github app is configured)
       if (cfg.hooks.beforeRun) {
         const h = runHook(cfg, dir, 'before_run', cfg.hooks.beforeRun, host, repo)
         if (!h.ok) return { ok: false, error: h.error }

@@ -1,7 +1,7 @@
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { parseWorkflow } from './workflow'
-import type { BoardColumn, Config, TrackerConfig } from './types'
+import type { BoardColumn, Config, GithubAppConfig, TrackerConfig } from './types'
 
 function obj(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
@@ -110,6 +110,22 @@ export function loadConfig(path?: string): Config {
   const wk = obj(fm.worker)
   const cx = obj(fm.codex)
   const dl = obj(fm.deadlock)
+  // The factory's GitHub App identity. Requires app id + installation id + private-key path (all resolvable, usually
+  // from ~/.bevyl/.env); missing any of the three → null (agents fall back to the ambient gh/git identity).
+  const gh = obj(fm.github)
+  const ghAppId = secret(gh.app_id, 'BEVYL_FACTORY_APP_ID')
+  const ghInstall = secret(gh.installation_id, 'BEVYL_FACTORY_INSTALLATION_ID')
+  const ghKeyPath = secret(gh.private_key_path, 'BEVYL_FACTORY_PRIVATE_KEY_PATH')
+  const github: GithubAppConfig | null =
+    ghAppId && ghInstall && ghKeyPath
+      ? {
+          appId: ghAppId,
+          installationId: ghInstall,
+          privateKeyPath: expandHome(ghKeyPath),
+          botName: secret(gh.bot_name, 'BEVYL_FACTORY_BOT_NAME') ?? 'bevyl-dark-factory[bot]',
+          botEmail: secret(gh.bot_email, 'BEVYL_FACTORY_BOT_EMAIL') ?? '',
+        }
+      : null
   const envHosts = (process.env.BUNION_SSH_HOSTS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
   const srv = obj(fm.server)
   const portRaw = process.env.BUNION_PORT ?? (typeof srv.port === 'number' ? String(srv.port) : null)
@@ -164,6 +180,7 @@ export function loadConfig(path?: string): Config {
     boardColumns: parseColumns(obj(fm.board).columns),
     repo: str(fm.repo) ?? process.env.REPO ?? 'bevyl-ai/bevyl.ai', // default repo (also the workers' $REPO fallback)
     repos: Object.fromEntries(Object.entries(obj(fm.repos)).map(([k, v]) => [k.trim().toLowerCase(), str(v)]).filter((e): e is [string, string] => !!e[1])), // repo:<slug> label -> owner/name
+    github,
     promptTemplate: prompt,
     workflowPath,
   }

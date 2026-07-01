@@ -714,6 +714,21 @@ export async function start(workflowPath?: string): Promise<void> {
         log(`action: ${identifier} restart (operator, fresh thread)`)
         return { ok: true, msg: 'restarting fresh' }
       }
+      if (action === 'cancel') {
+        // Operator escape hatch: abandon the ticket and drop it off the board. Full teardown (stop the run, free the
+        // pin, wipe the workspace) then move to Canceled — which fetchBoard excludes, so it's gone next poll. The
+        // Linear ticket persists (reopen there to re-enter). Clear the same in-memory memory restart does so a later
+        // reopen starts clean.
+        await moveIssue(cfg, issue.id, 'Canceled')
+        terminate(issue.id, true)
+        release(issue.id)
+        threadRecs.delete(issue.id)
+        saveThreads()
+        progress.delete(issue.id)
+        deadlocked.delete(issue.id)
+        log(`action: ${identifier} canceled (operator) — moved to Canceled`)
+        return { ok: true, msg: 'canceled — moved to Canceled' }
+      }
       if (action === 'to-qa' || action === 'to-build') {
         const target = action === 'to-qa' ? 'QA Testing' : 'In Progress'
         grantIfCapped(identifier, issue)

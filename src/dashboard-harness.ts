@@ -412,6 +412,12 @@ async function onAction(id: string, action: string) {
   }
   if (action === 'restart') return { ok: true, msg: 'restarted' }
   if (action === 'bump') return { ok: true, msg: 'budget bumped' }
+  if (action === 'cancel') {
+    // Real orchestrator moves to Canceled, which fetchBoard excludes → gone next snapshot. Mimic that by dropping it.
+    const idx = snapshot.items.findIndex((i) => i.identifier === id)
+    if (idx >= 0) snapshot.items.splice(idx, 1)
+    return { ok: true, msg: 'canceled — moved to Canceled' }
+  }
   return { ok: true, msg: 'done' }
 }
 

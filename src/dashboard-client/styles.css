@@ -1,3 +1,7 @@
+@import "tailwindcss";
+@source "./components/**/*.{ts,tsx}";
+@source "./lib/**/*.{ts,tsx}";
+@source "./*.tsx";
 /* base */
 *{box-sizing:border-box}
 :root{--bg:#090a0e;--surf:#15171e;--surf2:#1b1e27;--surf3:#232733;--line:#23262f;--line2:#2e323d;--line3:#3b4150;--fg:#eef1f7;--mut:#99a0ad;--mut2:#5a6270;--accent:#5b8def;--accent2:#86acff;--sh1:0 1px 2px rgba(0,0,0,.45);--sh2:0 8px 26px rgba(0,0,0,.42);--danger:#e0564f;--danger-text:#eaa6a0;--good:#3fb27f;--good2:#3a9168;--warn:#d99a2b;--pink:#b88cd9;--accent-glow:#5b8def1f}

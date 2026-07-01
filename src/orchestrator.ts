@@ -720,7 +720,11 @@ export async function start(workflowPath?: string): Promise<void> {
         // Linear ticket persists (reopen there to re-enter). Clear the same in-memory memory restart does so a later
         // reopen starts clean.
         await moveIssue(cfg, issue.id, 'Canceled')
-        terminate(issue.id, true)
+        // Mirror restart's teardown: terminate(_, false) then an UNCONDITIONAL removeWorkspace, because cancel is
+        // offered on idle/parked tickets too — terminate(_, true) only wipes the workspace when the ticket is
+        // currently running (it gates cleanup on the live `running` entry), so an idle ticket would leak its dir.
+        terminate(issue.id, false)
+        removeWorkspace(cfg, issue.identifier, host)
         release(issue.id)
         threadRecs.delete(issue.id)
         saveThreads()

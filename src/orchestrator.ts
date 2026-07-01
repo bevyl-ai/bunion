@@ -267,7 +267,11 @@ export async function start(workflowPath?: string): Promise<void> {
   const norm = (s: string): string => s.trim().toLowerCase()
   const isTerminal = (s: string): boolean => cfg.tracker.terminalStates.some((t) => norm(t) === norm(s))
   const isActive = (s: string): boolean => cfg.tracker.activeStates.some((t) => norm(t) === norm(s))
-  const isRoutable = (i: Issue): boolean => cfg.tracker.requiredLabels.every((l) => i.labels.some((x) => norm(x) === l))
+  // Opt-in gate (Symphony §4.1.1), augmented: a ticket enters if it's delegated to the factory's own app actor OR
+  // carries every required label. Delegation is Linear's assign-an-app mechanism (it sets `delegate`, not `assignee`).
+  const isRoutable = (i: Issue): boolean =>
+    (cfg.tracker.appActorId != null && i.delegateId === cfg.tracker.appActorId) ||
+    cfg.tracker.requiredLabels.every((l) => i.labels.some((x) => norm(x) === l))
   const planBlocked = (i: Issue): boolean => phaseOf(cfg, i.state) === 'plan' && i.blockers.some((b) => b.state == null || !isTerminal(b.state))
   const eligible = (i: Issue): boolean =>
     isActive(i.state) && !isTerminal(i.state) && isRoutable(i) && !planBlocked(i) && !claimed.has(i.id) && !running.has(i.id)
@@ -967,7 +971,7 @@ export async function start(workflowPath?: string): Promise<void> {
       try {
         // One labeled query is the whole board (active + handed-off). For an unlabeled config, fall back to the
         // active-states query. Either way, narrow host-side to the opt-in set.
-        board = (cfg.tracker.requiredLabels.length ? await fetchBoard(cfg) : await fetchCandidates(cfg)).filter(isRoutable)
+        board = (cfg.tracker.requiredLabels.length || cfg.tracker.appActorId ? await fetchBoard(cfg) : await fetchCandidates(cfg)).filter(isRoutable)
         pollFailureStreak = 0
         lastPollError = null
         lastPollOkAt = Date.now()

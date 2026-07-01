@@ -111,6 +111,7 @@ interface RawIssue {
   startedAt: string | null
   completedAt: string | null
   state: { name: string }
+  delegate: { id: string } | null
   labels: { nodes: { name: string }[] }
   inverseRelations: { nodes: { type: string; issue: { id: string; identifier: string; state: { name: string } | null } | null }[] }
   attachments: { nodes: { url: string }[] }
@@ -118,6 +119,7 @@ interface RawIssue {
 
 const ISSUE_FIELDS = `id identifier title description url priority branchName createdAt updatedAt startedAt completedAt
   state { name }
+  delegate { id }
   labels { nodes { name } }
   inverseRelations { nodes { type issue { id identifier state { name } } } }
   attachments { nodes { url } }`
@@ -180,7 +182,12 @@ export async function fetchBoard(cfg: Config): Promise<Issue[]> {
   }
   if (cfg.tracker.team) filter.team = { key: { eq: cfg.tracker.team } }
   if (cfg.tracker.projectSlug) filter.project = { slugId: { eq: cfg.tracker.projectSlug } }
-  if (cfg.tracker.requiredLabels.length) filter.labels = { name: { in: cfg.tracker.requiredLabels } }
+  // Opt-in gate (label OR delegated-to-app), nested under `and` so it doesn't collide with the completedAt `or` above.
+  // A loose server-side superset — case-sensitive label match + delegate — narrowed authoritatively host-side by isRoutable.
+  const optIn: Record<string, unknown>[] = []
+  if (cfg.tracker.requiredLabels.length) optIn.push({ labels: { name: { in: cfg.tracker.requiredLabels } } })
+  if (cfg.tracker.appActorId) optIn.push({ delegate: { id: { eq: cfg.tracker.appActorId } } })
+  if (optIn.length) filter.and = [{ or: optIn }]
   const nodes = await queryPaginated<RawIssue>(
     cfg,
     BOARD,
@@ -322,6 +329,7 @@ function toIssue(r: RawIssue): Issue {
     startedAt: r.startedAt,
     completedAt: r.completedAt,
     labels: r.labels.nodes.map((n) => n.name.trim().toLowerCase()), // §4.1.1: labels normalized lowercase
+    delegateId: r.delegate?.id ?? null,
     blockers: r.inverseRelations.nodes
       .filter((n) => n.type === 'blocks')
       .map((n) => ({ id: n.issue?.id ?? null, identifier: n.issue?.identifier ?? null, state: n.issue?.state?.name ?? null })),

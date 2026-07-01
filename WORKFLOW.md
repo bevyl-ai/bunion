@@ -8,7 +8,8 @@ tracker:
   kind: linear
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project
   api_key: $LINEAR_API_KEY
-  required_labels: [dark-factory]    # opt-in: only tickets carrying this label enter the factory
+  required_labels: [dark-factory]    # opt-in: tickets carrying this label enter the factory
+  app_actor_id: 438143c9-a37d-48c5-8e37-259d15f9cde7   # the factory's Linear app actor (Bevyl Factory) — a ticket DELEGATED to it also opts in (OR with required_labels). Assign in Linear: it sets `delegate`, not `assignee`.
   active_states: [Triage, Backlog, Todo, In Progress, QA - Testing, QA - blocked, Verifying in prod]   # NOT active (humans / the train move these): STG - Ready to merge, STG - Merged, Factory - Needs Engineer, and the human-review gates QA - Requested / Factory - UI review / Factory - can't verify
   terminal_states: [Done, Canceled, Cancelled, Duplicate, Factory - Needs Engineer]   # Factory - Needs Engineer = the factory stops + a person must decide
 polling:

@@ -13,6 +13,7 @@ export interface Issue {
   startedAt: string | null // ISO — first moved to a started state (the factory-entry clock for total elapsed)
   completedAt: string | null // ISO — when it reached Done
   labels: string[] // normalized: trimmed + lowercased (Symphony §4.1.1)
+  delegateId: string | null // the app actor an issue is delegated to (Linear sets `delegate`, not `assignee`, for apps), null if none
   blockers: { id: string | null; identifier: string | null; state: string | null }[] // each "blocks" relation's source
   prUrl: string | null // the GitHub PR attached to the issue, if any
 }
@@ -49,6 +50,7 @@ export interface TrackerConfig {
   // per-phase name via createAsUser. The orchestrator's own reads/operator-actions keep using apiKey (the operator).
   projectSlug: string | null // scope to one project, OR
   team: string | null // scope to a whole team (key, e.g. BEV) — pair with required_labels for opt-in
+  appActorId: string | null // the app's own actor id: a ticket delegated to it opts in, alongside required_labels (OR)
   requiredLabels: string[] // normalized: trim + lowercase + dedupe; matched host-side (AND)
   activeStates: string[]
   terminalStates: string[]

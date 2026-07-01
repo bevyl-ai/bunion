@@ -12,18 +12,10 @@ export function ChatBox({
   const [value, setValue] = useState('')
   const taRef = useRef<HTMLTextAreaElement | null>(null)
 
-  const autoGrow = (): void => {
-    const el = taRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 160) + 'px'
-  }
-
   const doSend = async (): Promise<void> => {
     const text = value.trim()
     if (!text) return
     setValue('')
-    if (taRef.current) taRef.current.style.height = 'auto'
     await onSend(text)
     taRef.current?.focus()
   }
@@ -40,11 +32,8 @@ export function ChatBox({
         placeholder={placeholder}
         value={value}
         disabled={pending}
-        class="flex-1 bg-surf2 border border-line2 rounded-lg text-fg text-[13px]/[1.5] font-['-apple-system',BlinkMacSystemFont,'Segoe_UI',Roboto,sans-serif] px-[11px] py-[9px] resize-y min-h-[38px] max-h-[160px] outline-none box-border focus:border-accent placeholder:text-mut2"
-        onInput={(e) => {
-          setValue((e.target as HTMLTextAreaElement).value)
-          autoGrow()
-        }}
+        class="flex-1 bg-surf2 border border-line2 rounded-lg text-fg text-[13px]/[1.5] font-['-apple-system',BlinkMacSystemFont,'Segoe_UI',Roboto,sans-serif] px-[11px] py-[9px] resize-y field-sizing-content min-h-[38px] max-h-[160px] outline-none box-border focus:border-accent placeholder:text-mut2"
+        onInput={(e) => setValue((e.target as HTMLTextAreaElement).value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()

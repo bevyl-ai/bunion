@@ -43,6 +43,11 @@ export const ago = (ms: number): string => {
   return Math.floor(m / 60) + 'h ' + (m % 60) + 'm'
 }
 
+// Freshness colour for a "last activity" dot: green < 30s, amber < 2m, red beyond. Shared by StatusBadge's
+// initial render and the live ticker that repaints it each second (lib/liveClock).
+export const staleColor = (msSinceActivity: number): string =>
+  msSinceActivity < 30000 ? '#3fb27f' : msSinceActivity < 120000 ? '#d99a2b' : '#e0564f'
+
 export const fmtTok = (n: number | null | undefined): string => {
   n = n || 0
   return n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(n >= 1e8 ? 0 : 1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'k' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n)

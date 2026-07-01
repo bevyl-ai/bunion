@@ -8,18 +8,16 @@ import { TokenBadge } from './TokenBadge'
 
 export function Card({
   item,
-  now,
   onOpen,
   onKebab,
 }: {
   item: BoardItem
-  now: number
   onOpen: (id: string) => void
   onKebab: (id: string, ev: MouseEvent) => void
 }) {
   const r = item
   const run = r.status === 'running'
-  const neHot = isNeHot(r, now)
+  const neHot = isNeHot(r)
   const prNum = prNumFromUrl(r.prUrl)
   const reason = HUMAN_NOTE_STATES.has(r.state) && r.note ? r.note.slice(0, 160) : null
   const hasActions = actionList(r).length > 0
@@ -79,7 +77,7 @@ export function Card({
         </div>
       )}
       <div class="cfoot flex items-center justify-between gap-2 mt-[9px]">
-        <StatusBadge item={r} now={now} />
+        <StatusBadge item={r} />
         <span class="meta inline-flex items-center gap-2 min-w-0">
           <TokenBadge tokens={r.tokens} />
           {r.enteredAt && (
@@ -87,7 +85,8 @@ export function Card({
               class="t-tot clk text-mut2 text-[11px] [font-variant-numeric:tabular-nums] font-[ui-monospace,Menlo,monospace] whitespace-nowrap"
               title="total time in the factory"
             >
-              ⏱ {ago((r.endedAt || now) - r.enteredAt)}
+              {/* live while the ticket is still in the factory; frozen once it has an end time */}
+              ⏱ {r.endedAt ? ago(r.endedAt - r.enteredAt) : <span data-since={r.enteredAt}>{ago(Date.now() - r.enteredAt)}</span>}
             </span>
           )}
         </span>

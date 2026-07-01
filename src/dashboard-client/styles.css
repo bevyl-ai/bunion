@@ -72,7 +72,7 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 #pausebanner .pb-dot{width:8px;height:8px;border-radius:50%;background:var(--color-danger);box-shadow:0 0 8px var(--color-danger)}
 
 /* board */
-.board{flex:1 1 auto;min-height:0;display:flex;gap:14px;padding:22px 22px 16px;align-items:stretch;overflow-x:auto;overflow-y:hidden;scroll-behavior:smooth}
+.board{flex:1 1 auto;min-height:0;display:flex;gap:14px;padding:22px 22px 16px;align-items:stretch;overflow-x:auto;overflow-y:hidden}
 .board::-webkit-scrollbar{height:10px}
 .board::-webkit-scrollbar-thumb{background:var(--color-line2);border-radius:6px}
 .board::-webkit-scrollbar-thumb:hover{background:#3a4150}
@@ -210,9 +210,7 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 /* --- interactivity pass: focus rings, press feedback, motion (gated by prefers-reduced-motion) --- */
 :focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}
-.card:focus-visible,.rcard:focus-visible{outline-offset:3px;border-color:var(--color-line3)}
-.card.kbfocus{border-color:var(--color-accent);box-shadow:0 0 0 1px var(--color-accent),var(--sh2)}
-.flipping{will-change:transform;z-index:2}
+.card:focus-visible,.rcard:focus-visible{outline-offset:3px;border-color:var(--color-accent);box-shadow:0 0 0 1px var(--color-accent),var(--sh2)}
 @keyframes runpulse{0%,100%{box-shadow:0 0 0 1px var(--color-accent-glow),var(--sh2)}50%{box-shadow:0 0 0 1px #5b8def4d,0 0 20px #5b8def26,var(--sh2)}}
 @keyframes skim{from{opacity:.32}to{opacity:.7}}
 .lg-skel{height:13px;border-radius:5px;background:var(--color-surf3);margin:11px 0;animation:skim 1.15s ease-in-out infinite alternate}

@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'preact/hooks'
 import { ago, estCost, fmtCost, fmtTok } from '../lib/format'
 import type { Snapshot } from '../lib/types'
 
@@ -33,12 +32,6 @@ export function Header({
   onPause: () => void
   pauseBusy: boolean
 }) {
-  const [clock, setClock] = useState(() => new Date().toLocaleTimeString())
-  useEffect(() => {
-    const t = setInterval(() => setClock(new Date().toLocaleTimeString()), 1000)
-    return () => clearInterval(t)
-  }, [])
-
   const items = snap.items || []
   const running = items.filter((r) => r.status === 'running').length
   const queued = items.filter((r) => r.status === 'queued').length
@@ -115,8 +108,8 @@ export function Header({
         onInput={(e) => onFilter((e.target as HTMLInputElement).value)}
         aria-label="Filter tickets by id, title, host, or state"
       />
-      <span class="ml-auto font-mono text-xs text-mut2 [font-variant-numeric:tabular-nums]" id="clock">
-        {clock}
+      <span class="ml-auto font-mono text-xs text-mut2 [font-variant-numeric:tabular-nums]" id="clock" data-clock>
+        {new Date().toLocaleTimeString()}
       </span>
       <a
         href="/stats"

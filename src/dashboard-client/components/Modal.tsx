@@ -64,7 +64,7 @@ export function Modal({
         <ModalTokens item={item} isRole={isRole} />
         <Transcript logRef={logRef} lines={lines} live={live} loaded={loaded} chatPending={chatPending} />
         <ChatBox
-          placeholder={isRole && role ? `Prompt ${role.name} — steer it; it acts on its next run` : 'Message the agent — it can answer or act on steering (move state, update the plan)'}
+          placeholder={isRole && role ? `Prompt ${role.name} — steers next run` : 'Message the agent — steer it (state, plan)'}
           pending={chatPending}
           onSend={(text) => onChat(expandedId!, text)}
         />
@@ -179,7 +179,7 @@ function ModalSub({ item, role }: { item: BoardItem | null; role: RoleItem | nul
   if (item.enteredAt)
     m.push(
       <span class="inline-flex items-center gap-[5px] [font-variant-numeric:tabular-nums]" key="elapsed" title="total time in the factory">
-        ⏱ {ago((item.endedAt || Date.now()) - item.enteredAt)}
+        ⏱ {item.endedAt ? ago(item.endedAt - item.enteredAt) : <span data-since={item.enteredAt}>{ago(Date.now() - item.enteredAt)}</span>}
       </span>,
     )
   if (item.status === 'running')

@@ -21,13 +21,8 @@ export function useKeyboardShortcuts({ modalOpen, onPause, onOpen }: { modalOpen
         let nx = e.key === 'j' ? idx + 1 : idx - 1
         if (nx < 0) nx = 0
         if (nx >= cards.length) nx = cards.length - 1
-        cards.forEach((c) => c.classList.remove('kbfocus'))
-        const t = cards[nx]
-        if (t) {
-          t.classList.add('kbfocus')
-          t.focus()
-          t.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-        }
+        // Native focus does the work: it applies the :focus-visible ring (CSS) and scrolls the card into view.
+        cards[nx]?.focus()
         e.preventDefault()
         return
       }

@@ -7,7 +7,7 @@ export interface MenuRequest {
   anchor: DOMRect
 }
 
-// Outside-click, scroll, and resize dismissal is handled by global listeners in DashboardApp, not here — this
+// Outside-click and resize dismissal is handled by global listeners in DashboardApp, not here — this
 // component only positions and renders the menu for a given request.
 export function ActionMenu({ request, onAction, onClose }: { request: MenuRequest | null; onAction: (id: string, action: string) => void; onClose: () => void }) {
   const ref = useRef<HTMLDivElement | null>(null)
@@ -21,14 +21,22 @@ export function ActionMenu({ request, onAction, onClose }: { request: MenuReques
     // The menu must already be in the DOM to read its real size, so it renders hidden first and is
     // repositioned + revealed once its dimensions are known.
     const m = ref.current
-    if (!m) return
-    const mw = m.offsetWidth
-    const mh = m.offsetHeight
-    const r = request.anchor
-    let left = Math.max(8, r.right - mw)
-    let top = r.bottom + 5
-    if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 5)
-    setPos({ left, top, visible: true })
+    if (m) {
+      const mw = m.offsetWidth
+      const mh = m.offsetHeight
+      const r = request.anchor
+      const left = Math.max(8, r.right - mw)
+      let top = r.bottom + 5
+      if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 5)
+      setPos({ left, top, visible: true })
+    }
+    // The menu is position:fixed at the button's open-time rect, so any scroll would leave it floating over a
+    // different card while still acting on the original ticket. Close it on scroll (native context-menu
+    // behaviour). This effect runs after the opening click's own synchronous focus/layout scroll, so attaching
+    // immediately can't self-dismiss it. Capture-phase so inner column scrollers count too.
+    const onScroll = (): void => onClose()
+    window.addEventListener('scroll', onScroll, true)
+    return () => window.removeEventListener('scroll', onScroll, true)
   }, [request])
 
   if (!request) return null

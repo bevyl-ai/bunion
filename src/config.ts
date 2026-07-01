@@ -95,6 +95,7 @@ export function loadConfig(path?: string): Config {
     appToken: secret(tk.app_token, 'LINEAR_APP_TOKEN'),
     projectSlug: secret(tk.project_slug, 'LINEAR_PROJECT_SLUG'),
     team: secret(tk.team, 'LINEAR_TEAM'),
+    appActorId: secret(tk.app_actor_id, 'LINEAR_APP_ACTOR_ID'),
     requiredLabels: [...new Set(arr(tk.required_labels).map((l) => l.trim().toLowerCase()).filter(Boolean))],
     activeStates: arr(tk.active_states).length ? arr(tk.active_states) : ['Todo', 'In Progress'],
     terminalStates: arr(tk.terminal_states).length ? arr(tk.terminal_states) : ['Closed', 'Cancelled', 'Canceled', 'Duplicate', 'Done'],

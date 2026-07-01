@@ -718,14 +718,12 @@ export async function start(workflowPath?: string): Promise<void> {
         return { ok: true, msg: 'restarting fresh' }
       }
       if (action === 'cancel') {
-        // Operator escape hatch: abandon the ticket and drop it off the board. Full teardown (stop the run, free the
-        // pin, wipe the workspace) then move to Canceled — which fetchBoard excludes, so it's gone next poll. The
-        // Linear ticket persists (reopen there to re-enter). Clear the same in-memory memory restart does so a later
-        // reopen starts clean.
-        await moveIssue(cfg, issue.id, 'Canceled')
-        // Mirror restart's teardown: terminate(_, false) then an UNCONDITIONAL removeWorkspace, because cancel is
-        // offered on idle/parked tickets too — terminate(_, true) only wipes the workspace when the ticket is
-        // currently running (it gates cleanup on the live `running` entry), so an idle ticket would leak its dir.
+        // Operator escape hatch: abandon the ticket and drop it off the board. Stop + tear down the run FIRST
+        // (like restart), THEN move to Canceled — otherwise the still-running agent races the in-flight Linear
+        // move and can keep writing Linear or even move the ticket back out of Canceled after the click.
+        // removeWorkspace is unconditional (not terminate(_, true), which only wipes when the ticket is currently
+        // running) so canceling an idle/parked ticket doesn't leak its workspace dir. If the move throws after
+        // teardown, the ticket simply stays where it was, stopped — the poll re-dispatches or the operator retries.
         terminate(issue.id, false)
         removeWorkspace(cfg, issue.identifier, host)
         release(issue.id)
@@ -733,6 +731,7 @@ export async function start(workflowPath?: string): Promise<void> {
         saveThreads()
         progress.delete(issue.id)
         deadlocked.delete(issue.id)
+        await moveIssue(cfg, issue.id, 'Canceled')
         log(`action: ${identifier} canceled (operator) — moved to Canceled`)
         return { ok: true, msg: 'canceled — moved to Canceled' }
       }

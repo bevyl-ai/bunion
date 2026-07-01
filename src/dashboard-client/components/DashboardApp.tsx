@@ -30,7 +30,7 @@ export function DashboardApp() {
     return () => clearInterval(t)
   }, [])
 
-  const { effState, postAction, busyIds } = useActions(snap, setSnap, showToast, now)
+  const { effState, overrides, postAction, busyIds } = useActions(snap, setSnap, showToast, now)
 
   const effItem = useMemo(() => {
     if (!expandedId) return null
@@ -38,7 +38,10 @@ export function DashboardApp() {
     if (!it) return null
     const st = effState(expandedId, it.state)
     return st === it.state ? it : { ...it, state: st }
-  }, [expandedId, snap.items, effState])
+    // `overrides` is read only to invalidate this memo when an optimistic override is set/cleared/expired —
+    // `effState`'s identity never changes (useCallback([])), so without this dep the memo would never refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedId, snap.items, effState, overrides])
 
   const effRole = useMemo(() => (expandedId ? snap.roles.find((r) => r.name === expandedId) || null : null), [expandedId, snap.roles])
 
@@ -136,6 +139,7 @@ export function DashboardApp() {
         cols={cols}
         items={snap.items}
         effState={effState}
+        overrides={overrides}
         now={now}
         filterQuery={filterQuery}
         scope={snap.scope}

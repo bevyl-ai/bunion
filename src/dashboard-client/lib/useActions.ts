@@ -21,6 +21,7 @@ export function useActions(
   now: number,
 ): {
   effState: (identifier: string, actual: string) => string
+  overrides: Record<string, OptimisticOverride>
   postAction: (id: string, action: string) => Promise<void>
   busyIds: Set<string>
 } {
@@ -108,5 +109,5 @@ export function useActions(
     [setSnap, onResult],
   )
 
-  return { effState, postAction, busyIds: busy }
+  return { effState, overrides, postAction, busyIds: busy }
 }

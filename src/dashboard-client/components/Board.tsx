@@ -1,6 +1,7 @@
 import { useMemo, useRef } from 'preact/hooks'
 import { colIdx } from '../lib/actions'
 import { useFlip } from '../lib/useFlip'
+import type { OptimisticOverride } from '../lib/useActions'
 import type { BoardColumn, BoardItem } from '../lib/types'
 import { Column } from './Column'
 import { JumpBar } from './JumpBar'
@@ -9,6 +10,7 @@ export function Board({
   cols,
   items,
   effState,
+  overrides,
   now,
   filterQuery,
   scope,
@@ -19,6 +21,7 @@ export function Board({
   cols: BoardColumn[]
   items: BoardItem[]
   effState: (identifier: string, actual: string) => string
+  overrides: Record<string, OptimisticOverride>
   now: number
   filterQuery: string
   scope: string
@@ -40,9 +43,14 @@ export function Board({
     const term = (terminalStates || []).map((s) => s.toLowerCase())
     for (const r of filtered) {
       const st = effState(r.identifier, r.state)
+      // Item 33: substitute the optimistic (pre-confirmation) state into the item object itself so the
+      // card's bucket placement AND its rendered badge/column both reflect the override immediately, not
+      // just the internal bookkeeping -- this is what was missing before (override was tracked but never
+      // actually displayed on the board).
+      const eff = st === r.state ? r : { ...r, state: st }
       const i = colIdx(cols, st)
-      if (i >= 0) bk[i]!.push(r)
-      else if (term.indexOf(st.toLowerCase()) < 0) unmapped.push(r)
+      if (i >= 0) bk[i]!.push(eff)
+      else if (term.indexOf(st.toLowerCase()) < 0) unmapped.push(eff)
     }
     // items 11/12: Needs Engineer + Ready (states containing STG - Ready to merge) sort oldest-entered-first.
     cols.forEach((col, i) => {
@@ -51,7 +59,10 @@ export function Board({
       if (isNe || isReady) bk[i]!.sort((a, b) => (a.enteredAt || 0) - (b.enteredAt || 0))
     })
     return { buckets: bk, unmapped }
-  }, [cols, filtered, effState, terminalStates])
+    // `overrides` is read only (via effState's closure) to invalidate this memo when an optimistic override
+    // is set/cleared/expired -- effState's own function identity never changes (useCallback([]) in useActions).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cols, filtered, effState, terminalStates, overrides])
 
   // Structural signature: rebuild only on membership/state/status/pr/QA-note changes; live field ticks never
   // touch this, so the FLIP hook + full column re-render is skipped for per-second updates (item 26).
@@ -61,7 +72,8 @@ export function Board({
       return [r.identifier, st, r.status, r.host, r.prUrl, r.retryAttempt, st === 'QA blocked' ? r.note || '' : ''].join('')
     })
     return key.join('') + '|' + filterQuery
-  }, [filtered, effState, filterQuery])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, effState, filterQuery, overrides])
 
   useFlip(boardRef, sig)
 
@@ -71,7 +83,18 @@ export function Board({
     const board = boardRef.current
     const el = colRefs.current.get(index)
     if (!board || !el) return
-    board.scrollTo({ left: el.offsetLeft - 16, behavior: 'smooth' })
+    const target = el.offsetLeft - 16
+    const before = board.scrollLeft
+    board.scrollTo({ left: target, behavior: 'smooth' })
+    // Chromium suspends the compositor-driven smooth-scroll animation on a backgrounded/hidden tab, so a
+    // click landing while the tab isn't visible can silently no-op. Verify shortly after that the scroll
+    // actually progressed and snap instantly as a fallback if it didn't — belt-and-suspenders, does not
+    // change the smooth-scroll behavior a normal focused/visible tab sees.
+    setTimeout(() => {
+      if (Math.abs(board.scrollLeft - before) < 1 && Math.abs(board.scrollLeft - target) > 1) {
+        board.scrollTo({ left: target, behavior: 'instant' as ScrollBehavior })
+      }
+    }, 200)
   }
 
   const unmappedNames = unmapped.length ? [...new Set(unmapped.map((r) => effState(r.identifier, r.state)))].join(', ') : ''

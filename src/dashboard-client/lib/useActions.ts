@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { DANGER_CONFIRM } from './actions'
 import type { Snapshot } from './types'
 
@@ -32,10 +32,32 @@ export function useActions(
   const snapRef = useRef(snap)
   snapRef.current = snap
 
-  // An override is "live" only until the real state catches up (actual === target), it expires (5s), or the item
-  // vanishes. Decide liveness at read time rather than via a state-syncing sweep effect: a failed/stale override
-  // stops applying once Date.now() passes its expiry, and the frequent SSE snapshot re-renders re-run this within
-  // ~1s. Stale keys are pruned opportunistically when a new move override is added (see postAction).
+  // Clear an optimistic override the moment the real snapshot catches up — the item reached the target state or
+  // vanished — or once it has expired (5s). This MUST mutate the map, not just be checked at read time: a
+  // confirmed-but-not-removed override would re-activate and snap the card back to the old target if the ticket
+  // moved again before its expiry. Keyed on snapshot changes only (SSE-frequency, NOT a per-second clock), so it
+  // costs nothing between real updates. Functional setOverrides + no `overrides` dep avoids a self-trigger loop.
+  useEffect(() => {
+    setOverrides((cur) => {
+      if (Object.keys(cur).length === 0) return cur
+      const byId = new Map(snap.items.map((i) => [i.identifier, i]))
+      const now = Date.now()
+      let changed = false
+      const next: Record<string, OptimisticOverride> = {}
+      for (const id in cur) {
+        const ov = cur[id]!
+        const it = byId.get(id)
+        if (!it || it.state === ov.state || now > ov.expiresAt) {
+          changed = true
+          continue
+        }
+        next[id] = ov
+      }
+      return changed ? next : cur
+    })
+  }, [snap.items])
+
+  // Read-time guard on top of the sweep: hides an expired override even if no snapshot has arrived to sweep it.
   const effState = useCallback(
     (identifier: string, actual: string): string => {
       const o = overrides[identifier]
@@ -66,14 +88,9 @@ export function useActions(
       }
     } else if (action.indexOf('move:') === 0) {
       const to = action.slice(5)
-      const at = Date.now()
-      // Drop any already-expired overrides while we add this one, so the map can't accumulate stale keys.
-      setOverrides((o) => {
-        const next: Record<string, OptimisticOverride> = {}
-        for (const k in o) if (at < o[k]!.expiresAt) next[k] = o[k]!
-        next[id] = { state: to, expiresAt: at + 5000 }
-        return next
-      })
+      // Optimistically show the target state; the snapshot-keyed sweep above clears it once the move confirms,
+      // the item vanishes, or it expires (5s).
+      setOverrides((o) => ({ ...o, [id]: { state: to, expiresAt: Date.now() + 5000 } }))
       revert = () =>
         setOverrides((o) => {
           const next = { ...o }

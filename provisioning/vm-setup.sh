@@ -39,8 +39,18 @@ touch "$HOME/.profile" && chmod 600 "$HOME/.profile"
 if [ -n "${BEVYL_FACTORY_BOT_NAME:-}" ]; then
   git config --global user.name "$BEVYL_FACTORY_BOT_NAME"
   git config --global user.email "${BEVYL_FACTORY_BOT_EMAIL:-}"
-  # gh must hit github.com (not the proxy) to use the injected GH_TOKEN — strip any prior GH_HOST=proxy line (idempotent).
+  # gh derives its API host from the workspace's remote URL, so the bot path needs remotes to read github.com —
+  # the insteadOf rewrite (step 2) still routes actual git transport through the proxy. Normalize any pre-existing
+  # template clones whose origin was set to the proxy URL directly, and strip the GH_HOST override (both idempotent).
   sed -i '/export GH_HOST=/d' "$HOME/.profile" 2>/dev/null || true
+  for t in "$HOME"/.bunion/repo*; do
+    [ -e "$t/.git" ] || continue
+    u=$(git -C "$t" remote get-url origin 2>/dev/null) || continue
+    case "$u" in https://bevyl-web.int.exe.xyz/*) git -C "$t" remote set-url origin "https://github.com/${u#https://bevyl-web.int.exe.xyz/}" ;; esac
+  done
+  # The brain writes a fresh installation token to ~/.bunion/gh-token at every session start (codex scrubs its exec
+  # env, so the token must arrive via the profile like .bunion-repo does). Export it into every agent shell.
+  grep -q 'bunion/gh-token' "$HOME/.profile" 2>/dev/null || echo '[ -r "$HOME/.bunion/gh-token" ] && export GH_TOKEN="$(cat "$HOME/.bunion/gh-token")"' >> "$HOME/.profile"
 else
   grep -q 'GH_HOST=' "$HOME/.profile" 2>/dev/null || echo 'export GH_HOST=bevyl-web.int.exe.xyz' >> "$HOME/.profile"
 fi

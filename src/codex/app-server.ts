@@ -40,13 +40,16 @@ export class AppServerSession {
     // VM and run the same app-server in the VM's workspace — the JSON-RPC stream rides the ssh stdio pipe unchanged,
     // and a login shell (`exec $SHELL -lc`) puts codex on PATH there too.
     // Factory bot identity: mint a fresh installation token so the agent's git/gh act as bevyl-dark-factory[bot].
-    // Local: pass it as GH_TOKEN in the child env. Remote (VM): prepend it to the ssh command — vm-setup gives the VM
-    // the bot git author + drops GH_HOST so `gh` hits github.com with this token (git clone/push still ride the exe.dev
-    // proxy). A mint failure throws — surfacing loudly as a session error the orchestrator retries — rather than
-    // silently letting the agent commit under the operator/proxy identity.
+    // Local: pass it as GH_TOKEN in the child env. Remote (VM): codex scrubs its exec env, so an inherited variable
+    // never reaches the agent's shells — instead write the token to ~/.bunion/gh-token on the VM at session start and
+    // let ~/.profile export it into every `bash -lc` shell (the same file-via-profile pattern as .bunion-repo). One
+    // file per VM is correct: every agent shares the same app installation token, and each new session refreshes it.
+    // A mint failure throws — surfacing loudly as a session error the orchestrator retries — rather than silently
+    // letting the agent commit under the operator/proxy identity.
     const token = this.cfg.github ? (await githubAppToken(this.cfg)) ?? '' : ''
     const env = !host && token ? { ...process.env, GH_TOKEN: token } : undefined
-    const remoteCmd = `${token ? `export GH_TOKEN=${shq(token)} && ` : ''}cd ${shq(workspace)} && exec "$SHELL" -lc ${shq(this.cfg.codex.command)}`
+    const tokenWrite = token ? `umask 077 && mkdir -p ~/.bunion && printf %s ${shq(token)} > ~/.bunion/gh-token && ` : ''
+    const remoteCmd = `${tokenWrite}cd ${shq(workspace)} && exec "$SHELL" -lc ${shq(this.cfg.codex.command)}`
     const proc = host
       ? spawn('ssh', ['-o', 'ConnectTimeout=20', '-o', 'ServerAliveInterval=15', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', host, remoteCmd], { stdio: ['pipe', 'pipe', 'pipe'] })
       : spawn('bash', ['-lc', this.cfg.codex.command], { cwd: workspace, env, stdio: ['pipe', 'pipe', 'pipe'] })

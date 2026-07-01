@@ -16,21 +16,21 @@ export function DashboardApp() {
   const { snap, cols, setSnap } = useSnapshot()
   const { toast, showToast } = useToast()
   const [searchInput, setSearchInput] = useState('') // raw text as typed, bound to the controlled input's value
-  const filterQuery = searchInput.trim().toLowerCase() // normalized query the Board matches against (item 3)
+  const filterQuery = searchInput.trim().toLowerCase() // normalized query the Board matches against
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [menu, setMenu] = useState<MenuRequest | null>(null)
   const [chatPending, setChatPending] = useState(false)
   const [now, setNow] = useState(() => Date.now())
 
-  // Item 26: tick every second for live in-place field updates (card elapsed/active/turn/token text) without
-  // forcing the structural board rebuild (Board.tsx's `sig` doesn't depend on `now`). Also drives the
-  // optimistic-override sweep in useActions (item 33's 5s expiry).
+  // Tick every second for live in-place field updates (card elapsed/active/turn/token text) without forcing
+  // the structural board rebuild (Board.tsx's `sig` doesn't depend on `now`). Also drives the optimistic-override
+  // sweep's 5s expiry in useActions.
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(t)
   }, [])
 
-  const { effState, overrides, postAction, busyIds } = useActions(snap, setSnap, showToast, now)
+  const { effState, postAction, busyIds } = useActions(snap, setSnap, showToast, now)
 
   const effItem = useMemo(() => {
     if (!expandedId) return null
@@ -38,10 +38,7 @@ export function DashboardApp() {
     if (!it) return null
     const st = effState(expandedId, it.state)
     return st === it.state ? it : { ...it, state: st }
-    // `overrides` is read only to invalidate this memo when an optimistic override is set/cleared/expired —
-    // `effState`'s identity never changes (useCallback([])), so without this dep the memo would never refresh.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandedId, snap.items, effState, overrides])
+  }, [expandedId, snap.items, effState])
 
   const effRole = useMemo(() => (expandedId ? snap.roles.find((r) => r.name === expandedId) || null : null), [expandedId, snap.roles])
 
@@ -139,7 +136,6 @@ export function DashboardApp() {
         cols={cols}
         items={snap.items}
         effState={effState}
-        overrides={overrides}
         now={now}
         filterQuery={filterQuery}
         scope={snap.scope}

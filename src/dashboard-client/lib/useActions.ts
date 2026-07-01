@@ -8,11 +8,11 @@ export interface OptimisticOverride {
 }
 
 // Central action-dispatch logic ported from the old dashboard's `postAction`. Owns:
-//  - the danger-confirm gate (item 32)
+//  - the danger-confirm gate
 //  - optimistic state overrides for move: actions, expiring after 5s or being superseded by a real snapshot
-//    update showing the actual new state, and reverting on failure (item 33)
+//    update showing the actual new state, and reverting on failure
 //  - optimistic pause toggle (global + per-role), reverting on failure
-//  - toast reporting (item 35, wired by the caller via onResult)
+//  - toast reporting, wired by the caller via onResult
 //  - busy-button tracking is left to the caller (per-button local state), this hook returns { busy } per action id
 export function useActions(
   snap: Snapshot,
@@ -21,7 +21,6 @@ export function useActions(
   now: number,
 ): {
   effState: (identifier: string, actual: string) => string
-  overrides: Record<string, OptimisticOverride>
   postAction: (id: string, action: string) => Promise<void>
   busyIds: Set<string>
 } {
@@ -54,10 +53,13 @@ export function useActions(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap.items, now])
 
-  const effState = useCallback((identifier: string, actual: string): string => {
-    const o = overridesRef.current[identifier]
-    return o ? o.state : actual
-  }, [])
+  const effState = useCallback(
+    (identifier: string, actual: string): string => {
+      const o = overrides[identifier]
+      return o ? o.state : actual
+    },
+    [overrides],
+  )
 
   const postAction = useCallback(
     async (id: string, action: string): Promise<void> => {
@@ -109,5 +111,5 @@ export function useActions(
     [setSnap, onResult],
   )
 
-  return { effState, overrides, postAction, busyIds: busy }
+  return { effState, postAction, busyIds: busy }
 }

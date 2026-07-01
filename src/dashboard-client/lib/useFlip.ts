@@ -1,10 +1,10 @@
+import type { RefObject } from 'preact'
 import { useLayoutEffect, useRef } from 'preact/hooks'
 
-// FLIP-style position-transition animation, ported from the old dashboard's `flip()`. Triggered only when
-// `sig` changes (a structural signature the caller computes — see boardSignature in Board.tsx); live in-place
-// field updates never touch `sig`, so this hook never fires for those (item 26). Entirely skipped when
-// prefers-reduced-motion is set (item 17).
-export function useFlip(containerRef: { current: HTMLElement | null }, sig: string): void {
+// FLIP-style position-transition animation. Triggered only when `sig` changes (a structural signature the
+// caller computes — see boardSignature in Board.tsx); live in-place field updates never touch `sig`, so this
+// hook never fires for those. Entirely skipped when prefers-reduced-motion is set.
+export function useFlip(containerRef: RefObject<HTMLElement>, sig: string): void {
   const prevRects = useRef<Map<string, DOMRect>>(new Map())
   const prevSig = useRef<string | null>(null)
 

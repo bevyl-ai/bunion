@@ -1,7 +1,6 @@
-// Formatting + small pure helpers ported byte-faithfully from the old src/dashboard.ts inline <script>.
-// Keep these in exact behavioral sync with the server-side src/tokens.ts RATES if either changes.
+// Keep the cost constants below in sync with the server-side src/tokens.ts RATES if either changes.
 
-// State-name -> pill color. Reproduced exactly from the old dashboard's `SC` map.
+// State-name -> pill color.
 const STATE_COLORS: Record<string, string> = {
   Triage: '#7c8493',
   Backlog: '#7c8493',
@@ -24,8 +23,6 @@ export const ago = (ms: number): string => {
   if (m < 60) return m + 'm ' + (s % 60) + 's'
   return Math.floor(m / 60) + 'h ' + (m % 60) + 'm'
 }
-
-export const esc = (s: string | null | undefined): string => (s || '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[c] as string)
 
 export const fmtTok = (n: number | null | undefined): string => {
   n = n || 0

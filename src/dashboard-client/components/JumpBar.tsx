@@ -1,8 +1,7 @@
 import type { BoardColumn } from '../lib/types'
 
-// Item 7: a persistent strip below the header, one chip per board column with its live count. Solves a real
-// first-impression problem — at normal desktop width the board needs ~3000px but only ~1600px is visible, and
-// columns with actual backlog (Needs Engineer, Ready) sit off-screen with zero cue otherwise.
+// The board is much wider than the viewport, so columns with real backlog can sit off-screen with no cue;
+// this strip surfaces a live count per column so an operator can jump straight to it.
 export function JumpBar({ cols, counts, onJump }: { cols: BoardColumn[]; counts: number[]; onJump: (index: number) => void }) {
   return (
     <div id="jumpbar" role="tablist" aria-label="Jump to board column">

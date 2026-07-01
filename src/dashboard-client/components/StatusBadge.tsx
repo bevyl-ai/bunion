@@ -1,7 +1,6 @@
 import { ago } from '../lib/format'
 import type { BoardItem } from '../lib/types'
 
-// Item 23: bottom-left status badge, first-matching-rule-wins cascade ported exactly from the old `cardHtml`.
 export function StatusBadge({ item, now }: { item: BoardItem; now: number }) {
   const r = item
   if (r.status === 'running') {
@@ -63,7 +62,6 @@ export function StatusBadge({ item, now }: { item: BoardItem; now: number }) {
   return <span class="ag">⏳ queued</span>
 }
 
-// Whether a card gets the hot-red pulsing left-border/box-shadow treatment (item 23c, >= 2 days in Needs Engineer).
 export function isNeHot(item: BoardItem, now: number): boolean {
   return item.state === 'Needs Engineer' && !!item.enteredAt && ((item.endedAt || now) - item.enteredAt) / 86400000 >= 2
 }

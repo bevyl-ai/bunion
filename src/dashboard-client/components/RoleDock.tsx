@@ -7,9 +7,19 @@ function roleColor(n: string): string {
   return name === 'mechanic' ? '#d99a2b' : name === 'dreamer' ? '#b88cd9' : name === 'user-advocate' ? '#3fb29e' : '#5b8def'
 }
 
-function RoleCard({ r, onOpen, onAction, busy }: { r: RoleItem; onOpen: (name: string) => void; onAction: (id: string, action: string) => void; busy: boolean }) {
+function RoleCard({
+  r,
+  onOpen,
+  onAction,
+  busy,
+}: {
+  r: RoleItem
+  onOpen: (name: string) => void
+  onAction: (id: string, action: string) => void
+  busy: boolean
+}) {
   const live = r.status === 'running'
-  const paused = !!r.paused
+  const paused = r.paused
   const col = roleColor(r.name)
   const dc = paused ? '#5a6270' : live ? '#3fb27f' : 'var(--mut2)'
   const cap = r.maxPerDay != null ? r.maxPerDay + (r.granted || 0) : null
@@ -45,7 +55,7 @@ function RoleCard({ r, onOpen, onAction, busy }: { r: RoleItem; onOpen: (name: s
             ▶ run
           </button>
         )}
-        {r.paused ? (
+        {paused ? (
           <button
             class={`runbtn${busy ? ' busy' : ''}`}
             title={`resume ${r.name}`}
@@ -116,7 +126,17 @@ function RoleCard({ r, onOpen, onAction, busy }: { r: RoleItem; onOpen: (name: s
   )
 }
 
-export function RoleDock({ roles, onOpen, onAction, busyIds }: { roles: RoleItem[]; onOpen: (name: string) => void; onAction: (id: string, action: string) => void; busyIds: Set<string> }) {
+export function RoleDock({
+  roles,
+  onOpen,
+  onAction,
+  busyIds,
+}: {
+  roles: RoleItem[]
+  onOpen: (name: string) => void
+  onAction: (id: string, action: string) => void
+  busyIds: Set<string>
+}) {
   if (!roles.length) return <div id="dock" style={{ display: 'none' }} />
   return (
     <div id="dock">

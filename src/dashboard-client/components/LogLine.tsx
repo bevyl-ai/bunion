@@ -1,6 +1,5 @@
 import { parseLogLine } from '../lib/logline'
 
-// Item 42: renders one transcript line per its classified kind, ported from the old `logHtml`.
 export function LogLine({ line }: { line: string }) {
   const { kind, text } = parseLogLine(line)
   switch (kind) {

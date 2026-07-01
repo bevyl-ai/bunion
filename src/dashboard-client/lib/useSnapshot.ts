@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { DEFAULT_COLUMNS, type BoardColumn, type Snapshot } from './types'
 
 const EMPTY_SNAPSHOT: Snapshot = {
@@ -17,7 +17,7 @@ const EMPTY_SNAPSHOT: Snapshot = {
   gatewayAccounts: [],
 }
 
-// SSE + polling-fallback lifecycle for the board snapshot (items 51-53 of the migration spec):
+// SSE + polling-fallback lifecycle for the board snapshot:
 //  - fetch /state.json once immediately for a fast first paint
 //  - then open an EventSource to /events for live push updates
 //  - if EventSource is unavailable at all, fall back to polling /state.json every 1s
@@ -26,8 +26,6 @@ const EMPTY_SNAPSHOT: Snapshot = {
 export function useSnapshot(): { snap: Snapshot; cols: BoardColumn[]; setSnap: (s: Snapshot) => void } {
   const [snap, setSnapState] = useState<Snapshot>(EMPTY_SNAPSHOT)
   const [cols, setCols] = useState<BoardColumn[]>(DEFAULT_COLUMNS)
-  const snapRef = useRef(snap)
-  snapRef.current = snap
 
   const applySnap = (s: Snapshot): void => {
     setSnapState(s)
@@ -93,7 +91,13 @@ export function useSnapshot(): { snap: Snapshot; cols: BoardColumn[]; setSnap: (
 
     return () => {
       cancelled = true
-      if (es) try { es.close() } catch { /* ignore */ }
+      if (es) {
+        try {
+          es.close()
+        } catch {
+          /* ignore */
+        }
+      }
       if (pollFallback) clearInterval(pollFallback)
       if (reopenTimer) clearTimeout(reopenTimer)
     }

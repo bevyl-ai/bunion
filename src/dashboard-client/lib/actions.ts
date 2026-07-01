@@ -1,6 +1,5 @@
 import type { ActionDef, BoardColumn, BoardItem } from './types'
 
-// Context-dependent primary actions for a ticket. Ported byte-faithfully from the old dashboard's `actionList`.
 const A_REWORK: ActionDef = { a: 'to-build', l: 'Back to coding', c: '', t: 'Move to In Progress so the agent resumes the thread, revises the code, and updates the PR' }
 
 export function actionList(it: BoardItem | null | undefined): ActionDef[] {
@@ -19,12 +18,11 @@ export function actionList(it: BoardItem | null | undefined): ActionDef[] {
 
 export function colIdx(cols: BoardColumn[], st: string | null | undefined): number {
   const l = (st || '').trim().toLowerCase()
-  for (let i = 0; i < cols.length; i++) for (let j = 0; j < cols[i]!.states.length; j++) if (cols[i]!.states[j]!.toLowerCase() === l) return i
-  return -1
+  return cols.findIndex((col) => col.states.some((s) => s.toLowerCase() === l))
 }
 
 // One "-> ColumnName" move per board column except the ticket's current column and the human-owned "QA Requested"
-// lane (Anya/Julia's manual QA tracking — WORKFLOW.md already bans the agent from writing there).
+// lane (Anya/Julia's manual QA tracking — WORKFLOW.md bans the agent from writing there).
 export function moveItems(cols: BoardColumn[], it: BoardItem | null | undefined): ActionDef[] {
   if (!it) return []
   const cur = colIdx(cols, it.state)
@@ -37,7 +35,6 @@ export function moveItems(cols: BoardColumn[], it: BoardItem | null | undefined)
   return out
 }
 
-// Reproduced EXACTLY from the old dashboard's DANGER_CONFIRM object — including escaped apostrophe/em-dash chars.
 export const DANGER_CONFIRM: Record<string, string> = {
   restart: "Permanently wipe this ticket's workspace and thread history — ALL context is lost and cannot be recovered. Continue?",
   'move:Done':

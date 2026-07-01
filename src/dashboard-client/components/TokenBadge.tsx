@@ -1,9 +1,9 @@
 import { estCost, fmtCost, fmtTok } from '../lib/format'
 import type { TokenBreakdown } from '../lib/types'
 
-// Item 24: bottom-right token badge with tooltip (exact token count + est. API-equivalent cost + flat-spend note),
-// and — if total >= 1e9 — a warning icon + amber/gold color + an appended tooltip warning referencing db510f7.
-// This exact threshold/warning must be re-applied every per-second live tick (item 26), not just on first render.
+// Totals >= 1e9 are almost certainly the pre-db510f7 double-counting bug (thread-cumulative
+// tokens re-folded onto a tally that already had them), not a real spend — flag it visibly
+// rather than let the number pass as trustworthy.
 export function TokenBadge({ tokens }: { tokens: TokenBreakdown | null }) {
   if (!tokens) return <span class="t-tok" />
   const input = tokens.phases.reduce((a, p) => a + p.input, 0)

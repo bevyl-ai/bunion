@@ -1,7 +1,5 @@
 import { useRef, useState } from 'preact/hooks'
 
-// Item 45: auto-growing textarea (min-height ~38px, max-height ~160px), Send disabled while empty/whitespace,
-// Enter sends (Shift+Enter inserts newline). On send: clear + disable both, POST /chat, re-enable + refocus.
 export function ChatBox({
   placeholder,
   onSend,
@@ -12,7 +10,7 @@ export function ChatBox({
   pending: boolean
 }) {
   const [value, setValue] = useState('')
-  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null)
 
   const autoGrow = (): void => {
     const el = taRef.current
@@ -30,8 +28,7 @@ export function ChatBox({
     taRef.current?.focus()
   }
 
-  const disabled = pending
-  const sendDisabled = disabled || !value.trim()
+  const sendDisabled = pending || !value.trim()
 
   return (
     <div id="mchat">
@@ -42,7 +39,7 @@ export function ChatBox({
         aria-label="Message the agent"
         placeholder={placeholder}
         value={value}
-        disabled={disabled}
+        disabled={pending}
         onInput={(e) => {
           setValue((e.target as HTMLTextAreaElement).value)
           autoGrow()

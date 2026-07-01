@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 
-// Cache is module-level (not per-hook-instance) so hover-prefetch (item 28) and the modal itself share one store,
-// matching the old dashboard's single `logCache` Map.
+// Cache is module-level (not per-hook-instance) so hover-prefetch and the modal itself share one store.
 const logCache = new Map<string, string[]>()
 
 export function prefetchLog(id: string | null | undefined): void {
@@ -26,7 +25,7 @@ export interface LogStreamState {
   loaded: boolean // false while showing the skeleton (no cached/seeded data yet)
 }
 
-// Drives the ticket-detail modal's transcript body (items 41, 43). Owns:
+// Drives the ticket-detail modal's transcript body. Owns:
 //  - SSE via /log-stream/<id>, seeded from the module-level cache if hover-prefetch already warmed it
 //  - graceful degradation to 1s polling of /transcript/<id> if EventSource is unavailable or errors
 //  - seed (full replace) vs append vs shrunk-seed (restart-from-scratch => full replace) semantics
@@ -92,8 +91,9 @@ export function useLogStream(id: string | null): LogStreamState {
             setLoaded(true)
             setLive('')
           } else if (j.lines && j.lines.length) {
+            const newLines = j.lines
             setLines((prev) => {
-              const next = prev.concat(j.lines!)
+              const next = prev.concat(newLines)
               logCache.set(id, next)
               return next
             })
@@ -116,26 +116,16 @@ export function useLogStream(id: string | null): LogStreamState {
 
     return () => {
       cancelled = true
-      if (es) try { es.close() } catch { /* ignore */ }
+      if (es) {
+        try {
+          es.close()
+        } catch {
+          /* ignore */
+        }
+      }
       if (poll) clearInterval(poll)
     }
   }, [id])
 
   return { lines, live, loaded }
-}
-
-// Ref-based "was the user already scrolled to (near) the bottom?" check, used before auto-scrolling on new
-// lines/live updates so an operator scrolled up to read history never gets yanked back down (item 43).
-export function useStickyScroll(): { ref: { current: HTMLDivElement | null }; wasAtBottom: () => boolean; scrollToBottom: () => void } {
-  const ref = useRef<HTMLDivElement | null>(null)
-  const wasAtBottom = (): boolean => {
-    const el = ref.current
-    if (!el) return true
-    return el.scrollTop + el.clientHeight >= el.scrollHeight - 60
-  }
-  const scrollToBottom = (): void => {
-    const el = ref.current
-    if (el) el.scrollTop = el.scrollHeight
-  }
-  return { ref, wasAtBottom, scrollToBottom }
 }

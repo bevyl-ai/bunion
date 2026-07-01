@@ -1,6 +1,6 @@
 // Client-side mirrors of the server's BoardItem/RoleItem/Snapshot shapes (src/dashboard.ts). Duplicated rather
 // than imported because the client bundle must not pull in server-only modules (bun:sqlite via stats.ts, etc.)
-// through a shared import graph — these are structurally identical to the wire JSON the server emits.
+// through a shared import graph — these types are structurally identical to the wire JSON the server emits.
 
 export interface TokenPhase {
   phase: string

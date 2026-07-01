@@ -1,8 +1,8 @@
 import { useEffect } from 'preact/hooks'
 
-// Items 54-56: p/P triggers pause, j/k moves focus between cards (wrapping-safe at the ends), Enter opens the
-// focused card's modal. All suppressed while focus is inside a text input/textarea, and j/k/Enter card-nav is
-// also suppressed while the modal is open (no card grid visible then — Modal owns its own Escape/ArrowUp/Down).
+// p/P triggers pause, j/k moves focus between cards (wrapping-safe at the ends), Enter opens the focused
+// card's modal. All suppressed while focus is inside a text input/textarea, and j/k/Enter card-nav is also
+// suppressed while the modal is open (no card grid visible then — Modal owns its own Escape/ArrowUp/Down).
 export function useKeyboardShortcuts({ modalOpen, onPause, onOpen }: { modalOpen: boolean; onPause: () => void; onOpen: (id: string) => void }): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {

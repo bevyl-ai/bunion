@@ -17,15 +17,15 @@ export function Transcript({
   const wasAtBottomRef = useRef(true)
   const prevLen = useRef(-1)
 
-  // Item 43: only auto-scroll to bottom if the user was already near the bottom before this update landed.
+  // Only auto-scroll if the user was already near the bottom before this update landed — a line count change
+  // that doesn't move the scroll position (e.g. content-only edits to the last line) must not force a scroll.
   useLayoutEffect(() => {
     const el = logRef.current
     if (!el) return
-    const changed = lines.length !== prevLen.current
+    const lineCountChanged = lines.length !== prevLen.current
     prevLen.current = lines.length
-    if (changed || live || chatPending) {
-      if (wasAtBottomRef.current || chatPending || live) el.scrollTop = el.scrollHeight
-    }
+    const shouldScroll = live || chatPending || (lineCountChanged && wasAtBottomRef.current)
+    if (shouldScroll) el.scrollTop = el.scrollHeight
   }, [lines, live, chatPending, logRef])
 
   const onScroll = (): void => {

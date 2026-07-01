@@ -25,7 +25,7 @@ export function StatsApp() {
   }, [])
 
   const onSort = (k: SortKey): void => {
-    if (sortKey === k) setDir((d) => (d === -1 ? 1 : -1) as -1 | 1)
+    if (sortKey === k) setDir((d) => (d === -1 ? 1 : -1))
     else {
       setSortKey(k)
       setDir(-1)
@@ -37,9 +37,16 @@ export function StatsApp() {
     return data.threads.slice().sort((a, b) => (num(a[sortKey]) - num(b[sortKey])) * dir)
   }, [data, sortKey, dir])
 
-  const totals = data?.totals || {}
+  const totals = data?.totals
   const daily = data?.daily || []
   const maxDailyTokens = Math.max(1, ...daily.map((d) => num(d.tokens)))
+
+  const totalCards: { label: string; value: number | undefined }[] = [
+    { label: 'tickets', value: totals?.tickets },
+    { label: 'events', value: totals?.events },
+    { label: 'deadlocks', value: totals?.deadlocks },
+    { label: 'caps', value: totals?.caps },
+  ]
 
   return (
     <>
@@ -51,14 +58,9 @@ export function StatsApp() {
         </a>
       </h1>
       <div class="tot" id="tot">
-        {[
-          ['tickets', totals.tickets],
-          ['events', totals.events],
-          ['deadlocks', totals.deadlocks],
-          ['caps', totals.caps],
-        ].map(([label, val]) => (
-          <div class="c" key={label as string}>
-            <b>{(val as number) || 0}</b>
+        {totalCards.map(({ label, value }) => (
+          <div class="c" key={label}>
+            <b>{value || 0}</b>
             <span>{label}</span>
           </div>
         ))}

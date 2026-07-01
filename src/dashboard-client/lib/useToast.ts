@@ -6,7 +6,7 @@ export interface ToastState {
   show: boolean
 }
 
-// bottom-center toast, auto-dismisses after ~3.4s (item 35).
+// bottom-center toast, auto-dismisses after ~3.4s.
 export function useToast(): { toast: ToastState | null; showToast: (msg: string, isErr: boolean) => void } {
   const [toast, setToast] = useState<ToastState | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)

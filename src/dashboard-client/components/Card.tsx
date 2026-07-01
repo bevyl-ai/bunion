@@ -45,7 +45,7 @@ export function Card({
             </a>
           )}
           {hasActions && (
-            <button class="kebab" data-id={r.identifier} onClick={(e) => onKebab(r.identifier, e as unknown as MouseEvent)} title="actions" aria-label={`Actions for ${r.identifier}`} aria-haspopup="menu">
+            <button class="kebab" data-id={r.identifier} onClick={(e) => onKebab(r.identifier, e)} title="actions" aria-label={`Actions for ${r.identifier}`} aria-haspopup="menu">
               ⋯
             </button>
           )}

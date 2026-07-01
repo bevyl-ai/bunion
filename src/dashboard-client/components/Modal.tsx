@@ -31,15 +31,14 @@ export function Modal({
   onMoveMenu: (id: string, ev: MouseEvent) => void
   onChat: (id: string, text: string) => Promise<void>
   chatPending: boolean
-  busy: boolean // item 34: true while any action for the expanded ticket is in flight — dims all mactions buttons
+  busy: boolean // true while an action for the expanded ticket is in flight — dims the mactions buttons
 }) {
   const { lines, live, loaded } = useLogStream(expandedId)
   const logRef = useRef<HTMLDivElement | null>(null)
-  const panelRef = useRef<HTMLDivElement | null>(null)
 
   const open = !!expandedId
 
-  // Item 47: ArrowUp/ArrowDown scroll the transcript while the modal is open; Escape closes from anywhere.
+  // ArrowUp/ArrowDown scroll the transcript while the modal is open; Escape closes from anywhere.
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent): void => {
@@ -63,7 +62,7 @@ export function Modal({
 
   return (
     <div id="modal" class="open" style={{ display: 'flex' }} onClick={(e) => { if ((e.target as HTMLElement).id === 'modal') onClose() }}>
-      <div id="mpanel" ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="mtitle">
+      <div id="mpanel" role="dialog" aria-modal="true" aria-labelledby="mtitle">
         <ModalHead item={item} role={role} onClose={onClose} />
         <ModalSub item={item} role={role} />
         <ModalBanner item={item} isRole={isRole} />
@@ -88,40 +87,31 @@ function ModalHead({ item, role, onClose }: { item: BoardItem | null; role: Role
       <span id="mtitle">
         {role ? (
           <>
-            <span style={{ textTransform: 'capitalize', color: roleColor(role.name) }}>{role.name}</span>{' '}
+            <span style={{ textTransform: 'capitalize', color: roleColor(role.name) }}>{role.name}</span>
             <span class="pill" style={{ color: 'var(--mut)', background: '#8b929e1a' }}>
               pool role
             </span>
             {role.model && (
-              <>
-                {' '}
-                <span class="pill" style={{ color: 'var(--mut2)', background: '#8b929e14', fontFamily: 'ui-monospace,Menlo,monospace' }}>
-                  {role.model}
-                </span>
-              </>
+              <span class="pill" style={{ color: 'var(--mut2)', background: '#8b929e14', fontFamily: 'ui-monospace,Menlo,monospace' }}>
+                {role.model}
+              </span>
             )}
           </>
         ) : item ? (
           <>
-            {item.identifier}{' '}
+            {item.identifier}
             <span class="pill" style={{ color: SC(item.state), background: SC(item.state) + '22' }}>
               {item.state}
             </span>
             {item.prUrl && (
-              <>
-                {' '}
-                <a class="pr" href={item.prUrl} target="_blank" rel="noopener">
-                  PR #{prNum}
-                </a>
-              </>
+              <a class="pr" href={item.prUrl} target="_blank" rel="noopener">
+                PR #{prNum}
+              </a>
             )}
             {item.url && (
-              <>
-                {' '}
-                <a class="pr" style={{ background: '#8b929e1a', color: 'var(--mut)' }} href={item.url} target="_blank" rel="noopener">
-                  Linear ↗
-                </a>
-              </>
+              <a class="pr" style={{ background: '#8b929e1a', color: 'var(--mut)' }} href={item.url} target="_blank" rel="noopener">
+                Linear ↗
+              </a>
             )}
           </>
         ) : null}
@@ -137,16 +127,21 @@ function ModalSub({ item, role }: { item: BoardItem | null; role: RoleItem | nul
   if (role) {
     const live = role.status === 'running'
     const meta: ComponentChildren[] = [
-      <span class="m">
+      <span class="m" key="status">
         <i class="dot" style={{ background: live ? '#3fb27f' : 'var(--mut2)' }} />
         {live ? 'working' : 'idle'}
       </span>,
-      <span class="m">↻ every {ago(role.cadenceMs)}</span>,
+      <span class="m" key="cadence">↻ every {ago(role.cadenceMs)}</span>,
     ]
-    if (role.maxPerDay != null) meta.push(<span class="m">{role.filedToday}/{role.maxPerDay + (role.granted || 0)} filed today{(role.granted || 0) > 0 ? ` (+${role.granted} granted)` : ''}</span>)
-    if (role.lastRunAt) meta.push(<span class="m">last run {ago(Date.now() - role.lastRunAt)} ago</span>)
-    if (role.tokens) meta.push(<span class="m">Σ {fmtTok(role.tokens)} tok</span>)
-    if (role.host) meta.push(<span class="m">⌂ {stripHostSuffix(role.host)}</span>)
+    if (role.maxPerDay != null)
+      meta.push(
+        <span class="m" key="filed">
+          {role.filedToday}/{role.maxPerDay + (role.granted || 0)} filed today{(role.granted || 0) > 0 ? ` (+${role.granted} granted)` : ''}
+        </span>,
+      )
+    if (role.lastRunAt) meta.push(<span class="m" key="lastRun">last run {ago(Date.now() - role.lastRunAt)} ago</span>)
+    if (role.tokens) meta.push(<span class="m" key="tokens">Σ {fmtTok(role.tokens)} tok</span>)
+    if (role.host) meta.push(<span class="m" key="host">⌂ {stripHostSuffix(role.host)}</span>)
     return (
       <div id="msub">
         <div class="mtitle2">{live ? role.activity || 'working…' : 'idle — waiting for the next run'}</div>
@@ -158,22 +153,22 @@ function ModalSub({ item, role }: { item: BoardItem | null; role: RoleItem | nul
   const m: ComponentChildren[] = []
   if (item.priority >= 1 && item.priority <= 4)
     m.push(
-      <span class="m">
+      <span class="m" key="priority">
         <i class={`pri p${item.priority}`} />
         {PRI[item.priority]}
       </span>,
     )
   if (item.enteredAt)
     m.push(
-      <span class="m" title="total time in the factory">
+      <span class="m" key="elapsed" title="total time in the factory">
         ⏱ {ago((item.endedAt || Date.now()) - item.enteredAt)}
       </span>,
     )
-  if (item.status === 'running') m.push(<span class="m">⏺ turn {item.turn || 0}</span>)
-  if (item.host) m.push(<span class="m">⌂ {stripHostSuffix(item.host)}</span>)
+  if (item.status === 'running') m.push(<span class="m" key="turn">⏺ turn {item.turn || 0}</span>)
+  if (item.host) m.push(<span class="m" key="host">⌂ {stripHostSuffix(item.host)}</span>)
   if (item.tokens)
     m.push(
-      <span class="m" title="total tokens">
+      <span class="m" key="tokens" title="total tokens">
         Σ {fmtTok(item.tokens.total)} tok
       </span>,
     )
@@ -185,8 +180,6 @@ function ModalSub({ item, role }: { item: BoardItem | null; role: RoleItem | nul
   )
 }
 
-// Item 39: banner logic — Needs Engineer always shows (red-tinted); else a non-empty note while not running
-// shows neutral-tinted; else hidden. Roles never show this banner.
 function ModalBanner({ item, isRole }: { item: BoardItem | null; isRole: boolean }) {
   if (isRole || !item) return <div id="mbanner" style={{ display: 'none' }} />
   if (item.state === 'Needs Engineer') {
@@ -206,7 +199,6 @@ function ModalBanner({ item, isRole }: { item: BoardItem | null; isRole: boolean
   return <div id="mbanner" style={{ display: 'none' }} />
 }
 
-// Item 40: token breakdown row — one chip per nonzero pipeline phase + a final total chip. Roles never show this.
 function ModalTokens({ item, isRole }: { item: BoardItem | null; isRole: boolean }) {
   if (isRole || !item || !item.tokens) return <div id="mtokens" style={{ display: 'none' }} />
   let tcached = 0
@@ -219,7 +211,7 @@ function ModalTokens({ item, isRole }: { item: BoardItem | null; isRole: boolean
   }
   const mc = estCost(tinput, toutput, tcached)
   return (
-    <div id="mtokens" style={{ display: 'flex' }}>
+    <div id="mtokens">
       <span class="tklab">tokens</span>
       {item.tokens.phases.map((p) => (
         <span key={p.phase} class="tkph" title={`input ${fmtTok(p.input)} · output ${fmtTok(p.output)} · cached ${fmtTok(p.cached)} · ~${fmtCost(estCost(p.input, p.output, p.cached))} API-equiv`}>
@@ -240,8 +232,6 @@ function ModalTokens({ item, isRole }: { item: BoardItem | null; isRole: boolean
   )
 }
 
-// Item 46: the actionList() buttons + a "..." button that opens the full move-to-any-column menu. Hidden
-// entirely for roles (roles only get chat, no action buttons).
 function ModalActions({
   item,
   isRole,
@@ -258,7 +248,7 @@ function ModalActions({
   if (isRole || !item) return <div id="mactions" style={{ display: 'none' }} />
   const acts = actionList(item)
   return (
-    <div id="mactions" style={{ display: 'flex' }}>
+    <div id="mactions">
       {acts.map((d) => (
         <button key={d.a} class={`mbtn ${d.c || ''}${busy ? ' busy' : ''}`} title={d.t || ''} onClick={() => onAction(item.identifier, d.a)}>
           {d.l}

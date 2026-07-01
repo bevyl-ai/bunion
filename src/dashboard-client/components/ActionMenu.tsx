@@ -7,10 +7,8 @@ export interface MenuRequest {
   anchor: DOMRect
 }
 
-// Item 31: the floating menu shared by the card kebab AND the modal's "..." move-to-any-column button.
-// Right-aligned to its anchor button, flips upward if it would overflow the viewport bottom. Closes on outside
-// click, scroll, or resize (item 31) — those listeners are global and owned by DashboardApp; this component is
-// purely presentational once a MenuRequest is supplied.
+// Outside-click, scroll, and resize dismissal is handled by global listeners in DashboardApp, not here — this
+// component only positions and renders the menu for a given request.
 export function ActionMenu({ request, onAction, onClose }: { request: MenuRequest | null; onAction: (id: string, action: string) => void; onClose: () => void }) {
   const ref = useRef<HTMLDivElement | null>(null)
   const [pos, setPos] = useState<{ left: number; top: number; visible: boolean }>({ left: 0, top: 0, visible: false })
@@ -20,8 +18,8 @@ export function ActionMenu({ request, onAction, onClose }: { request: MenuReques
       setPos((p) => ({ ...p, visible: false }))
       return
     }
-    // Measure after mount (menu must be in the DOM, hidden, to get its real size) — mirrors the old showMenu()'s
-    // visibility:hidden measure-then-place trick.
+    // The menu must already be in the DOM to read its real size, so it renders hidden first and is
+    // repositioned + revealed once its dimensions are known.
     const m = ref.current
     if (!m) return
     const mw = m.offsetWidth

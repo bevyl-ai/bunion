@@ -32,10 +32,14 @@ export function ActionMenu({ request, onAction, onClose }: { request: MenuReques
     }
     // The menu is position:fixed at the button's open-time rect, so any scroll would leave it floating over a
     // different card while still acting on the original ticket. Close it on scroll (native context-menu
-    // behaviour). Scoped to while the menu is open; capture-phase so inner column scrollers count too.
+    // behaviour). Subscribe on the NEXT frame so the opening click's own focus/layout scroll doesn't instantly
+    // dismiss it; capture-phase so inner column scrollers count too.
     const onScroll = (): void => onClose()
-    window.addEventListener('scroll', onScroll, true)
-    return () => window.removeEventListener('scroll', onScroll, true)
+    const raf = requestAnimationFrame(() => window.addEventListener('scroll', onScroll, true))
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('scroll', onScroll, true)
+    }
   }, [request])
 
   if (!request) return null

@@ -1,5 +1,5 @@
 import { actionList } from '../lib/actions'
-import { ago } from '../lib/format'
+import { ago, prNumFromUrl } from '../lib/format'
 import { prefetchLog } from '../lib/useLogStream'
 import type { BoardItem } from '../lib/types'
 import { PriorityDot } from './PriorityDot'
@@ -20,7 +20,7 @@ export function Card({
   const r = item
   const run = r.status === 'running'
   const neHot = isNeHot(r, now)
-  const prNum = r.prUrl ? r.prUrl.split('/pull/')[1] || '' : ''
+  const prNum = prNumFromUrl(r.prUrl)
   const reason = (r.state === 'QA blocked' || r.state === 'Needs Engineer') && r.note ? r.note.slice(0, 160) : null
   const hasActions = actionList(r).length > 0
 

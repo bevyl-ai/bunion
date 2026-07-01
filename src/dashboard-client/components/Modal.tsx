@@ -1,7 +1,7 @@
 import type { ComponentChildren } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
 import { actionList } from '../lib/actions'
-import { ago, estCost, fmtCost, fmtTok, PRI, roleColor, SC, stripHostSuffix } from '../lib/format'
+import { ago, estCost, fmtCost, fmtTok, PRI, prNumFromUrl, roleColor, SC, stripHostSuffix } from '../lib/format'
 import { useLogStream } from '../lib/useLogStream'
 import type { BoardItem, RoleItem } from '../lib/types'
 import { ChatBox } from './ChatBox'
@@ -75,7 +75,7 @@ export function Modal({
 }
 
 function ModalHead({ item, role, onClose }: { item: BoardItem | null; role: RoleItem | null; onClose: () => void }) {
-  const prNum = item?.prUrl ? item.prUrl.split('/pull/')[1] || '' : ''
+  const prNum = prNumFromUrl(item?.prUrl)
   return (
     <div id="mhead">
       <span class="live" />

@@ -51,3 +51,5 @@ export function fmtCost(d: number): string {
 export const PRI: Record<number, string> = { 1: 'Urgent', 2: 'High', 3: 'Medium', 4: 'Low' }
 
 export const stripHostSuffix = (h: string): string => h.replace(/\.exe\.xyz$/, '')
+
+export const prNumFromUrl = (url: string | null | undefined): string => (url ? url.split('/pull/')[1] || '' : '')

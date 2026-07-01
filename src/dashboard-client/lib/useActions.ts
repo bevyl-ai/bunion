@@ -26,6 +26,10 @@ export function useActions(
 } {
   const [overrides, setOverrides] = useState<Record<string, OptimisticOverride>>({})
   const [busy, setBusy] = useState<Set<string>>(new Set())
+  // postAction's revert closures run after an `await` -- if a real snapshot update arrives from the server
+  // while that fetch is in flight, a revert built on `snap` captured at click-time would clobber it, because
+  // setSnap takes a full Snapshot value rather than a (prev => next) updater. The ref always holds whatever
+  // snapshot is current by the time revert() actually runs.
   const snapRef = useRef(snap)
   snapRef.current = snap
 
@@ -58,58 +62,55 @@ export function useActions(
     [overrides],
   )
 
-  const postAction = useCallback(
-    async (id: string, action: string): Promise<void> => {
-      if (DANGER_CONFIRM[action] && !confirm(id + ': ' + DANGER_CONFIRM[action])) return
-      setBusy((b) => new Set(b).add(id))
+  // Not memoized: every caller (DashboardApp's handleAction and friends) already wraps this in its own
+  // non-memoized closure before passing it further down, so a stable identity here was never consumed by
+  // anything -- a useCallback here bought nothing and only invited the ref-mirroring workaround below to look
+  // load-bearing when it wasn't the reason snapRef exists (see snapRef's own comment for the real reason).
+  const postAction = async (id: string, action: string): Promise<void> => {
+    if (DANGER_CONFIRM[action] && !confirm(id + ': ' + DANGER_CONFIRM[action])) return
+    setBusy((b) => new Set(b).add(id))
 
-      let revert: (() => void) | null = null
-      if (id === '__pause__' && action === 'toggle') {
-        const was = snapRef.current.paused
-        setSnap({ ...snapRef.current, paused: !snapRef.current.paused })
-        revert = () => setSnap({ ...snapRef.current, paused: was })
-      } else if (action === 'pause') {
-        const role = (snapRef.current.roles || []).find((r) => r.name === id)
-        if (role) {
-          const wasPaused = !!role.paused
-          setSnap({ ...snapRef.current, roles: snapRef.current.roles.map((r) => (r.name === id ? { ...r, paused: !r.paused } : r)) })
-          revert = () => setSnap({ ...snapRef.current, roles: snapRef.current.roles.map((r) => (r.name === id ? { ...r, paused: wasPaused } : r)) })
-        }
-      } else if (action.indexOf('move:') === 0) {
-        const to = action.slice(5)
-        setOverrides((o) => ({ ...o, [id]: { state: to, expiresAt: Date.now() + 5000 } }))
-        revert = () =>
-          setOverrides((o) => {
-            const next = { ...o }
-            delete next[id]
-            return next
-          })
+    let revert: (() => void) | null = null
+    if (id === '__pause__' && action === 'toggle') {
+      const was = snapRef.current.paused
+      setSnap({ ...snapRef.current, paused: !snapRef.current.paused })
+      revert = () => setSnap({ ...snapRef.current, paused: was })
+    } else if (action === 'pause') {
+      const role = (snapRef.current.roles || []).find((r) => r.name === id)
+      if (role) {
+        const wasPaused = !!role.paused
+        setSnap({ ...snapRef.current, roles: snapRef.current.roles.map((r) => (r.name === id ? { ...r, paused: !r.paused } : r)) })
+        revert = () => setSnap({ ...snapRef.current, roles: snapRef.current.roles.map((r) => (r.name === id ? { ...r, paused: wasPaused } : r)) })
       }
+    } else if (action.indexOf('move:') === 0) {
+      const to = action.slice(5)
+      setOverrides((o) => ({ ...o, [id]: { state: to, expiresAt: Date.now() + 5000 } }))
+      revert = () =>
+        setOverrides((o) => {
+          const next = { ...o }
+          delete next[id]
+          return next
+        })
+    }
 
-      let ok = false
-      try {
-        const r = (await (
-          await fetch('/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, action }) })
-        ).json()) as { ok?: boolean; msg?: string }
-        ok = !!(r && r.ok)
-        const sys = (id || '').indexOf('__') === 0
-        onResult(ok ? (sys ? '' : id + ' — ') + (r.msg || 'done') : 'Failed: ' + ((r && r.msg) || 'error'), !ok)
-      } catch {
-        onResult('Action failed', true)
-      }
-      if (!ok && revert) revert()
-      setBusy((b) => {
-        const next = new Set(b)
-        next.delete(id)
-        return next
-      })
-    },
-    // postAction is returned to callers and invoked later from event handlers, so it needs a stable identity —
-    // it can't depend on `snap` directly or every snapshot update would hand callers a new function. It reads
-    // the latest snapshot through snapRef instead, which is intentional, not a workaround.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [setSnap, onResult],
-  )
+    let ok = false
+    try {
+      const r = (await (
+        await fetch('/action', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, action }) })
+      ).json()) as { ok?: boolean; msg?: string }
+      ok = !!(r && r.ok)
+      const sys = (id || '').indexOf('__') === 0
+      onResult(ok ? (sys ? '' : id + ' — ') + (r.msg || 'done') : 'Failed: ' + ((r && r.msg) || 'error'), !ok)
+    } catch {
+      onResult('Action failed', true)
+    }
+    if (!ok && revert) revert()
+    setBusy((b) => {
+      const next = new Set(b)
+      next.delete(id)
+      return next
+    })
+  }
 
   return { effState, postAction, busyIds: busy }
 }

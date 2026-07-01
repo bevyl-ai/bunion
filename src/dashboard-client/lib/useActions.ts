@@ -18,7 +18,6 @@ export function useActions(
   snap: Snapshot,
   setSnap: (s: Snapshot) => void,
   onResult: (msg: string, isErr: boolean) => void,
-  now: number,
 ): {
   effState: (identifier: string, actual: string) => string
   postAction: (id: string, action: string) => Promise<void>
@@ -34,15 +33,15 @@ export function useActions(
   snapRef.current = snap
 
   // An override is "live" only until the real state catches up (actual === target), it expires (5s), or the item
-  // vanishes. Rather than a state-syncing effect that sweeps the map on every snapshot/clock change, decide
-  // liveness at read time in effState — the 1s `now` tick already re-renders, so an expired override reverts on
-  // the next tick. Stale keys are pruned opportunistically when a new move override is added (see postAction).
+  // vanishes. Decide liveness at read time rather than via a state-syncing sweep effect: a failed/stale override
+  // stops applying once Date.now() passes its expiry, and the frequent SSE snapshot re-renders re-run this within
+  // ~1s. Stale keys are pruned opportunistically when a new move override is added (see postAction).
   const effState = useCallback(
     (identifier: string, actual: string): string => {
       const o = overrides[identifier]
-      return o && now < o.expiresAt && actual !== o.state ? o.state : actual
+      return o && Date.now() < o.expiresAt && actual !== o.state ? o.state : actual
     },
-    [overrides, now],
+    [overrides],
   )
 
   // Not memoized: every caller (DashboardApp's handleAction and friends) already wraps this in its own

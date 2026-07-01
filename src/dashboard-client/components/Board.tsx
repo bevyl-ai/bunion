@@ -8,7 +8,6 @@ export function Board({
   cols,
   items,
   effState,
-  now,
   filterQuery,
   scope,
   terminalStates,
@@ -18,7 +17,6 @@ export function Board({
   cols: BoardColumn[]
   items: BoardItem[]
   effState: (identifier: string, actual: string) => string
-  now: number
   filterQuery: string
   scope: string
   terminalStates: string[] | undefined
@@ -82,7 +80,6 @@ export function Board({
               key={col.name}
               col={col}
               items={buckets[i]!}
-              now={now}
               onOpen={onOpen}
               onKebab={onKebab}
               colRef={(el) => {
@@ -92,7 +89,7 @@ export function Board({
             />
           ))}
           {unmapped.length > 0 && (
-            <Column col={{ name: `⚠ unmapped — ${unmappedNames}`, c: '#e0564f', states: [] }} items={unmapped} now={now} onOpen={onOpen} onKebab={onKebab} />
+            <Column col={{ name: `⚠ unmapped — ${unmappedNames}`, c: '#e0564f', states: [] }} items={unmapped} onOpen={onOpen} onKebab={onKebab} />
           )}
         </div>
       )}

@@ -20,17 +20,10 @@ export function DashboardApp() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [menu, setMenu] = useState<MenuRequest | null>(null)
   const [chatPending, setChatPending] = useState(false)
-  const [now, setNow] = useState(() => Date.now())
 
-  // Tick every second for live in-place field updates (card elapsed/active/turn/token text) without forcing
-  // the structural board rebuild (Board.tsx's `sig` doesn't depend on `now`). Also drives the optimistic-override
-  // sweep's 5s expiry in useActions.
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(t)
-  }, [])
-
-  const { effState, postAction, busyIds } = useActions(snap, setSnap, showToast, now)
+  // Live elapsed/active/countdown text is patched directly in the DOM by lib/liveClock's single ticker — no
+  // per-second React re-render. Data changes (states, tokens, streaming) still arrive via the SSE snapshot.
+  const { effState, postAction, busyIds } = useActions(snap, setSnap, showToast)
 
   const effItem = useMemo(() => {
     if (!expandedId) return null
@@ -133,7 +126,6 @@ export function DashboardApp() {
         cols={cols}
         items={snap.items}
         effState={effState}
-        now={now}
         filterQuery={filterQuery}
         scope={snap.scope}
         terminalStates={snap.terminalStates}

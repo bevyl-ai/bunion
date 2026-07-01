@@ -4,14 +4,12 @@ import { Card } from './Card'
 export function Column({
   col,
   items,
-  now,
   onOpen,
   onKebab,
   colRef,
 }: {
   col: BoardColumn
   items: BoardItem[]
-  now: number
   onOpen: (id: string) => void
   onKebab: (id: string, ev: MouseEvent) => void
   colRef?: (el: HTMLDivElement | null) => void
@@ -36,7 +34,7 @@ export function Column({
       </div>
       <div class="colcards flex flex-col gap-2.5 flex-auto overflow-y-auto overflow-x-hidden min-h-0 pb-2">
         {items.length ? (
-          items.map((r) => <Card key={r.identifier} item={r} now={now} onOpen={onOpen} onKebab={onKebab} />)
+          items.map((r) => <Card key={r.identifier} item={r} onOpen={onOpen} onKebab={onKebab} />)
         ) : (
           <div class="colempty text-[#3a414e] text-[11.5px] py-4 text-center border border-dashed border-line rounded-[10px]">empty</div>
         )}

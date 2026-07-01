@@ -4,12 +4,12 @@ repo: bevyl-ai/bevyl.ai              # default repo — a ticket targets this un
 repos:                               # additional repos keyed by the repo:<slug> Linear label — label a ticket repo:<slug> to route it
   bunion: bevyl-ai/bunion            # the factory's own repo (self-hosting)
   stupify: Octember/stupif.ai        # the code-reviewer (Octember org — the bevyl-web GH app/proxy must be granted access)
-github:                              # LOCAL-mode bot identity: agents commit + open PRs as the bevyl-dark-factory GitHub App
-  app_id: $BEVYL_FACTORY_APP_ID              # instead of the operator. The daemon mints an hourly installation token from the
-  installation_id: $BEVYL_FACTORY_INSTALLATION_ID  # private key and injects it as GH_TOKEN; each workspace's git author is the bot.
-  private_key_path: $BEVYL_FACTORY_PRIVATE_KEY_PATH  # (values live in ~/.bevyl/.env). Unset any of the three → agents fall back to the
-  bot_name: $BEVYL_FACTORY_BOT_NAME          # ambient gh/git identity. VM workers keep authing via the exe.dev proxy (unaffected).
-  bot_email: $BEVYL_FACTORY_BOT_EMAIL
+github:                              # Bot identity: agents commit + open PRs as the bevyl-dark-factory GitHub App instead
+  app_id: $BEVYL_FACTORY_APP_ID              # of the operator. The BRAIN mints an hourly installation token from the private
+  installation_id: $BEVYL_FACTORY_INSTALLATION_ID  # key (never shipped to VMs) and injects it as GH_TOKEN per session — local via the
+  private_key_path: $BEVYL_FACTORY_PRIVATE_KEY_PATH  # child env, VM via the ssh command. Commit author = bot; `gh` opens PRs as the bot;
+  bot_name: $BEVYL_FACTORY_BOT_NAME          # git clone/push still ride the exe.dev proxy. Unset any of the three required keys
+  bot_email: $BEVYL_FACTORY_BOT_EMAIL        # → agents fall back to the ambient identity. (values live in ~/.bevyl/.env)
 tracker:
   kind: linear
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project

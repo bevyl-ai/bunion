@@ -1,6 +1,7 @@
 import { AppServerSession } from './codex/app-server'
 import { phaseOf, repoFor } from './config'
 import { linearGraphqlTool, linearReadTool } from './codex/dynamic-tool'
+import { opsReadTool } from './codex/ops-tool'
 import { waitTool } from './codex/wait-tool'
 import { fetchById, fetchWorkpad } from './linear'
 import { log } from './log'
@@ -67,7 +68,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
       return { ok: false, error: e instanceof Error ? e.message : String(e), code: e instanceof CategorizedError ? e.code : undefined }
     }
 
-    session = new AppServerSession(cfg, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state)), linearReadTool(getCachedIssue), waitTool(cfg, host, dir, onEvent)], onEvent)
+    session = new AppServerSession(cfg, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state)), linearReadTool(getCachedIssue), waitTool(cfg, host, dir, onEvent), opsReadTool()], onEvent)
     let current = issue
     try {
       await session.start(dir, host)

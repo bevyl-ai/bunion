@@ -52,6 +52,12 @@ export function useLogStream(id: string | null): LogStreamState {
     let cancelled = false
     let es: EventSource | null = null
     let poll: ReturnType<typeof setInterval> | null = null
+    // The subscription below can still be open -- and still deliver a queued network frame -- for a moment
+    // after render has already moved on to a different id: the render-phase reset above updates lastId.current
+    // synchronously, but this effect's own cleanup (which tears the subscription down) only runs later, after
+    // paint. Every callback checks lastId.current, not just `cancelled`, so a late frame from an id nobody is
+    // looking at anymore can never overwrite state for whatever id is current by the time it arrives.
+    const stale = (): boolean => cancelled || lastId.current !== id
 
     const cached = logCache.get(id)
     setLines(cached ?? [])
@@ -63,7 +69,7 @@ export function useLogStream(id: string | null): LogStreamState {
         const res = await fetch('/transcript/' + encodeURIComponent(id), { cache: 'no-store' })
         if (!res.ok || (res.headers.get('content-type') || '').indexOf('json') < 0) return
         const j = (await res.json()) as { log?: string[] }
-        if (cancelled) return
+        if (stale()) return
         const ls = j.log || []
         logCache.set(id, ls)
         setLines(ls)
@@ -89,7 +95,7 @@ export function useLogStream(id: string | null): LogStreamState {
       }
       if (es) {
         es.onmessage = (e) => {
-          if (cancelled) return
+          if (stale()) return
           let j: { seed?: boolean; lines?: string[]; live?: string }
           try {
             j = JSON.parse(e.data)
@@ -121,7 +127,7 @@ export function useLogStream(id: string | null): LogStreamState {
             /* ignore */
           }
           es = null
-          if (!cancelled) startPolling()
+          if (!stale()) startPolling()
         }
       }
     }

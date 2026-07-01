@@ -13,12 +13,15 @@ export function dur(ms: number | null | undefined): string {
   return h + 'h' + (m % 60 ? ' ' + (m % 60) + 'm' : '')
 }
 
+// Literal hex, not var(--color-x): callers append an alpha suffix (oc(x) + '22') to build the badge background,
+// and "var(--color-x)22" is not a valid CSS color -- that silently dropped the background tint for every outcome
+// except Needs Engineer (the one entry that was already a literal) since this table's first version.
 const OC: Record<string, string> = {
-  Done: 'var(--purple)',
-  'STG - Ready to merge': 'var(--green)',
-  'STG - Merged': 'var(--amber)',
-  'Verifying in Prod': 'var(--accent)',
+  Done: '#a371f7',
+  'STG - Ready to merge': '#3fb27f',
+  'STG - Merged': '#d99a2b',
+  'Verifying in Prod': '#5b8def',
   'Needs Engineer': '#d9568c',
-  'QA blocked': 'var(--red)',
+  'QA blocked': '#e0564f',
 }
-export const oc = (s: string | null | undefined): string => (s && OC[s]) || 'var(--mut2)'
+export const oc = (s: string | null | undefined): string => (s && OC[s]) || '#5a6270'

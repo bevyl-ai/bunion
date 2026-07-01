@@ -15,10 +15,6 @@ export function prefetchLog(id: string | null | undefined): void {
     })
 }
 
-export function getCachedLog(id: string): string[] | undefined {
-  return logCache.get(id)
-}
-
 export interface LogStreamState {
   lines: string[]
   live: string // in-progress streaming agent reply, '' when none

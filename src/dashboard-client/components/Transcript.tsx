@@ -36,15 +36,15 @@ export function Transcript({
 
   if (!loaded) {
     return (
-      <div id="logbody" ref={logRef} onScroll={onScroll}>
+      <div id="logbody" class="m-0 px-[18px] pt-1 pb-5 overflow-auto flex-1 text-[13px]/[1.5] font-['-apple-system',BlinkMacSystemFont,'Segoe_UI',Roboto,Helvetica,Arial,sans-serif]" ref={logRef} onScroll={onScroll}>
         <SkeletonLines />
       </div>
     )
   }
 
   return (
-    <div id="logbody" ref={logRef} onScroll={onScroll}>
-      {lines.length === 0 && !chatPending && !live && <div class="lg" style={{ color: 'var(--mut)' }}>(no log yet)</div>}
+    <div id="logbody" class="m-0 px-[18px] pt-1 pb-5 overflow-auto flex-1 text-[13px]/[1.5] font-['-apple-system',BlinkMacSystemFont,'Segoe_UI',Roboto,Helvetica,Arial,sans-serif]" ref={logRef} onScroll={onScroll}>
+      {lines.length === 0 && !chatPending && !live && <div class="p-0 text-mut">(no log yet)</div>}
       {lines.map((l, i) => (
         <LogLine key={i} line={l} />
       ))}

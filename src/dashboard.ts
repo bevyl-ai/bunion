@@ -1,8 +1,21 @@
+import tailwindPlugin from 'bun-plugin-tailwind'
 import type { RateLimits } from './types'
 import type { TokenBreakdown } from './tokens'
 import type { Stats } from './stats'
 import boardHtml from './dashboard-client/board.html'
 import statsHtml from './dashboard-client/stats.html'
+
+// bun-plugin-tailwind only implements the Bun.build() bundler-plugin hooks (onBeforeParse), not the
+// Bun.plugin() module-loader hooks that Bun.serve's automatic HTML-import bundling uses -- registering it via
+// Bun.plugin() throws ("build.onBeforeParse is not a function"). So the two page stylesheets are compiled
+// explicitly via Bun.build() once at process start (still no separate operator-run build step -- it just
+// happens automatically every time the process boots) and served from memory below.
+async function compileTailwindCss(entrypoint: string): Promise<string> {
+  const result = await Bun.build({ entrypoints: [entrypoint], plugins: [tailwindPlugin] })
+  const out = result.outputs.find((o) => o.path.endsWith('.css'))
+  if (!out) throw new Error(`tailwind build produced no CSS output for ${entrypoint}`)
+  return out.text()
+}
 
 // One ticket on the board. `status`: running (an agent is on it now), retrying (waiting out a backoff/continuation),
 // or queued (an eligible candidate with no free slot/VM yet). The run-specific fields are 0/empty unless running.
@@ -114,17 +127,24 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
 
   const noStore = { headers: { 'cache-control': 'no-store' } }
   const sseHeaders = { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' }
+  const cssHeaders = { 'content-type': 'text/css; charset=utf-8' }
+  // Kicked off once at boot; every request just awaits the same cached promise (near-instant after the first).
+  const dashboardCss = compileTailwindCss(`${import.meta.dir}/dashboard-client/styles.css`)
+  const statsCss = compileTailwindCss(`${import.meta.dir}/dashboard-client/stats-styles.css`)
 
   Bun.serve({
     port,
     // §13.7 says SHOULD bind loopback by default UNLESS configured otherwise. This deployment is reached only through
     // the exe.dev share-proxy (the access boundary), which connects from outside loopback, so it binds all interfaces.
     routes: {
-      // Bun.serve's HTML-import auto-bundling: JSX/TSX/CSS under dashboard-client is bundled on process boot with
-      // no separate `bun build` step, and coexists cleanly with the plain function routes below (Bun tries
-      // `routes` first, falling through to `fetch()` for anything not listed here).
+      // Bun.serve's HTML-import auto-bundling: JSX/TSX under dashboard-client is bundled on process boot with no
+      // separate `bun build` step, and coexists cleanly with the plain function routes below (Bun tries `routes`
+      // first, falling through to `fetch()` for anything not listed here). CSS is NOT part of this auto-bundling
+      // (see compileTailwindCss's comment) — board.tsx/stats.tsx inject a <link> to the two routes below at runtime.
       '/': boardHtml,
       '/stats': statsHtml,
+      '/dashboard.css': async () => new Response(await dashboardCss, { headers: cssHeaders }),
+      '/stats.css': async () => new Response(await statsCss, { headers: cssHeaders }),
     },
     async fetch(req, server) {
       const url = new URL(req.url)

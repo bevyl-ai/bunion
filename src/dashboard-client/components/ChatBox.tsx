@@ -31,7 +31,7 @@ export function ChatBox({
   const sendDisabled = pending || !value.trim()
 
   return (
-    <div id="mchat">
+    <div id="mchat" class="flex items-end gap-2 mt-2.5 mx-4 mb-0">
       <textarea
         id="mmsg"
         ref={taRef}
@@ -40,6 +40,7 @@ export function ChatBox({
         placeholder={placeholder}
         value={value}
         disabled={pending}
+        class="flex-1 bg-surf2 border border-line2 rounded-lg text-fg text-[13px]/[1.5] font-['-apple-system',BlinkMacSystemFont,'Segoe_UI',Roboto,sans-serif] px-[11px] py-[9px] resize-y min-h-[38px] max-h-[160px] outline-none box-border focus:border-accent placeholder:text-mut2"
         onInput={(e) => {
           setValue((e.target as HTMLTextAreaElement).value)
           autoGrow()
@@ -51,7 +52,12 @@ export function ChatBox({
           }
         }}
       />
-      <button id="msend" disabled={sendDisabled} onClick={() => void doSend()}>
+      <button
+        id="msend"
+        disabled={sendDisabled}
+        onClick={() => void doSend()}
+        class="bg-accent text-white border-none rounded-lg px-4 h-[38px] font-semibold text-[13px]/[1] font-['-apple-system',BlinkMacSystemFont,sans-serif] cursor-pointer whitespace-nowrap flex-none disabled:opacity-50 disabled:cursor-default"
+      >
         {pending ? '…' : 'Send'}
       </button>
     </div>

@@ -1,5 +1,6 @@
 import { useMemo, useRef } from 'preact/hooks'
 import { colIdx } from '../lib/actions'
+import { HUMAN_NOTE_STATES } from '../lib/format'
 import { useFlip } from '../lib/useFlip'
 import type { BoardColumn, BoardItem } from '../lib/types'
 import { Column } from './Column'
@@ -61,7 +62,7 @@ export function Board({
   const sig = useMemo(() => {
     const key = filtered.map((r) => {
       const st = effState(r.identifier, r.state)
-      return [r.identifier, st, r.status, r.host, r.prUrl, r.retryAttempt, st === 'QA - blocked' ? r.note || '' : ''].join('')
+      return [r.identifier, st, r.status, r.host, r.prUrl, r.retryAttempt, HUMAN_NOTE_STATES.has(st) ? r.note || '' : ''].join('')
     })
     return key.join('') + '|' + filterQuery
   }, [filtered, effState, filterQuery])

@@ -17,6 +17,18 @@ const STATE_COLORS: Record<string, string> = {
 }
 export const SC = (s: string): string => STATE_COLORS[s] || '#7c8493'
 
+// Lanes whose `note` is a human-facing reason (why blocked / what to decide / the prod check to run / QA proof).
+// The server hydrates the latest workpad note for exactly these lanes (see orchestrator note-fetch gate), so the
+// card renders the note and the board change-signatures track it for exactly these lanes — keep the three in sync.
+export const HUMAN_NOTE_STATES = new Set<string>([
+  'QA - blocked',
+  'Factory - Needs Engineer',
+  'QA - Requested',
+  'Factory - UI review',
+  "Factory - can't verify",
+  'STG - Ready to merge',
+])
+
 // Pool-role-name -> accent color.
 export function roleColor(n: string): string {
   const name = (n || '').toLowerCase()

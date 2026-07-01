@@ -93,8 +93,11 @@ export async function startDashboard(port: number, getSnapshot: () => Snapshot, 
   const pushBoardNow = (): void => {
     if (boardClients.size === 0) return
     const s = getSnapshot()
-    // Same structural signature the client render() uses (incl. the QA-blocked note term) — push only on a real change.
-    const sig = JSON.stringify(s.items.map((i) => [i.identifier, i.state, i.status, i.host, i.prUrl, i.retryAttempt, i.state === 'QA - blocked' ? (i.note ?? '') : '']))
+    // Same structural fields the client render() keys on, plus the note unconditionally: the server hydrates a
+    // human-facing note asynchronously for several human-action lanes (QA - blocked / Requested / UI review /
+    // can't verify / Needs Engineer / Ready to merge), and that late arrival must push even when nothing else
+    // changed — otherwise an open dashboard never receives the reason until some unrelated field ticks.
+    const sig = JSON.stringify(s.items.map((i) => [i.identifier, i.state, i.status, i.host, i.prUrl, i.retryAttempt, i.note ?? '']))
     if (sig === lastBoardSig) return
     lastBoardSig = sig
     const msg = sse(s)

@@ -15,7 +15,10 @@ export function TokenBadge({ tokens }: { tokens: TokenBreakdown | null }) {
     `${fmtTok(tokens.total)} tokens · ~${fmtCost(cost)} at API rates · flat plan, not per-token` +
     (stale ? ' · ⚠ likely inflated by pre-fix accounting bug (see db510f7) — do not trust this number at face value' : '')
   return (
-    <span class={`t-tok clk${stale ? ' tok-stale' : ''}`} title={title}>
+    <span
+      class={`t-tok clk text-mut2 text-[11px] [font-variant-numeric:tabular-nums] font-[ui-monospace,Menlo,monospace] whitespace-nowrap${stale ? ' tok-stale' : ''}`}
+      title={title}
+    >
       {stale ? '⚠ ' : ''}
       {fmtTok(tokens.total)} tok
     </span>

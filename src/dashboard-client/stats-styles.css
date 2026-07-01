@@ -4,7 +4,7 @@
 @source "./*.tsx";
 
 /* Same values as the pre-Tailwind :root block, renamed to the --color- prefix Tailwind's @theme requires to
-   generate bg-*/text-*/border-* utilities. */
+   generate the matching bg, text, and border utility variants. */
 @theme {
   --color-bg: #090a0e;
   --color-surf: #15171e;

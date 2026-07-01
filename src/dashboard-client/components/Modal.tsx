@@ -57,7 +57,7 @@ export function Modal({
 
   return (
     <div id="modal" class="open" style={{ display: 'flex' }} onClick={(e) => { if ((e.target as HTMLElement).id === 'modal') onClose() }}>
-      <div id="mpanel" role="dialog" aria-modal="true" aria-labelledby="mtitle">
+      <div id="mpanel" role="dialog" aria-modal="true" aria-labelledby="mtitle" class="bg-surf border border-line2 rounded-2xl w-[min(960px,100%)] max-h-[86vh] flex flex-col overflow-hidden">
         <ModalHead item={item} role={role} onClose={onClose} />
         <ModalSub item={item} role={role} />
         <ModalBanner item={item} isRole={isRole} />
@@ -77,17 +77,17 @@ export function Modal({
 function ModalHead({ item, role, onClose }: { item: BoardItem | null; role: RoleItem | null; onClose: () => void }) {
   const prNum = prNumFromUrl(item?.prUrl)
   return (
-    <div id="mhead">
+    <div id="mhead" class="flex items-center gap-2.5 px-[18px] py-3.5 border-b border-line flex-wrap bg-gradient-to-b from-[#191c24] to-surf">
       <span class="live" />
-      <span id="mtitle">
+      <span id="mtitle" class="flex items-center gap-2.5 font-mono font-semibold text-sm">
         {role ? (
           <>
             <span style={{ textTransform: 'capitalize', color: roleColor(role.name) }}>{role.name}</span>
-            <span class="pill" style={{ color: 'var(--mut)', background: '#8b929e1a' }}>
+            <span class="pill" style={{ color: 'var(--color-mut)', background: '#8b929e1a' }}>
               pool role
             </span>
             {role.model && (
-              <span class="pill" style={{ color: 'var(--mut2)', background: '#8b929e14', fontFamily: 'ui-monospace,Menlo,monospace' }}>
+              <span class="pill" style={{ color: 'var(--color-mut2)', background: '#8b929e14', fontFamily: 'ui-monospace,Menlo,monospace' }}>
                 {role.model}
               </span>
             )}
@@ -104,14 +104,22 @@ function ModalHead({ item, role, onClose }: { item: BoardItem | null; role: Role
               </a>
             )}
             {item.url && (
-              <a class="pr" style={{ background: '#8b929e1a', color: 'var(--mut)' }} href={item.url} target="_blank" rel="noopener">
+              <a class="pr" style={{ background: '#8b929e1a', color: 'var(--color-mut)' }} href={item.url} target="_blank" rel="noopener">
                 Linear ↗
               </a>
             )}
           </>
         ) : null}
       </span>
-      <span id="mclose" role="button" tabIndex={0} aria-label="Close" onClick={onClose} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onClose()}>
+      <span
+        id="mclose"
+        role="button"
+        tabIndex={0}
+        aria-label="Close"
+        class="ml-auto cursor-pointer text-mut text-[12.5px] hover:text-fg"
+        onClick={onClose}
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onClose()}
+      >
         close ✕
       </span>
     </div>
@@ -122,71 +130,97 @@ function ModalSub({ item, role }: { item: BoardItem | null; role: RoleItem | nul
   if (role) {
     const live = role.status === 'running'
     const meta: ComponentChildren[] = [
-      <span class="m" key="status">
-        <i class="dot" style={{ background: live ? '#3fb27f' : 'var(--mut2)' }} />
+      <span class="inline-flex items-center gap-[5px] [font-variant-numeric:tabular-nums]" key="status">
+        <i class="dot" style={{ background: live ? '#3fb27f' : 'var(--color-mut2)' }} />
         {live ? 'working' : 'idle'}
       </span>,
-      <span class="m" key="cadence">↻ every {ago(role.cadenceMs)}</span>,
+      <span class="inline-flex items-center gap-[5px] [font-variant-numeric:tabular-nums]" key="cadence">↻ every {ago(role.cadenceMs)}</span>,
     ]
     if (role.maxPerDay != null)
       meta.push(
-        <span class="m" key="filed">
+        <span class="inline-flex items-center gap-[5px] [font-variant-numeric:tabular-nums]" key="filed">
           {role.filedToday}/{role.maxPerDay + (role.granted || 0)} filed today{(role.granted || 0) > 0 ? ` (+${role.granted} granted)` : ''}
         </span>,
       )
-    if (role.lastRunAt) meta.push(<span class="m" key="lastRun">last run {ago(Date.now() - role.lastRunAt)} ago</span>)
-    if (role.tokens) meta.push(<span class="m" key="tokens">Σ {fmtTok(role.tokens)} tok</span>)
-    if (role.host) meta.push(<span class="m" key="host">⌂ {stripHostSuffix(role.host)}</span>)
+    if (role.lastRunAt)
+      meta.push(
+        <span class="inline-flex items-center gap-[5px] [font-variant-numeric:tabular-nums]" key="lastRun">
+          last run {ago(Date.now() - role.lastRunAt)} ago
+        </span>,
+      )
+    if (role.tokens)
+      meta.push(
+        <span class="inline-flex items-center gap-[5px] [font-variant-numeric:tabular-nums]" key="tokens">
+          Σ {fmtTok(role.tokens)} tok
+        </span>,
+      )
+    if (role.host)
+      meta.push(
+        <span class="inline-flex items-center gap-[5px] [font-variant-numeric:tabular-nums]" key="host">
+          ⌂ {stripHostSuffix(role.host)}
+        </span>,
+      )
     return (
-      <div id="msub">
-        <div class="mtitle2">{live ? role.activity || 'working…' : 'idle — waiting for the next run'}</div>
-        <div class="mmeta">{meta}</div>
+      <div id="msub" class="pt-[9px] px-4 pb-0">
+        <div class="text-[14.5px] text-fg font-medium leading-[1.4]">{live ? role.activity || 'working…' : 'idle — waiting for the next run'}</div>
+        <div class="flex gap-3 flex-wrap mt-[7px] text-mut text-[11.5px]">{meta}</div>
       </div>
     )
   }
-  if (!item) return <div id="msub" />
+  if (!item) return <div id="msub" class="pt-[9px] px-4 pb-0" />
   const m: ComponentChildren[] = []
   if (item.priority >= 1 && item.priority <= 4)
     m.push(
-      <span class="m" key="priority">
-        <i class={`pri p${item.priority}`} />
+      <span class="inline-flex items-center gap-[5px] [font-variant-numeric:tabular-nums]" key="priority">
+        <i class={`pri p${item.priority} !mr-0`} />
         {PRI[item.priority]}
       </span>,
     )
   if (item.enteredAt)
     m.push(
-      <span class="m" key="elapsed" title="total time in the factory">
+      <span class="inline-flex items-center gap-[5px] [font-variant-numeric:tabular-nums]" key="elapsed" title="total time in the factory">
         ⏱ {ago((item.endedAt || Date.now()) - item.enteredAt)}
       </span>,
     )
-  if (item.status === 'running') m.push(<span class="m" key="turn">⏺ turn {item.turn || 0}</span>)
-  if (item.host) m.push(<span class="m" key="host">⌂ {stripHostSuffix(item.host)}</span>)
+  if (item.status === 'running')
+    m.push(
+      <span class="inline-flex items-center gap-[5px] [font-variant-numeric:tabular-nums]" key="turn">
+        ⏺ turn {item.turn || 0}
+      </span>,
+    )
+  if (item.host)
+    m.push(
+      <span class="inline-flex items-center gap-[5px] [font-variant-numeric:tabular-nums]" key="host">
+        ⌂ {stripHostSuffix(item.host)}
+      </span>,
+    )
   if (item.tokens)
     m.push(
-      <span class="m" key="tokens" title="total tokens">
+      <span class="inline-flex items-center gap-[5px] [font-variant-numeric:tabular-nums]" key="tokens" title="total tokens">
         Σ {fmtTok(item.tokens.total)} tok
       </span>,
     )
   return (
-    <div id="msub">
-      <div class="mtitle2">{item.title || ''}</div>
-      {m.length > 0 && <div class="mmeta">{m}</div>}
+    <div id="msub" class="pt-[9px] px-4 pb-0">
+      <div class="text-[14.5px] text-fg font-medium leading-[1.4]">{item.title || ''}</div>
+      {m.length > 0 && <div class="flex gap-3 flex-wrap mt-[7px] text-mut text-[11.5px]">{m}</div>}
     </div>
   )
 }
 
 function ModalBanner({ item, isRole }: { item: BoardItem | null; isRole: boolean }) {
+  const base = 'mt-[11px] mx-4 mb-0 px-3 py-[9px] rounded-[9px] text-[12.5px] leading-[1.5]'
   if (isRole || !item) return <div id="mbanner" style={{ display: 'none' }} />
   if (item.state === 'Needs Engineer') {
     return (
-      <div id="mbanner" class="nh">
-        <b>⚠ Needs Engineer</b> — {item.note || 'open the workpad in Linear for the decision needed'}
+      <div id="mbanner" class={`${base} bg-[#e0564f18] border border-[#e0564f44] text-danger-text`}>
+        <b class="text-danger">⚠ Needs Engineer</b> — {item.note || 'open the workpad in Linear for the decision needed'}
       </div>
     )
   }
   if (item.note && item.status !== 'running') {
     return (
-      <div id="mbanner" class="note">
+      <div id="mbanner" class={`${base} bg-surf2 border border-line text-mut`}>
         {item.note}
       </div>
     )
@@ -206,14 +240,18 @@ function ModalTokens({ item, isRole }: { item: BoardItem | null; isRole: boolean
   }
   const mc = estCost(tinput, toutput, tcached)
   return (
-    <div id="mtokens">
-      <span class="tklab">tokens</span>
+    <div id="mtokens" class="mt-[11px] mx-4 mb-0 flex items-center gap-[7px] flex-wrap text-xs">
+      <span class="uppercase tracking-[.5px] text-[10px] text-mut2">tokens</span>
       {item.tokens.phases.map((p) => (
-        <span key={p.phase} class="tkph" title={`input ${fmtTok(p.input)} · output ${fmtTok(p.output)} · cached ${fmtTok(p.cached)} · ~${fmtCost(estCost(p.input, p.output, p.cached))} API-equiv`}>
-          <b>{p.phase}</b> {fmtTok(p.total)}
+        <span
+          key={p.phase}
+          class="bg-surf2 border border-line rounded-md px-2 py-0.5 text-mut font-mono"
+          title={`input ${fmtTok(p.input)} · output ${fmtTok(p.output)} · cached ${fmtTok(p.cached)} · ~${fmtCost(estCost(p.input, p.output, p.cached))} API-equiv`}
+        >
+          <b class="text-fg font-semibold capitalize">{p.phase}</b> {fmtTok(p.total)}
         </span>
       ))}
-      <span class="tktot">
+      <span class="ml-auto text-fg font-mono font-semibold">
         Σ {fmtTok(item.tokens.total)}
         {tinput > 0 && (
           <>
@@ -242,14 +280,33 @@ function ModalActions({
 }) {
   if (isRole || !item) return <div id="mactions" style={{ display: 'none' }} />
   const acts = actionList(item)
+  const base =
+    'font-semibold text-xs/[1] font-[inherit] rounded-lg px-[13px] py-2 cursor-pointer transition-[background,border-color] duration-[120ms] motion-safe:active:scale-[.97] motion-safe:active:opacity-[.85]'
+  const busyCls = busy ? ' opacity-60 pointer-events-none' : ''
   return (
-    <div id="mactions">
+    <div id="mactions" class="flex gap-2 flex-wrap mt-[9px] mx-4 mb-3.5">
       {acts.map((d) => (
-        <button key={d.a} class={`mbtn ${d.c || ''}${busy ? ' busy' : ''}`} title={d.t || ''} onClick={() => onAction(item.identifier, d.a)}>
+        <button
+          key={d.a}
+          class={`${base} ${
+            d.c === 'go'
+              ? 'text-[#9ec1ff] bg-surf2 border border-[#5b8def55] hover:bg-accent-glow hover:border-[#3a4150]'
+              : d.c === 'danger'
+                ? 'text-danger-text bg-surf2 border border-[#e0564f55] hover:bg-[#e0564f1a] hover:border-[#3a4150]'
+                : 'text-fg bg-surf2 border border-line2 hover:bg-[#2a2f3a] hover:border-[#3a4150]'
+          }${busyCls}`}
+          title={d.t || ''}
+          onClick={() => onAction(item.identifier, d.a)}
+        >
           {d.l}
         </button>
       ))}
-      <button class={`mbtn mmore${busy ? ' busy' : ''}`} data-id={item.identifier} onClick={(e) => onMoveMenu(item.identifier, e)} title="move this ticket to any column">
+      <button
+        class={`${base} text-fg bg-surf2 border border-line2 hover:bg-[#2a2f3a] hover:border-[#3a4150]${busyCls}`}
+        data-id={item.identifier}
+        onClick={(e) => onMoveMenu(item.identifier, e)}
+        title="move this ticket to any column"
+      >
         ⋯
       </button>
     </div>

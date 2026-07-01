@@ -3,9 +3,10 @@
 @source "./lib/**/*.{ts,tsx}";
 @source "./*.tsx";
 
-/* Theme tokens, namespaced for Tailwind's @theme so every one of these also generates the matching bg-*/text-*/
-   border-* utilities (e.g. --color-good generates bg-good, text-good, border-good, ...). Values are unchanged
-   from the pre-Tailwind :root block -- only the variable names picked up the --color- prefix Tailwind requires. */
+/* Theme tokens, namespaced for Tailwind's @theme so every one of these also generates the matching bg, text, and
+   border utility variants (e.g. --color-good generates bg-good, text-good, border-good, ...). Values are
+   unchanged from the pre-Tailwind :root block -- only the variable names picked up the --color- prefix Tailwind
+   requires. */
 @theme {
   --color-bg: #090a0e;
   --color-surf: #15171e;
@@ -26,6 +27,7 @@
   --color-warn: #d99a2b;
   --color-pink: #b88cd9;
   --color-accent-glow: #5b8def1f;
+  --color-neutral: #7c8493;
 }
 /* Not colors, so not in @theme (Tailwind only auto-generates utilities from namespaced tokens like --color-*) --
    referenced the same way as before via var(--sh1)/var(--sh2). */

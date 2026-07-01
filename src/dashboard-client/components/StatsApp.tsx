@@ -52,21 +52,24 @@ export function StatsApp() {
     <>
       <h1>
         <span class="mark" />
-        bunion <span class="muted">&middot; stats</span>
-        <a class="back" href="/">
+        bunion <span class="text-mut2">&middot; stats</span>
+        <a class="ml-auto text-[12.5px] font-normal text-mut" href="/">
           ← board
         </a>
       </h1>
-      <div class="tot" id="tot">
+      <div class="mt-[18px] mb-[6px] flex flex-wrap gap-[11px]" id="tot">
         {totalCards.map(({ label, value }) => (
-          <div class="c" key={label}>
-            <b>{value || 0}</b>
-            <span>{label}</span>
+          <div
+            class="rounded-[10px] border border-line bg-surf px-4 py-[9px] tabular-nums shadow-[0_1px_2px_rgba(0,0,0,.4)]"
+            key={label}
+          >
+            <b class="block text-[19px] font-[650] text-fg">{value || 0}</b>
+            <span class="text-[10px] tracking-[.6px] text-mut uppercase">{label}</span>
           </div>
         ))}
       </div>
       <h2>last 30 days</h2>
-      <div class="wrap">
+      <div class="overflow-hidden rounded-xl border border-line bg-surf shadow-[0_1px_2px_rgba(0,0,0,.4)]">
         <table id="daily">
           <thead>
             <tr>
@@ -84,18 +87,21 @@ export function StatsApp() {
                 <tr key={r.day}>
                   <td>{r.day}</td>
                   <td>{r.dispatched || 0}</td>
-                  <td style={{ color: 'var(--green)' }}>{r.shipped || 0}</td>
+                  <td class="text-green">{r.shipped || 0}</td>
                   <td>
                     {fmtTokStats(r.tokens)}
-                    <span class="bar" style={{ width: Math.round((num(r.tokens) / maxDailyTokens) * 70) + 'px' }} />
+                    <span
+                      class="ml-[7px] inline-block h-[7px] rounded bg-accent align-middle opacity-60"
+                      style={{ width: Math.round((num(r.tokens) / maxDailyTokens) * 70) + 'px' }}
+                    />
                   </td>
-                  <td style={r.deadlocks ? { color: 'var(--amber)' } : undefined}>{r.deadlocks || 0}</td>
-                  <td style={r.caps ? { color: 'var(--red)' } : undefined}>{r.caps || 0}</td>
+                  <td style={r.deadlocks ? { color: 'var(--color-amber)' } : undefined}>{r.deadlocks || 0}</td>
+                  <td style={r.caps ? { color: 'var(--color-red)' } : undefined}>{r.caps || 0}</td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={6} class="empty">
+                <td colSpan={6} class="p-[22px] text-center text-mut2">
                   no activity recorded yet
                 </td>
               </tr>
@@ -105,18 +111,20 @@ export function StatsApp() {
       </div>
       <h2>
         threads{' '}
-        <span class="muted" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>
-          — click a column to rank best/worst
-        </span>
+        <span class="font-normal tracking-normal text-mut2 normal-case">— click a column to rank best/worst</span>
       </h2>
-      <div class="wrap">
+      <div class="overflow-hidden rounded-xl border border-line bg-surf shadow-[0_1px_2px_rgba(0,0,0,.4)]">
         <table id="th">
           <thead>
             <tr>
               <th>ticket</th>
               <th>outcome</th>
               {HEADERS.map((h) => (
-                <th key={h.k} class={`s${sortKey === h.k ? ' act' : ''}`} onClick={() => onSort(h.k)}>
+                <th
+                  key={h.k}
+                  class={`cursor-pointer select-none hover:text-fg${sortKey === h.k ? ' act' : ''}`}
+                  onClick={() => onSort(h.k)}
+                >
                   {h.label}
                 </th>
               ))}
@@ -129,12 +137,20 @@ export function StatsApp() {
               threads.map((r) => (
                 <tr key={r.identifier}>
                   <td>
-                    <a class="cid" href={`https://linear.app/bevyl/issue/${r.identifier}`} target="_blank" rel="noopener">
+                    <a
+                      class="[font-family:ui-monospace,Menlo,monospace] font-semibold"
+                      href={`https://linear.app/bevyl/issue/${r.identifier}`}
+                      target="_blank"
+                      rel="noopener"
+                    >
                       {r.identifier}
                     </a>
                   </td>
-                  <td style={{ textAlign: 'right' }}>
-                    <span class="out" style={{ background: oc(r.outcome) + '22', color: oc(r.outcome) }}>
+                  <td>
+                    <span
+                      class="rounded-[20px] px-[9px] py-0.5 text-[10.5px] font-semibold"
+                      style={{ background: oc(r.outcome) + '22', color: oc(r.outcome) }}
+                    >
                       {r.outcome || '—'}
                     </span>
                   </td>
@@ -142,13 +158,13 @@ export function StatsApp() {
                   <td>{dur(r.cycle_ms)}</td>
                   <td>{r.reworks || 0}</td>
                   <td>{(r.caps || 0) + (r.deadlocks || 0) || ''}</td>
-                  <td class="acct">{(r.account || '').replace(/ .*/, '') || '—'}</td>
-                  <td class="tid">{(r.thread_id || '').slice(0, 12) || '—'}</td>
+                  <td class="text-[11px] text-mut">{(r.account || '').replace(/ .*/, '') || '—'}</td>
+                  <td class="[font-family:ui-monospace,Menlo,monospace] text-[11px] text-mut2">{(r.thread_id || '').slice(0, 12) || '—'}</td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan={8} class="empty">
+                <td colSpan={8} class="p-[22px] text-center text-mut2">
                   no threads recorded yet
                 </td>
               </tr>
@@ -156,7 +172,7 @@ export function StatsApp() {
           </tbody>
         </table>
       </div>
-      {error && <p style={{ color: 'var(--red)' }}>failed to load stats: {error}</p>}
+      {error && <p class="text-red">failed to load stats: {error}</p>}
     </>
   )
 }

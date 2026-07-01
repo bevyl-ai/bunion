@@ -37,13 +37,14 @@ export function ActionMenu({ request, onAction, onClose }: { request: MenuReques
     <div
       id="actmenu"
       ref={ref}
+      class="fixed z-[999] bg-surf2 border border-line2 rounded-[9px] p-[5px] shadow-[0_14px_36px_rgba(0,0,0,.55)] flex flex-col gap-0.5 min-w-[144px]"
       style={{ display: 'flex', visibility: pos.visible ? 'visible' : 'hidden', left: pos.left + 'px', top: pos.top + 'px' }}
       onClick={(e) => e.stopPropagation()}
     >
       {request.items.map((d) => (
         <button
           key={d.a}
-          class={`actitem ${d.c || ''}`}
+          class={`block w-full text-left bg-none border-none text-fg font-semibold text-[12.5px]/[1] font-[inherit] px-[11px] py-2 rounded-md cursor-pointer whitespace-nowrap hover:bg-[#2a2f3a] ${d.c === 'go' ? 'text-[#9ec1ff]' : d.c === 'danger' ? 'text-danger-text' : ''}`}
           title={d.t || ''}
           onClick={(e) => {
             e.preventDefault()

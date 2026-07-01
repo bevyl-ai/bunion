@@ -9,14 +9,21 @@ export interface RoleHandle {
   stop(): void
 }
 
+// A pool role's persistent workspace key — the checkout dir name under the workspace root. Exported so the
+// orchestrator's prune keep-list protects EXACTLY the dirs role sessions create (BEV-4061: these keys were absent
+// from the keep list, so the periodic sweep rm -rf'd role checkouts — including a live mechanic's cwd mid-run).
+export const roleWorkspaceKey = (name: string): string => `role-${name}`
+
 // One run of a pool role: prep a workspace on the worker, then run a SINGLE standing-mission turn on a persistent
 // thread — resuming the role's prior thread so it remembers what it filed last time. The role drives Linear (file/tag
 // tickets) through the same dynamic tool the pipeline uses; the resume falls back to a fresh thread if it fails so a
-// role is never wedged. The orchestrator schedules the next run on the role's cadence.
+// role is never wedged. The orchestrator schedules the next run on the role's cadence. ensureWorkspace validates the
+// reused checkout before codex gets the cwd (the BEV-3970/3971 self-heal): a missing or `.git`-less role workspace
+// comes back created=true, re-running after_create (fresh clone) + installSkills instead of starting a turn in a bad dir.
 export function startRole(cfg: Config, role: Role, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null, quota: RoleQuota, brainState: string): RoleHandle {
   let session: AppServerSession | null = null
   let stopped = false
-  const wsKey = `role-${role.name}`
+  const wsKey = roleWorkspaceKey(role.name)
 
   const done = (async (): Promise<{ ok: boolean; error?: string }> => {
     let dir = ''

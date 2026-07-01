@@ -43,6 +43,19 @@ test('a directory with NO .git (stale/broken worktree) → wiped and recreated, 
   expect(existsSync(join(second.dir, 'stale-leftover.txt'))).toBe(false) // proves it WAS wiped
 })
 
+// BEV-4061: a pool role reuses ONE persistent workspace (`role-<name>`) across cadence runs. When it vanishes out
+// from under the pool (a VM reset, or the pre-fix prune sweep eating it — even mid-run), the next run must flow
+// through the exact BEV-3970 self-heal tickets get: created=true, so role-runner re-runs after_create (fresh clone)
+// + installSkills instead of handing codex a missing cwd. The literal key pins the on-disk contract with role-runner.
+test('a vanished role workspace (role-mechanic) → recreated with created=true so the clone + skills re-run', () => {
+  const first = ensureWorkspace(cfg, 'role-mechanic', null)
+  mkdirSync(join(first.dir, '.git'), { recursive: true }) // simulate the completed clone of a prior cadence run
+  rmSync(first.dir, { recursive: true, force: true }) // the workspace disappears between runs
+  const again = ensureWorkspace(cfg, 'role-mechanic', null)
+  expect(again.created).toBe(true)
+  expect(existsSync(again.dir)).toBe(true)
+})
+
 test('a non-directory at the path → replaced with a fresh dir', () => {
   const dir = join(root, 'BEV-4')
   mkdirSync(root, { recursive: true })

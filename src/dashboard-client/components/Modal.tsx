@@ -1,16 +1,11 @@
 import type { ComponentChildren } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
 import { actionList } from '../lib/actions'
-import { ago, estCost, fmtCost, fmtTok, PRI, SC, stripHostSuffix } from '../lib/format'
+import { ago, estCost, fmtCost, fmtTok, PRI, roleColor, SC, stripHostSuffix } from '../lib/format'
 import { useLogStream } from '../lib/useLogStream'
 import type { BoardItem, RoleItem } from '../lib/types'
 import { ChatBox } from './ChatBox'
 import { Transcript } from './Transcript'
-
-function roleColor(n: string): string {
-  const name = (n || '').toLowerCase()
-  return name === 'mechanic' ? '#d99a2b' : name === 'dreamer' ? '#b88cd9' : name === 'user-advocate' ? '#3fb29e' : '#5b8def'
-}
 
 export function Modal({
   expandedId,
@@ -254,7 +249,7 @@ function ModalActions({
           {d.l}
         </button>
       ))}
-      <button class={`mbtn mmore${busy ? ' busy' : ''}`} data-id={item.identifier} onClick={(e) => onMoveMenu(item.identifier, e as unknown as MouseEvent)} title="move this ticket to any column">
+      <button class={`mbtn mmore${busy ? ' busy' : ''}`} data-id={item.identifier} onClick={(e) => onMoveMenu(item.identifier, e)} title="move this ticket to any column">
         ⋯
       </button>
     </div>

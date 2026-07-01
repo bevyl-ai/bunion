@@ -26,22 +26,20 @@ export function useActions(
 } {
   const [overrides, setOverrides] = useState<Record<string, OptimisticOverride>>({})
   const [busy, setBusy] = useState<Set<string>>(new Set())
-  const overridesRef = useRef(overrides)
-  overridesRef.current = overrides
   const snapRef = useRef(snap)
   snapRef.current = snap
 
-  // Sweep expired/superseded overrides whenever the snapshot's items change OR the 1s clock ticks — mirrors the
-  // inline cleanup at the top of the old dashboard's render(), which ran on every SSE push AND every tickLive.
-  // An override clears once the real item shows the target state, once it expires (5s), or if the item vanished.
+  // Sweep expired/superseded overrides whenever the snapshot's items change, the 1s clock ticks, or an override
+  // is added/removed. An override clears once the real item shows the target state, once it expires (5s), or if
+  // the item vanished. Re-running right after this effect's own setOverrides call is harmless: the swept map has
+  // nothing left to remove on that pass, so `changed` comes back false and the loop settles immediately.
   useEffect(() => {
-    const cur = overridesRef.current
-    if (Object.keys(cur).length === 0) return
+    if (Object.keys(overrides).length === 0) return
     const byId = new Map(snap.items.map((i) => [i.identifier, i]))
     let changed = false
     const next: Record<string, OptimisticOverride> = {}
-    for (const id in cur) {
-      const ov = cur[id]!
+    for (const id in overrides) {
+      const ov = overrides[id]!
       const it = byId.get(id)
       if (!it || it.state === ov.state || Date.now() > ov.expiresAt) {
         changed = true
@@ -50,8 +48,7 @@ export function useActions(
       next[id] = ov
     }
     if (changed) setOverrides(next)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snap.items, now])
+  }, [snap.items, now, overrides])
 
   const effState = useCallback(
     (identifier: string, actual: string): string => {
@@ -107,6 +104,9 @@ export function useActions(
         return next
       })
     },
+    // postAction is returned to callers and invoked later from event handlers, so it needs a stable identity —
+    // it can't depend on `snap` directly or every snapshot update would hand callers a new function. It reads
+    // the latest snapshot through snapRef instead, which is intentional, not a workaround.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [setSnap, onResult],
   )

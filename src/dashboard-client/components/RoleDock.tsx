@@ -1,11 +1,6 @@
-import { ago, fmtTok, stripHostSuffix } from '../lib/format'
+import { ago, fmtTok, roleColor, stripHostSuffix } from '../lib/format'
 import { prefetchLog } from '../lib/useLogStream'
 import type { RoleItem } from '../lib/types'
-
-function roleColor(n: string): string {
-  const name = (n || '').toLowerCase()
-  return name === 'mechanic' ? '#d99a2b' : name === 'dreamer' ? '#b88cd9' : name === 'user-advocate' ? '#3fb29e' : '#5b8def'
-}
 
 function RoleCard({
   r,

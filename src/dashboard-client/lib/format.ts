@@ -16,6 +16,12 @@ const STATE_COLORS: Record<string, string> = {
 }
 export const SC = (s: string): string => STATE_COLORS[s] || '#7c8493'
 
+// Pool-role-name -> accent color.
+export function roleColor(n: string): string {
+  const name = (n || '').toLowerCase()
+  return name === 'mechanic' ? '#d99a2b' : name === 'dreamer' ? '#b88cd9' : name === 'user-advocate' ? '#3fb29e' : '#5b8def'
+}
+
 export const ago = (ms: number): string => {
   const s = Math.max(0, Math.floor(ms / 1000))
   if (s < 60) return s + 's'

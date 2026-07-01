@@ -25,17 +25,25 @@ EOF
 # 2. Route github clones through the integration proxy (which carries the gh credential helper).
 git config --global url."https://bevyl-web.int.exe.xyz/".insteadOf "https://github.com/"
 
-# 2b. gh has no github.com creds on the VM — only the bevyl-web integration proxy — so point gh at it
-#     so `gh pr` just works. This authors PRs as the bevyl-web app (exe-dev-github-integration[bot]),
-#     which is fine: the bevyl stupify reviewer is configured to review the factory's app-authored PRs
-#     (its inScope gates on the `bunion` label, and it posts COMMENT reviews — which GitHub allows even
-#     app-on-its-own-PR). See stupify-octember-stupify / stupify-bevyl-ai-bevyl-ai ~/.stupify/review-sweep.ts.
+# 2b. git clone/push ride the bevyl-web integration proxy (step 2's insteadOf) — the VM holds no github.com creds.
+#     PR AUTHOR + commit author: with a factory GitHub App configured (BEVYL_FACTORY_BOT_NAME set in the provisioning
+#     env), author commits as the bot and point `gh` at github.com so it uses the per-session GH_TOKEN the brain
+#     injects (codex/app-server + wait-tool) → PRs open as bevyl-dark-factory[bot]. Without the app, fall back to the
+#     old behavior: no git author override, and GH_HOST=proxy so `gh` authors PRs as exe-dev-github-integration[bot].
+#     (stupify reviews the factory's app-authored PRs either way — its inScope gates on the `bunion` label.)
 # BEV re-audit: ~/.profile ends up holding real secrets (QA_PASS, the scoped AWS key, ELEVENLABS_API_KEY, etc. —
 # see step 6/7 below) but nothing ever set its mode, so it inherited whatever umask happened to be in effect —
 # 600 on some VMs, world-readable 644 on others. Force it closed BEFORE the first secret-bearing line is ever
 # appended, and again at the end (idempotent either way) so re-running this script also repairs a drifted VM.
 touch "$HOME/.profile" && chmod 600 "$HOME/.profile"
-grep -q 'GH_HOST=' "$HOME/.profile" 2>/dev/null || echo 'export GH_HOST=bevyl-web.int.exe.xyz' >> "$HOME/.profile"
+if [ -n "${BEVYL_FACTORY_BOT_NAME:-}" ]; then
+  git config --global user.name "$BEVYL_FACTORY_BOT_NAME"
+  git config --global user.email "${BEVYL_FACTORY_BOT_EMAIL:-}"
+  # gh must hit github.com (not the proxy) to use the injected GH_TOKEN — strip any prior GH_HOST=proxy line (idempotent).
+  sed -i '/export GH_HOST=/d' "$HOME/.profile" 2>/dev/null || true
+else
+  grep -q 'GH_HOST=' "$HOME/.profile" 2>/dev/null || echo 'export GH_HOST=bevyl-web.int.exe.xyz' >> "$HOME/.profile"
+fi
 
 # 3. The repo's toolchain. The base image ships codex + gh + python3 but NO bun/node, and the
 #    bevyl repo is bun-based — without this the build/QA agents can't run tests/typecheck.

@@ -1,5 +1,6 @@
+import { githubAppToken } from '../github'
 import { execAsync, shq } from '../ssh'
-import type { AgentEvent, DynamicTool } from '../types'
+import type { AgentEvent, Config, DynamicTool } from '../types'
 
 // The `wait` host tool. The agent calls it ONCE and the orchestrator polls host-side on the worker — in plain code,
 // spending ZERO agent tokens — then returns a concise result. This replaces the poll-and-reason burn (agents looping
@@ -12,7 +13,7 @@ import type { AgentEvent, DynamicTool } from '../types'
 const DESCRIPTION =
   "Wait — token-free — for your PR's build gate to resolve: CI checks AND stupify's code review, in ONE call. After you " +
   'push, just call `wait` (optionally { pr }); it returns one verdict — act on it:\n' +
-  '• PASS — CI green + stupify approved (✅) the latest code → move to QA - Testing.\n' +
+  '• PASS — CI green + stupify approved (✅) the latest code → move to QA Testing.\n' +
   '• CI_FAILED — lists the failing checks → fix them, push again (a push re-triggers CI + stupify).\n' +
   '• CHANGES_REQUESTED — stupify objected to the latest code (its words are included) → fix it in code (or push back inline with justification), push, then `wait` again.\n' +
   '• STUPIFY_FLAKED — CI green but stupify never reviewed within the timeout → proceed to QA, noting in the workpad you proceeded without a `✅` (reviewer unavailable).\n' +
@@ -88,16 +89,19 @@ function parseReview(json: string): Review {
   return { reviewed: true, approved: cover.body.includes('✅'), body: cover.body.replace(/<!--[\s\S]*?-->/g, '').trim(), sha: cover.sha, head, codeSha }
 }
 
-export function waitTool(host: string | null, workspace: string, onEvent: (e: AgentEvent) => void = () => {}): DynamicTool {
+export function waitTool(cfg: Config, host: string | null, workspace: string, onEvent: (e: AgentEvent) => void = () => {}): DynamicTool {
   return {
     spec: { name: 'wait', description: DESCRIPTION, inputSchema: SCHEMA },
     async run(args: unknown): Promise<{ success: boolean; output: string }> {
       const a = args && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : {}
       const interval = clamp(typeof a.interval_seconds === 'number' ? a.interval_seconds : 20, 5, 120)
       const timeout = clamp(typeof a.timeout_seconds === 'number' ? a.timeout_seconds : 1200, 30, 1800)
-      // Source ~/.profile so the worker's agent env is present — notably GH_HOST, which gh needs to find its auth in
-      // ~/.config/gh/hosts.yml (codex itself runs via a login shell for the same reason). Without it gh hits github.com unauthed.
-      const sh = (cmd: string): Promise<{ ok: boolean; out: string; code: number | null }> => execAsync(host, `. ~/.profile 2>/dev/null; cd ${shq(workspace)} && ${cmd}`, Math.min(90_000, timeout * 1000))
+      // Source ~/.profile so the worker's agent env is present. With a github app configured, prepend a fresh
+      // installation token as GH_TOKEN so `gh` authenticates as the factory bot against github.com — the same identity
+      // the agent session uses. (vm-setup drops GH_HOST so gh defaults to github.com; without a token it'd be unauthed.)
+      const ghToken = cfg.github ? await githubAppToken(cfg) : null
+      const prefix = ghToken ? `export GH_TOKEN=${shq(ghToken)}; ` : ''
+      const sh = (cmd: string): Promise<{ ok: boolean; out: string; code: number | null }> => execAsync(host, `${prefix}. ~/.profile 2>/dev/null; cd ${shq(workspace)} && ${cmd}`, Math.min(90_000, timeout * 1000))
       const deadline = Date.now() + timeout * 1000
 
       // ESCAPE HATCH — poll an arbitrary command.
@@ -155,7 +159,7 @@ function verdict(kind: string, ci: { pending: number; failed: number; passed: nu
   const ciLine = ci.failed > 0 ? `FAILED ❌ (${ci.failed} failing${ci.failures.length ? `: ${ci.failures.join('; ')}` : ''})` : !ci.any ? 'no checks reported' : ci.pending > 0 ? `pending (${ci.pending} still running, ${ci.passed} passed)` : `green ✅ (${ci.passed} checks)`
   const stLine = rv.reviewed ? `${rv.approved ? 'approved ✅' : 'CHANGES REQUESTED'} (reviewed ${short(rv.sha)}, head ${short(rv.head)})` : 'no review of the latest code yet'
   const rec: Record<string, string> = {
-    PASS: 'Gate passed → move to QA - Testing.',
+    PASS: 'Gate passed → move to QA Testing.',
     CI_FAILED: 'Fix the failing checks, then push (a push re-triggers CI + stupify).',
     CHANGES_REQUESTED: 'Address stupify\'s objection in code (or push back inline with justification), push, then `wait` again.',
     STUPIFY_FLAKED: 'Stupify did not review in time and CI is green → proceed to QA, noting in the workpad you proceeded without a `✅` (reviewer unavailable).',

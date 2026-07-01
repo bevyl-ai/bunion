@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { githubAppToken } from '../github'
 import { shq } from '../ssh'
 import { CategorizedError } from '../types'
 import type { AgentEvent, Config, DynamicTool } from '../types'
@@ -38,9 +39,14 @@ export class AppServerSession {
     // Local: bash `-lc` sources the login profile so codex is on PATH with its auth env. Remote: ssh into the worker
     // VM and run the same app-server in the VM's workspace — the JSON-RPC stream rides the ssh stdio pipe unchanged,
     // and a login shell (`exec $SHELL -lc`) puts codex on PATH there too.
+    // Local mode: authenticate the agent's git/gh as the factory bot by injecting a fresh installation token as
+    // GH_TOKEN (the workspace's credential helper + `gh` both read it). VM workers auth via the exe.dev proxy, so no
+    // token is injected there. A mint failure throws — surfacing loudly as a session error the orchestrator retries —
+    // rather than silently letting the agent commit under the operator's identity.
+    const env = !host && this.cfg.github ? { ...process.env, GH_TOKEN: (await githubAppToken(this.cfg)) ?? '' } : undefined
     const proc = host
       ? spawn('ssh', ['-o', 'ConnectTimeout=20', '-o', 'ServerAliveInterval=15', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new', host, `cd ${shq(workspace)} && exec "$SHELL" -lc ${shq(this.cfg.codex.command)}`], { stdio: ['pipe', 'pipe', 'pipe'] })
-      : spawn('bash', ['-lc', this.cfg.codex.command], { cwd: workspace, stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawn('bash', ['-lc', this.cfg.codex.command], { cwd: workspace, env, stdio: ['pipe', 'pipe', 'pipe'] })
     this.proc = proc
     proc.stdout?.on('data', (d: Buffer) => this.onData(d))
     // §10.3: stderr is diagnostic only — route it to a separate log path so it never contaminates the JSON parse.

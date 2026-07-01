@@ -111,3 +111,20 @@ export function installSkills(dir: string, host: Host): void {
   mkdirSync(dest, { recursive: true })
   cpSync(SKILLS_SRC, dest, { recursive: true })
 }
+
+// Point this workspace's git at the factory's bot identity: author commits as the bot, and authenticate pushes with
+// the installation token the daemon injects as GH_TOKEN (see codex/app-server + github.ts). Scoped to the workspace's
+// LOCAL git config — never touches the operator's global identity. Local mode only: VM workers auth via the exe.dev
+// proxy and get no GH_TOKEN, so we leave their git untouched. No-op unless a github app is configured.
+export function configureGitBot(cfg: Config, dir: string, host: Host): void {
+  const g = cfg.github
+  if (!g || host) return
+  const helper = '!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'
+  const cmd = [
+    `git config user.name ${shq(g.botName)}`,
+    `git config user.email ${shq(g.botEmail)}`,
+    `git config credential.https://github.com.helper ${shq(helper)}`,
+  ].join(' && ')
+  const r = exec('sh', ['-lc', cmd], { cwd: dir, timeoutMs: 15_000 })
+  if (!r.ok) log(`warn: git bot identity setup failed in ${dir}: ${r.combined.trim().slice(-200)}`)
+}

@@ -64,7 +64,7 @@ export function Modal({
         <ModalTokens item={item} isRole={isRole} />
         <Transcript logRef={logRef} lines={lines} live={live} loaded={loaded} chatPending={chatPending} />
         <ChatBox
-          placeholder={isRole && role ? `Prompt ${role.name} — steer it; it acts on its next run` : 'Message the agent — it can answer or act on steering (move state, update the plan)'}
+          placeholder={isRole && role ? `Prompt ${role.name} — steers next run` : 'Message the agent — steer it (state, plan)'}
           pending={chatPending}
           onSend={(text) => onChat(expandedId!, text)}
         />

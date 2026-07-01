@@ -160,13 +160,13 @@ export async function start(workflowPath?: string): Promise<void> {
   // actually clear the current deficit, plus one full cap's worth of real working headroom on top.
   const capClearIncrementFor = (identifier: string): number => capClearIncrement(grandTotal(tokens, identifier), effectiveCap(identifier), cfg.deadlock.hardTokenCap)
   // BEV audit: `bump` is the only action that grants headroom before reopening a cap-tripped ticket — but
-  // to-qa/to-build/move: ALSO reopen a Needs Engineer ticket into an active state (the dashboard offers them right
+  // to-qa/to-build/move: ALSO reopen a Factory - Needs Engineer ticket into an active state (the dashboard offers them right
   // there next to Bump), and none of them touch ticketGrants. The ticket's total is still >= the un-bumped cap, so
-  // the very next poll's blast-radius check re-trips it straight back to Needs Engineer — silently discarding the
+  // the very next poll's blast-radius check re-trips it straight back to Factory - Needs Engineer — silently discarding the
   // reopen. Call this before any move that might reopen a capped ticket; it's a no-op unless the ticket is
-  // currently Needs Engineer AND genuinely over its cap (not parked there for some other reason).
+  // currently Factory - Needs Engineer AND genuinely over its cap (not parked there for some other reason).
   const grantIfCapped = (identifier: string, issue: Issue): void => {
-    if (norm(issue.state) !== 'needs engineer') return
+    if (norm(issue.state) !== 'factory - needs engineer') return
     if (grandTotal(tokens, identifier) < effectiveCap(identifier)) return
     const inc = capClearIncrementFor(identifier)
     ticketGrants.set(identifier, (ticketGrants.get(identifier) ?? 0) + inc)
@@ -206,7 +206,7 @@ export async function start(workflowPath?: string): Promise<void> {
   const progress = new Map<string, { since: number; tokensAtProgress: number; seen: Set<string> }>()
   const deadlocked = new Set<string>()
   // BEV-3969/3971: consecutive WORKER_SETUP_CODES failures per ticket — reset on success or a non-setup code;
-  // escalated to Needs Engineer once it hits WORKER_SETUP_STREAK_LIMIT (ensureWorkspace's self-heal gets first crack).
+  // escalated to Factory - Needs Engineer once it hits WORKER_SETUP_STREAK_LIMIT (ensureWorkspace's self-heal gets first crack).
   const setupFailureStreaks = new Map<string, number>()
 
   // One rolling transcript per ticket (LRU). NOT cleared on re-dispatch, so operator chat + prior phases survive a
@@ -214,10 +214,10 @@ export async function start(workflowPath?: string): Promise<void> {
   // evicts the oldest past the cap.
   const getLog = (identifier: string): string[] => logs.get(identifier) ?? []
   // BEV ergonomics audit: pure recency eviction let a ticket that's actively awaiting operator attention
-  // (Needs Engineer / QA blocked) lose its ENTIRE transcript just because other tickets churned more recently on
+  // (Factory - Needs Engineer / QA - blocked) lose its ENTIRE transcript just because other tickets churned more recently on
   // a busy board — the dashboard then shows "(no log yet)", indistinguishable from "never ran," on exactly the
   // tickets an operator most needs history on (BEV-3869: 75h stuck, 6.31B tokens of real history, 0 cached lines).
-  const PROTECTED_LOG_STATES = new Set(['needs engineer', 'qa blocked'])
+  const PROTECTED_LOG_STATES = new Set(['factory - needs engineer', 'qa - blocked'])
   const touchLog = (identifier: string): void => {
     const prev = logs.get(identifier) ?? []
     logs.delete(identifier)
@@ -274,7 +274,7 @@ export async function start(workflowPath?: string): Promise<void> {
   // Per-state concurrency (Symphony §8.2/§8.3): an issue in state S is dispatch-eligible only if fewer than
   // max_concurrent_agents_by_state[S] agents are already running on issues in S (counted by their CURRENT state). No
   // entry for S = no per-state limit (the global cap is the only ceiling). Bounds an expensive stage's blast radius —
-  // one phase (e.g. the blocked phase on `QA blocked`) can't consume every slot.
+  // one phase (e.g. the blocked phase on `QA - blocked`) can't consume every slot.
   const stateFull = (state: string): boolean => {
     const cap = cfg.agent.maxConcurrentByState[norm(state)]
     if (cap === undefined) return false
@@ -418,9 +418,9 @@ export async function start(workflowPath?: string): Promise<void> {
         const isSetupFailure = code === 'codex_not_found' || streak >= WORKER_SETUP_STREAK_LIMIT
         warn(`✗ ${issue.identifier}: ${(outcome.error ?? '').slice(0, 200)}${sid ? ` session=${sid}` : ''}${code ? ` code=${code}` : ''}${streak > 1 ? ` streak=${streak}` : ''}`) // §13.1
         if (isSetupFailure) {
-          log(`setup failure ${issue.identifier} (${code}${streak > 1 ? ` x${streak}` : ''}) → Needs Engineer`)
+          log(`setup failure ${issue.identifier} (${code}${streak > 1 ? ` x${streak}` : ''}) → Factory - Needs Engineer`)
           try {
-            await moveIssue(cfg, issue.id, 'Needs Engineer')
+            await moveIssue(cfg, issue.id, 'Factory - Needs Engineer')
             await postComment(cfg, issue.id, `## ⚠️ Setup failure — needs operator\nThe factory cannot run this ticket: \`${code}\`${streak >= WORKER_SETUP_STREAK_LIMIT ? ` (${streak} consecutive worker-setup failures — recreating the workspace did not resolve it)` : ''}.\n\n> ${(outcome.error ?? '').slice(0, 400)}\n\nManual intervention required before it can retry.`)
           } catch (e) {
             warn(`setup failure move ${issue.identifier}: ${e instanceof Error ? e.message : String(e)}`)
@@ -690,12 +690,12 @@ export async function start(workflowPath?: string): Promise<void> {
         const cap = effectiveCap(identifier)
         log(`action: ${identifier} budget +${Math.round(inc / 1e6)}M → ${Math.round(cap / 1e6)}M cap (operator)`)
         const s = norm(issue.state)
-        if (s === 'needs engineer' || s === 'qa blocked') {
+        if (s === 'factory - needs engineer' || s === 'qa - blocked') {
           // It was parked (likely by the cap) — re-open to In Progress with a fresh no-progress clock so it can use the
           // new headroom; the thread resumes on the next dispatch.
           stopRun(issue.id)
           progress.delete(issue.id)
-          deadlocked.delete(issue.id) // BEV audit: a fresh no-progress clock must also clear first-offense memory, or the next deadlock skips QA-blocked triage and jumps straight to Needs Engineer
+          deadlocked.delete(issue.id) // BEV audit: a fresh no-progress clock must also clear first-offense memory, or the next deadlock skips QA-blocked triage and jumps straight to Factory - Needs Engineer
           notesFetched.delete(issue.id)
           summaries.delete(issue.identifier)
           await moveIssue(cfg, issue.id, 'In Progress')
@@ -712,7 +712,7 @@ export async function start(workflowPath?: string): Promise<void> {
         saveThreads()
         logs.set(issue.identifier, []) // from-scratch run: clear the transcript too
         saveLogs()
-        progress.delete(issue.id) // BEV audit: "fresh thread" must also mean a fresh no-progress clock and first-offense memory — otherwise a ticket that deadlocked once before the restart skips straight to Needs Engineer on its very next deadlock
+        progress.delete(issue.id) // BEV audit: "fresh thread" must also mean a fresh no-progress clock and first-offense memory — otherwise a ticket that deadlocked once before the restart skips straight to Factory - Needs Engineer on its very next deadlock
         deadlocked.delete(issue.id)
         log(`action: ${identifier} restart (operator, fresh thread)`)
         return { ok: true, msg: 'restarting fresh' }
@@ -737,7 +737,7 @@ export async function start(workflowPath?: string): Promise<void> {
         return { ok: true, msg: 'canceled — moved to Canceled' }
       }
       if (action === 'to-qa' || action === 'to-build') {
-        const target = action === 'to-qa' ? 'QA Testing' : 'In Progress'
+        const target = action === 'to-qa' ? 'QA - Testing' : 'In Progress'
         grantIfCapped(identifier, issue)
         stopRun(issue.id) // stop the current turn but keep the pin + workspace + thread → the move resumes it
         await moveIssue(cfg, issue.id, target)
@@ -776,8 +776,8 @@ export async function start(workflowPath?: string): Promise<void> {
   // daemon log, token burns, what's stuck), so the mechanic especially gets it first-class instead of guessing.
   const brainDigest = (): string => {
     const lc = (s: string): string => s.trim().toLowerCase()
-    const needs = lastBoard.filter((i) => lc(i.state) === 'needs engineer').map((i) => i.identifier)
-    const blocked = lastBoard.filter((i) => lc(i.state) === 'qa blocked').map((i) => i.identifier)
+    const needs = lastBoard.filter((i) => lc(i.state) === 'factory - needs engineer').map((i) => i.identifier)
+    const blocked = lastBoard.filter((i) => lc(i.state) === 'qa - blocked').map((i) => i.identifier)
     const tok = (n: number): string => (n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${Math.round(n / 1e6)}M` : `${Math.round(n / 1e3)}k`)
     const burns = Object.keys(tokens)
       .filter((id) => /^[A-Z][A-Z0-9]*-\d+$/.test(id))
@@ -788,7 +788,7 @@ export async function start(workflowPath?: string): Promise<void> {
     return [
       `## Factory state — live from the brain (you run on a worker and cannot see any of this otherwise)`,
       `- Status: ${paused ? 'PAUSED' : 'running'}`,
-      `- Stuck now: ${needs.length} Needs Engineer${needs.length ? ` (${needs.join(', ')})` : ''}; ${blocked.length} QA blocked${blocked.length ? ` (${blocked.join(', ')})` : ''}`,
+      `- Stuck now: ${needs.length} Factory - Needs Engineer${needs.length ? ` (${needs.join(', ')})` : ''}; ${blocked.length} QA - blocked${blocked.length ? ` (${blocked.join(', ')})` : ''}`,
       `- Top token burns: ${burns.length ? burns.map(([id, n]) => `${id} ${tok(n)}`).join(', ') : 'none tracked'}`,
       `- Recent brain warnings / errors / deadlocks (daemon.log tail):`,
       ...(warnings.length ? warnings.map((l) => `    ${l}`) : ['    (none recently — factory healthy)']),
@@ -925,7 +925,7 @@ export async function start(workflowPath?: string): Promise<void> {
     // PERSISTED (threads.json) and already used elsewhere to land a resume back on the worker holding the rollout,
     // so it reliably tells us where a ticket's workspace actually lives even across a restart. BEV audit: this
     // used to fall back to "keep on ALL hosts" unconditionally, pinning every open ticket's ~5-6G checkout on
-    // every one of the 8 workers (an 8x multiplier) for as long as it stayed open — Needs Engineer/Ready can sit
+    // every one of the 8 workers (an 8x multiplier) for as long as it stayed open — Factory - Needs Engineer/Ready can sit
     // for days. Only tickets we genuinely have no host record for (never dispatched, or pre-date host tracking)
     // still get the broad protect-everywhere fallback.
     for (const i of lastBoard) {
@@ -994,7 +994,7 @@ export async function start(workflowPath?: string): Promise<void> {
       }
       // Surface WHY a ticket is stuck: pull its workpad Verdict for the blocked + needs-human states (not while an
       // agent is live on it — its own messages fill the note then). Clear a cached note when a ticket changes state
-      // so a qa-blocked verdict doesn't linger after the blocked phase escalates it to Needs Engineer.
+      // so a qa-blocked verdict doesn't linger after the blocked phase escalates it to Factory - Needs Engineer.
       const now = Date.now()
       const stuck: { issue: Issue; target: string; reason: string }[] = []
       for (const i of board) {
@@ -1019,24 +1019,24 @@ export async function start(workflowPath?: string): Promise<void> {
           const cap = effectiveCap(i.identifier)
           if (total >= cap) {
             // Absolute blast-radius cap (plus any operator budget bump): even a ticket that keeps reaching new states
-            // (which resets the no-progress clock) must never burn unbounded. Straight to Needs Engineer.
-            stuck.push({ issue: i, target: 'Needs Engineer', reason: `burned ${Math.round(total / 1e6)}M tokens — hit the ${Math.round(cap / 1e6)}M per-ticket cap` })
+            // (which resets the no-progress clock) must never burn unbounded. Straight to Factory - Needs Engineer.
+            stuck.push({ issue: i, target: 'Factory - Needs Engineer', reason: `burned ${Math.round(total / 1e6)}M tokens — hit the ${Math.round(cap / 1e6)}M per-ticket cap` })
           } else {
-            // No-progress deadlock: a ticket deadlocking while IN `QA blocked` means the triage itself is looping →
-            // straight to Needs Engineer. Anywhere else: 1st offense → QA blocked (let it triage), 2nd → Needs Engineer.
+            // No-progress deadlock: a ticket deadlocking while IN `QA - blocked` means the triage itself is looping →
+            // straight to Factory - Needs Engineer. Anywhere else: 1st offense → QA - blocked (let it triage), 2nd → Factory - Needs Engineer.
             const reason = deadlockReason(total - pr.tokensAtProgress, now - pr.since, cfg.deadlock)
-            if (reason) stuck.push({ issue: i, target: norm(i.state) === 'qa blocked' || deadlocked.has(i.id) ? 'Needs Engineer' : 'QA blocked', reason })
+            if (reason) stuck.push({ issue: i, target: norm(i.state) === 'qa - blocked' || deadlocked.has(i.id) ? 'Factory - Needs Engineer' : 'QA - blocked', reason })
           }
         }
         const s = norm(i.state)
-        if ((s === 'qa blocked' || s === 'needs engineer' || s === 'stg - ready to merge') && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
+        if ((s === 'qa - blocked' || s === 'factory - needs engineer' || s === 'stg - ready to merge') && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
           notesFetched.add(i.id)
           void fetchLatestNote(cfg, i.id).then((n) => n && summaries.set(i.identifier, n)).catch(() => {})
         }
       }
       for (const id of [...progress.keys()]) if (!board.some((i) => i.id === id)) { progress.delete(id); deadlocked.delete(id); setupFailureStreaks.delete(id) }
       // Deadlock sweep: no forward progress + resource burn → move to the blocked state (the blocked phase triages it),
-      // or to Needs Engineer if it already deadlocked once. Await the move so it isn't re-dispatched below this poll.
+      // or to Factory - Needs Engineer if it already deadlocked once. Await the move so it isn't re-dispatched below this poll.
       for (const { issue, target, reason } of stuck) {
         deadlocked.add(issue.id)
         terminate(issue.id, false)
@@ -1047,7 +1047,7 @@ export async function start(workflowPath?: string): Promise<void> {
         stats.record({ identifier: issue.identifier, kind: reason.includes('per-ticket cap') ? 'cap' : 'deadlock', toState: target, threadId: threadRecs.get(issue.id)?.threadId, totalTokens: grandTotal(tokens, issue.identifier), account: acct(placement.get(issue.id) ?? null), detail: reason })
         try {
           await moveIssue(cfg, issue.id, target)
-          await postComment(cfg, issue.id, `## 🔁 Auto-blocked — deadlock\nThe factory ${reason} on this ticket, so I moved it to \`${target}\` instead of looping further.${target === 'QA blocked' ? '\n\n**Blocked phase:** if there is no concrete, fixable meta-problem here, escalate to `Needs Engineer` — do not just send it back to loop again.' : ''}`)
+          await postComment(cfg, issue.id, `## 🔁 Auto-blocked — deadlock\nThe factory ${reason} on this ticket, so I moved it to \`${target}\` instead of looping further.${target === 'QA - blocked' ? '\n\n**Blocked phase:** if there is no concrete, fixable meta-problem here, escalate to `Factory - Needs Engineer` — do not just send it back to loop again.' : ''}`)
         } catch (e) {
           warn(`deadlock move ${issue.identifier}: ${e instanceof Error ? e.message : String(e)}`)
         }
@@ -1070,7 +1070,7 @@ export async function start(workflowPath?: string): Promise<void> {
 }
 
 // A ticket is deadlocked when it keeps spending tokens/time without advancing to a pipeline state it hasn't
-// reached this lifecycle (e.g. oscillating In Progress ↔ QA Testing, or a fix that never lands). Returns a
+// reached this lifecycle (e.g. oscillating In Progress ↔ QA - Testing, or a fix that never lands). Returns a
 // human-readable reason or null. Pure so it's unit-testable.
 export function deadlockReason(tokensSinceProgress: number, msSinceProgress: number, dl: Omit<Config['deadlock'], 'hardTokenCap'>): string | null {
   const mins = Math.round(msSinceProgress / 60_000)
@@ -1082,7 +1082,7 @@ export function deadlockReason(tokensSinceProgress: number, msSinceProgress: num
 
 // An operator chat turn: read-only, answer from the thread's own context. Terse so it doesn't crowd the history.
 function chatPrompt(msg: string): string {
-  return `The operator is messaging you directly about this ticket, with this thread's full context. You can ACT on their steering through Linear via \`linear_graphql\`: update the \`## Codex Workpad\` and move the ticket's status. Narrate what you do plainly (e.g. "ok — recording the simpler plan in the workpad and moving this to In Progress so the build picks it up"). When their steering means the code should change, capture the concrete change in the workpad and move the ticket to \`In Progress\` — do this even if it is parked in STG - Ready to merge / QA blocked, because that re-enters it into the pipeline and the build agent resumes THIS thread to make the edits. Do NOT edit files, run commands, or push in this turn — only Linear. If the operator is just asking a question, answer it and change nothing. Operator:\n\n${msg}`
+  return `The operator is messaging you directly about this ticket, with this thread's full context. You can ACT on their steering through Linear via \`linear_graphql\`: update the \`## Codex Workpad\` and move the ticket's status. Narrate what you do plainly (e.g. "ok — recording the simpler plan in the workpad and moving this to In Progress so the build picks it up"). When their steering means the code should change, capture the concrete change in the workpad and move the ticket to \`In Progress\` — do this even if it is parked in STG - Ready to merge / QA - blocked, because that re-enters it into the pipeline and the build agent resumes THIS thread to make the edits. Do NOT edit files, run commands, or push in this turn — only Linear. If the operator is just asking a question, answer it and change nothing. Operator:\n\n${msg}`
 }
 
 // An operator chat turn for a pool role — same read-only contract, framed as steering the role's standing focus.

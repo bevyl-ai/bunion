@@ -231,7 +231,7 @@ header{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:14px 22px;
 /* jump bar */
 /* Jump bar (item 7): a persistent strip below the header — one chip per board column with a live count, since
    at normal desktop width the board needs ~3000px but only ~1600px is visible and off-screen columns with real
-   backlog (Needs Engineer, Ready) otherwise have zero cue. */
+   backlog (Factory - Needs Engineer, Ready) otherwise have zero cue. */
 #jumpbar{flex:0 0 auto;display:flex;gap:6px;flex-wrap:wrap;padding:8px 22px;border-bottom:1px solid var(--color-line);background:rgba(11,12,17,.5)}
 .jumpchip{display:inline-flex;align-items:center;gap:6px;background:var(--color-surf);border:1px solid var(--color-line);border-radius:20px;padding:3px 10px 3px 8px;font-size:11px;font-weight:600;color:var(--color-mut2);cursor:pointer;transition:background .12s,border-color .12s,color .12s}
 .jumpchip i{width:6px;height:6px;border-radius:50%;opacity:.5}

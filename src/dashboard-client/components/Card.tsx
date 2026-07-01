@@ -21,7 +21,7 @@ export function Card({
   const run = r.status === 'running'
   const neHot = isNeHot(r, now)
   const prNum = prNumFromUrl(r.prUrl)
-  const reason = (r.state === 'QA blocked' || r.state === 'Needs Engineer') && r.note ? r.note.slice(0, 160) : null
+  const reason = (r.state === 'QA - blocked' || r.state === 'Factory - Needs Engineer') && r.note ? r.note.slice(0, 160) : null
   const hasActions = actionList(r).length > 0
 
   return (

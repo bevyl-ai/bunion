@@ -20,23 +20,23 @@ export function StatusBadge({ item, now }: { item: BoardItem; now: number }) {
       </span>
     )
 
-  if (r.state === 'Needs Engineer') {
+  if (r.state === 'Factory - Needs Engineer') {
     const neDays = r.enteredAt ? ((r.endedAt || now) - r.enteredAt) / 86400000 : 0
     if (neDays >= 2)
       return (
         <span class="ag ne-hot inline-flex items-center gap-1.5 text-[11.5px] whitespace-nowrap">
-          ⚠⚠ needs engineer &middot; {neDays.toFixed(1)}d ignored
+          ⚠⚠ factory - needs engineer &middot; {neDays.toFixed(1)}d ignored
         </span>
       )
     if (neDays >= 1)
       return (
         <span class="ag inline-flex items-center gap-1.5 text-[11.5px] whitespace-nowrap text-[#e0a020]">
-          ⚠ needs engineer &middot; {neDays.toFixed(1)}d
+          ⚠ factory - needs engineer &middot; {neDays.toFixed(1)}d
         </span>
       )
     return (
       <span class="ag inline-flex items-center gap-1.5 text-[11.5px] whitespace-nowrap text-[#d9568c]">
-        ⚠ needs engineer
+        ⚠ factory - needs engineer
       </span>
     )
   }
@@ -69,5 +69,5 @@ export function StatusBadge({ item, now }: { item: BoardItem; now: number }) {
 }
 
 export function isNeHot(item: BoardItem, now: number): boolean {
-  return item.state === 'Needs Engineer' && !!item.enteredAt && ((item.endedAt || now) - item.enteredAt) / 86400000 >= 2
+  return item.state === 'Factory - Needs Engineer' && !!item.enteredAt && ((item.endedAt || now) - item.enteredAt) / 86400000 >= 2
 }

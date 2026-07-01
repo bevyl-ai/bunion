@@ -33,7 +33,7 @@ export interface Stats {
 }
 
 const SHIPPED = "('STG - Ready to merge','STG - Merged','Done')"
-const REWORK_FROM = "('QA Testing','QA Verify','QA blocked')"
+const REWORK_FROM = "('QA - Testing','QA - blocked')"
 const ORDER: Record<string, string> = { tokens: 'tokens DESC', cycle: 'cycle_ms DESC', reworks: 'reworks DESC, tokens DESC', recent: 'last_ts DESC' }
 
 export function openStats(path: string = join(homedir(), '.bunion', 'stats.db')): Stats {

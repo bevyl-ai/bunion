@@ -12,7 +12,7 @@ import type { AgentEvent, DynamicTool } from '../types'
 const DESCRIPTION =
   "Wait — token-free — for your PR's build gate to resolve: CI checks AND stupify's code review, in ONE call. After you " +
   'push, just call `wait` (optionally { pr }); it returns one verdict — act on it:\n' +
-  '• PASS — CI green + stupify approved (✅) the latest code → move to QA Testing.\n' +
+  '• PASS — CI green + stupify approved (✅) the latest code → move to QA - Testing.\n' +
   '• CI_FAILED — lists the failing checks → fix them, push again (a push re-triggers CI + stupify).\n' +
   '• CHANGES_REQUESTED — stupify objected to the latest code (its words are included) → fix it in code (or push back inline with justification), push, then `wait` again.\n' +
   '• STUPIFY_FLAKED — CI green but stupify never reviewed within the timeout → proceed to QA, noting in the workpad you proceeded without a `✅` (reviewer unavailable).\n' +
@@ -155,7 +155,7 @@ function verdict(kind: string, ci: { pending: number; failed: number; passed: nu
   const ciLine = ci.failed > 0 ? `FAILED ❌ (${ci.failed} failing${ci.failures.length ? `: ${ci.failures.join('; ')}` : ''})` : !ci.any ? 'no checks reported' : ci.pending > 0 ? `pending (${ci.pending} still running, ${ci.passed} passed)` : `green ✅ (${ci.passed} checks)`
   const stLine = rv.reviewed ? `${rv.approved ? 'approved ✅' : 'CHANGES REQUESTED'} (reviewed ${short(rv.sha)}, head ${short(rv.head)})` : 'no review of the latest code yet'
   const rec: Record<string, string> = {
-    PASS: 'Gate passed → move to QA Testing.',
+    PASS: 'Gate passed → move to QA - Testing.',
     CI_FAILED: 'Fix the failing checks, then push (a push re-triggers CI + stupify).',
     CHANGES_REQUESTED: 'Address stupify\'s objection in code (or push back inline with justification), push, then `wait` again.',
     STUPIFY_FLAKED: 'Stupify did not review in time and CI is green → proceed to QA, noting in the workpad you proceeded without a `✅` (reviewer unavailable).',

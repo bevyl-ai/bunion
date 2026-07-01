@@ -9,15 +9,15 @@ export function actionList(it: BoardItem | null | undefined): ActionDef[] {
   if (!it || it.state === 'Done') return []
   if (it.status === 'running')
     return [{ a: 'restart', l: 'Restart this agent', c: 'danger', t: 'Stop the current agent, wipe its workspace, and restart the ticket from scratch on a fresh thread' }, A_REWORK, A_CANCEL]
-  if (it.state === 'Needs Engineer')
+  if (it.state === 'Factory - Needs Engineer')
     return [
       { a: 'bump', l: 'Bump budget & reopen', c: 'go', t: 'Grant another token budget on top of the cap and re-open to In Progress (use for a ticket parked by the token cap)' },
-      { a: 'to-qa', l: 'Back to QA', c: 'go', t: 'Send back to QA Testing so the agent re-verifies' },
+      { a: 'to-qa', l: 'Back to QA', c: 'go', t: 'Send back to QA - Testing so the agent re-verifies' },
       A_REWORK,
       A_CANCEL,
     ]
-  if (it.state === 'STG - Ready to merge') return [{ a: 'to-qa', l: 'Re-verify', c: 'go', t: 'Send back to QA Testing for the agent to re-verify before shipping' }, A_REWORK, A_CANCEL]
-  return [{ a: 'to-qa', l: 'Send to QA', c: 'go', t: 'Move to QA Testing so the agent verifies the work' }, A_REWORK, A_CANCEL]
+  if (it.state === 'STG - Ready to merge') return [{ a: 'to-qa', l: 'Re-verify', c: 'go', t: 'Send back to QA - Testing for the agent to re-verify before shipping' }, A_REWORK, A_CANCEL]
+  return [{ a: 'to-qa', l: 'Send to QA', c: 'go', t: 'Move to QA - Testing so the agent verifies the work' }, A_REWORK, A_CANCEL]
 }
 
 export function colIdx(cols: BoardColumn[], st: string | null | undefined): number {
@@ -25,15 +25,13 @@ export function colIdx(cols: BoardColumn[], st: string | null | undefined): numb
   return cols.findIndex((col) => col.states.some((s) => s.toLowerCase() === l))
 }
 
-// One "-> ColumnName" move per board column except the ticket's current column and the human-owned "QA Requested"
-// lane (Anya/Julia's manual QA tracking — WORKFLOW.md bans the agent from writing there).
+// One "-> ColumnName" move per board column except the ticket's current column.
 export function moveItems(cols: BoardColumn[], it: BoardItem | null | undefined): ActionDef[] {
   if (!it) return []
   const cur = colIdx(cols, it.state)
   const out: ActionDef[] = []
   cols.forEach((col, i) => {
     if (i === cur) return
-    if (col.name === 'QA Requested') return
     out.push({ a: 'move:' + col.states[0], l: '→ ' + col.name, c: '', t: 'Move this ticket to ' + col.name })
   })
   return out

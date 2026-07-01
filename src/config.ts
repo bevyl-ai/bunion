@@ -68,14 +68,15 @@ function parseCadence(v: unknown): number {
 const DEFAULT_COLUMNS: BoardColumn[] = [
   { name: 'Planning', color: '#8b93a1', states: ['Triage', 'Backlog', 'Todo'] },
   { name: 'In Progress', color: '#5b8def', states: ['In Progress'] },
-  { name: 'QA Requested', color: '#d9a441', states: ['QA Requested'] },
-  { name: 'QA check', color: '#d99a2b', states: ['QA Testing'] },
-  { name: 'Verify QA', color: '#c79a3a', states: ['QA Verify'] },
-  { name: 'Blocked', color: '#e0564f', states: ['QA blocked'] },
-  { name: 'Needs Engineer', color: '#d9568c', states: ['Needs Engineer'] },
+  { name: 'QA check', color: '#d99a2b', states: ['QA - Testing'] },
+  { name: 'Blocked', color: '#e0564f', states: ['QA - blocked'] },
+  { name: 'QA - Requested', color: '#d9a441', states: ['QA - Requested'] },
+  { name: 'Factory - UI review', color: '#b88cd9', states: ['Factory - UI review'] },
   { name: 'Ready', color: '#3fb27f', states: ['STG - Ready to merge'] },
   { name: 'In Staging', color: '#e3b341', states: ['STG - Merged'] },
   { name: 'Verifying prod', color: '#4a9eda', states: ['Verifying in Prod'] },
+  { name: "Factory - can't verify", color: '#e0864f', states: ["Factory - can't verify"] },
+  { name: 'Factory - Needs Engineer', color: '#d9568c', states: ['Factory - Needs Engineer'] },
   { name: 'Done', color: '#6b7280', states: ['Done'] },
 ]
 function parseColumns(v: unknown): BoardColumn[] {
@@ -156,7 +157,7 @@ export function loadConfig(path?: string): Config {
       tokens: num(dl.tokens, 20_000_000), // tokens burned with no new pipeline state (within stallMs) → blocked
       stallMs: num(dl.stall_ms, 30 * 60_000), // ...with no forward progress for at least this long
       hardStallMs: num(dl.hard_stall_ms, 90 * 60_000), // OR this long with no progress, regardless of token spend
-      hardTokenCap: num(dl.hard_token_cap, 200_000_000), // absolute per-ticket total-spend ceiling → Needs Engineer, regardless of progress (blast-radius cap)
+      hardTokenCap: num(dl.hard_token_cap, 200_000_000), // absolute per-ticket total-spend ceiling → Factory - Needs Engineer, regardless of progress (blast-radius cap)
     },
     dashboardPort: portRaw && Number.isFinite(Number(portRaw)) ? Number(portRaw) : null,
     boardColumns: parseColumns(obj(fm.board).columns),

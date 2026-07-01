@@ -6,12 +6,13 @@ const STATE_COLORS: Record<string, string> = {
   Backlog: '#7c8493',
   Todo: '#7c8493',
   'In Progress': '#5b8def',
-  'QA Requested': '#d9a441',
-  'QA Testing': '#d99a2b',
-  'QA Verify': '#c79a3a',
-  'QA blocked': '#e0564f',
-  'Needs Engineer': '#d9568c',
+  'QA - Testing': '#d99a2b',
+  'QA - blocked': '#e0564f',
+  'QA - Requested': '#d9a441',
+  'Factory - UI review': '#b88cd9',
   'STG - Ready to merge': '#3fb27f',
+  "Factory - can't verify": '#e0864f',
+  'Factory - Needs Engineer': '#d9568c',
   Done: '#a371f7',
 }
 export const SC = (s: string): string => STATE_COLORS[s] || '#7c8493'

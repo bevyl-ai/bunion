@@ -94,7 +94,7 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
     if (boardClients.size === 0) return
     const s = getSnapshot()
     // Same structural signature the client render() uses (incl. the QA-blocked note term) — push only on a real change.
-    const sig = JSON.stringify(s.items.map((i) => [i.identifier, i.state, i.status, i.host, i.prUrl, i.retryAttempt, i.state === 'QA blocked' ? (i.note ?? '') : '']))
+    const sig = JSON.stringify(s.items.map((i) => [i.identifier, i.state, i.status, i.host, i.prUrl, i.retryAttempt, i.state === 'QA - blocked' ? (i.note ?? '') : '']))
     if (sig === lastBoardSig) return
     lastBoardSig = sig
     const msg = sse(s)

@@ -47,9 +47,9 @@ export function Board({
       if (i >= 0) bk[i]!.push(eff)
       else if (term.indexOf(st.toLowerCase()) < 0) unmapped.push(eff)
     }
-    // Needs Engineer + Ready (states containing STG - Ready to merge) sort oldest-entered-first.
+    // Factory - Needs Engineer + Ready (states containing STG - Ready to merge) sort oldest-entered-first.
     cols.forEach((col, i) => {
-      const isNe = col.name === 'Needs Engineer'
+      const isNe = col.name === 'Factory - Needs Engineer'
       const isReady = col.states.some((s) => s === 'STG - Ready to merge')
       if (isNe || isReady) bk[i]!.sort((a, b) => (a.enteredAt || 0) - (b.enteredAt || 0))
     })
@@ -61,7 +61,7 @@ export function Board({
   const sig = useMemo(() => {
     const key = filtered.map((r) => {
       const st = effState(r.identifier, r.state)
-      return [r.identifier, st, r.status, r.host, r.prUrl, r.retryAttempt, st === 'QA blocked' ? r.note || '' : ''].join('')
+      return [r.identifier, st, r.status, r.host, r.prUrl, r.retryAttempt, st === 'QA - blocked' ? r.note || '' : ''].join('')
     })
     return key.join('') + '|' + filterQuery
   }, [filtered, effState, filterQuery])

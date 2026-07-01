@@ -99,11 +99,11 @@ const items: BoardItem[] = [
     retryDueAt: now + 45_000,
     tokens: null,
   },
-  // Needs Engineer, <1 day old — plain pink badge, no day count
+  // Factory - Needs Engineer, <1 day old — plain pink badge, no day count
   {
     identifier: 'BEV-2001',
-    title: 'Needs Engineer, fresh (under 1 day)',
-    state: 'Needs Engineer',
+    title: 'Factory - Needs Engineer, fresh (under 1 day)',
+    state: 'Factory - Needs Engineer',
     priority: 2,
     host: 'worker-2.exe.xyz',
     prUrl: null,
@@ -120,11 +120,11 @@ const items: BoardItem[] = [
     retryDueAt: null,
     tokens: tokBreakdown([tok(50_000, 10_000, 20_000, 'plan')]),
   },
-  // Needs Engineer, 1-2 days — amber single-warning badge, no card pulse
+  // Factory - Needs Engineer, 1-2 days — amber single-warning badge, no card pulse
   {
     identifier: 'BEV-2002',
-    title: 'Needs Engineer, 1.5 days ignored — amber tier',
-    state: 'Needs Engineer',
+    title: 'Factory - Needs Engineer, 1.5 days ignored — amber tier',
+    state: 'Factory - Needs Engineer',
     priority: 1,
     host: null,
     prUrl: null,
@@ -141,11 +141,11 @@ const items: BoardItem[] = [
     retryDueAt: null,
     tokens: null,
   },
-  // Needs Engineer, 3+ days — hot-red pulsing badge + card border pulse
+  // Factory - Needs Engineer, 3+ days — hot-red pulsing badge + card border pulse
   {
     identifier: 'BEV-2003',
-    title: 'Needs Engineer, 3.2 days ignored — hot-red pulsing tier',
-    state: 'Needs Engineer',
+    title: 'Factory - Needs Engineer, 3.2 days ignored — hot-red pulsing tier',
+    state: 'Factory - Needs Engineer',
     priority: 1,
     host: null,
     prUrl: null,
@@ -183,11 +183,11 @@ const items: BoardItem[] = [
     retryDueAt: null,
     tokens: null,
   },
-  // STG - Ready to merge, 3+ days — amber "ready - X.Xd waiting"
+  // In the human UI-review gate
   {
     identifier: 'BEV-3002',
-    title: 'Ready to merge, 4.1 days waiting — amber tier',
-    state: 'STG - Ready to merge',
+    title: 'Frontend change awaiting a human UI/taste review',
+    state: 'Factory - UI review',
     priority: 2,
     host: null,
     prUrl: 'https://github.com/bevyl-ai/bunion/pull/4102',
@@ -225,11 +225,11 @@ const items: BoardItem[] = [
     retryDueAt: null,
     tokens: tokBreakdown([tok(600_000_000, 200_000_000, 150_000_000, 'plan'), tok(500_000_000, 200_000_000, 100_000_000, 'build')]),
   },
-  // QA blocked with a note
+  // QA - blocked with a note
   {
     identifier: 'BEV-5001',
-    title: 'QA blocked with a note explaining why',
-    state: 'QA blocked',
+    title: 'QA - blocked with a note explaining why',
+    state: 'QA - blocked',
     priority: 2,
     host: 'worker-3.exe.xyz',
     prUrl: null,
@@ -246,16 +246,16 @@ const items: BoardItem[] = [
     retryDueAt: null,
     tokens: tokBreakdown([tok(80_000, 20_000, 10_000, 'plan'), tok(150_000, 50_000, 30_000, 'build'), tok(40_000, 15_000, 5_000, 'qa')]),
   },
-  // A ticket in an unmapped/renamed state
+  // Shipped but the prod-verify agent couldn't confirm live → the human "can't verify" glance queue
   {
     identifier: 'BEV-6001',
-    title: 'Ticket sitting in a renamed Linear state not in any column',
-    state: 'Awaiting Design Review',
+    title: "Shipped, but prod-verify couldn't confirm it's live",
+    state: "Factory - can't verify",
     priority: 3,
     host: null,
-    prUrl: null,
+    prUrl: 'https://github.com/bevyl-ai/bevyl.ai/pull/6566',
     url: 'https://linear.app/bevyl/issue/BEV-6001',
-    note: null,
+    note: "CANNOT VERIFY: no prod access to confirm the brand-kit upload fix is live — a human should glance.",
     status: 'handoff',
     enteredAt: now - 6 * 3600_000,
     endedAt: null,
@@ -350,14 +350,15 @@ const snapshot: Snapshot = {
   columns: [
     { name: 'Planning', c: '#8b93a1', states: ['Triage', 'Backlog', 'Todo'] },
     { name: 'In Progress', c: '#5b8def', states: ['In Progress'] },
-    { name: 'QA Requested', c: '#d9a441', states: ['QA Requested'], inert: true },
-    { name: 'QA check', c: '#d99a2b', states: ['QA Testing'] },
-    { name: 'Verify QA', c: '#c79a3a', states: ['QA Verify'] },
-    { name: 'Blocked', c: '#e0564f', states: ['QA blocked'] },
-    { name: 'Needs Engineer', c: '#d9568c', states: ['Needs Engineer'], inert: true },
+    { name: 'QA check', c: '#d99a2b', states: ['QA - Testing'] },
+    { name: 'Blocked', c: '#e0564f', states: ['QA - blocked'] },
+    { name: 'QA - Requested', c: '#d9a441', states: ['QA - Requested'], inert: true },
+    { name: 'Factory - UI review', c: '#b88cd9', states: ['Factory - UI review'], inert: true },
     { name: 'Ready', c: '#3fb27f', states: ['STG - Ready to merge'], inert: true },
     { name: 'In Staging', c: '#e3b341', states: ['STG - Merged'], inert: true },
     { name: 'Verifying prod', c: '#4a9eda', states: ['Verifying in Prod'] },
+    { name: "Factory - can't verify", c: '#e0864f', states: ["Factory - can't verify"], inert: true },
+    { name: 'Factory - Needs Engineer', c: '#d9568c', states: ['Factory - Needs Engineer'], inert: true },
     { name: 'Done', c: '#6b7280', states: ['Done'], inert: true },
   ],
   terminalStates: ['Done', 'Canceled', 'Duplicate'],

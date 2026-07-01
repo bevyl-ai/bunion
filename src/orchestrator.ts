@@ -888,7 +888,7 @@ export async function start(workflowPath?: string): Promise<void> {
       log(`backfilled ${n} ticket thread(s) from worker rollouts`)
     }
   }
-  if (cfg.dashboardPort) startDashboard(cfg.dashboardPort, snapshot, getLog, log, onAction, onChat, stats, (id) => livePartial.get(id) ?? '')
+  if (cfg.dashboardPort) void startDashboard(cfg.dashboardPort, snapshot, getLog, log, onAction, onChat, stats, (id) => livePartial.get(id) ?? '')
 
   // Start the pool — each role on its cadence. BEV audit: roleLast is now persisted (above), so the FIRST run after
   // a restart waits out whatever's left of the role's real cadence instead of always firing within the first

@@ -82,7 +82,7 @@ function apiErr(code: string, message: string, status: number): Response {
 // A tiny status server: GET /state.json is the live orchestrator snapshot; GET / serves the Preact dashboard
 // (bundled on the fly by Bun.serve's HTML-import routing — see ./dashboard-client) which polls/streams it and
 // renders the board (kanban by pipeline stage) + a per-run log modal.
-export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string) => Promise<{ ok: boolean; msg?: string }>, onChat?: (id: string, text: string) => Promise<{ ok: boolean; reply?: string; msg?: string }>, getStats?: Stats, getLive?: (id: string) => string): void {
+export async function startDashboard(port: number, getSnapshot: () => Snapshot, getLog: (id: string) => string[], log: (m: string) => void, onAction?: (id: string, action: string) => Promise<{ ok: boolean; msg?: string }>, onChat?: (id: string, text: string) => Promise<{ ok: boolean; reply?: string; msg?: string }>, getStats?: Stats, getLive?: (id: string) => string): Promise<void> {
   // Server-Sent Events push. Clients subscribe to /events (board) + /log-stream/<id> (transcript); a tight interval
   // diff-pushes so the dashboard reflects any change within ~150ms WITHOUT the client polling. /state.json + /transcript
   // stay live as the EventSource fallback (the exe.dev proxy could buffer SSE; the client degrades to polling cleanly).
@@ -128,9 +128,13 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
   const noStore = { headers: { 'cache-control': 'no-store' } }
   const sseHeaders = { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive', 'x-accel-buffering': 'no' }
   const cssHeaders = { 'content-type': 'text/css; charset=utf-8' }
-  // Kicked off once at boot; every request just awaits the same cached promise (near-instant after the first).
-  const dashboardCss = compileTailwindCss(`${import.meta.dir}/dashboard-client/styles.css`)
-  const statsCss = compileTailwindCss(`${import.meta.dir}/dashboard-client/stats-styles.css`)
+  // Build both stylesheets to completion BEFORE Bun.serve so their Bun.build() never overlaps Bun.serve's own
+  // HTML-import bundler when it lazily bundles board.html on the first request. That overlap intermittently flaked
+  // the HTML bundle with a spurious `Could not resolve: "./StatusBadge"` (a real relative import) on the slower brain,
+  // breaking the very first page load after a restart until a reload happened to hit a clean rebuild. Sequential +
+  // pre-serve = no concurrent Bun bundler ops on cold start. Costs a few ms of extra boot before the port opens.
+  const dashboardCss = await compileTailwindCss(`${import.meta.dir}/dashboard-client/styles.css`)
+  const statsCss = await compileTailwindCss(`${import.meta.dir}/dashboard-client/stats-styles.css`)
 
   Bun.serve({
     port,
@@ -143,8 +147,8 @@ export function startDashboard(port: number, getSnapshot: () => Snapshot, getLog
       // (see compileTailwindCss's comment) — board.tsx/stats.tsx inject a <link> to the two routes below at runtime.
       '/': boardHtml,
       '/stats': statsHtml,
-      '/dashboard.css': async () => new Response(await dashboardCss, { headers: cssHeaders }),
-      '/stats.css': async () => new Response(await statsCss, { headers: cssHeaders }),
+      '/dashboard.css': () => new Response(dashboardCss, { headers: cssHeaders }),
+      '/stats.css': () => new Response(statsCss, { headers: cssHeaders }),
     },
     async fetch(req, server) {
       const url = new URL(req.url)

@@ -177,6 +177,8 @@ Description:
 
 Linear tools (we are rate-limited — use sparingly): `linear_read` returns a ticket's CURRENT cached state (status / labels / priority / blockers / PR) with NO API cost — prefer it for re-checking state. `linear_graphql` runs one raw GraphQL op per call — use it for WRITES (the workpad comment, state changes, PR attachment) and anything `linear_read` doesn't cover. Your workpad is already provided above, so don't re-fetch it. You have `git`, `gh`, a shell, and this checkout of the target repo. Skills live in `.codex/skills/`.
 
+Prod observability: `ops_read` runs allowlisted READ-ONLY API calls against Trigger.dev, Vercel, and Datadog through the brain (no prod credentials exist on your VM — its description lists exactly what's allowed). Reach for it to diagnose a failed prod Trigger run, see why a Vercel preview didn't build (deployment state + build events), or read Datadog monitors/logs — before concluding you can't inspect prod.
+
 ## Always (every phase)
 
 - Keep ONE persistent `## Codex Workpad` Linear comment as the running source of truth (plan, acceptance criteria, validation, a short per-phase log). Reconcile it before working; never post separate "done"/summary comments. If updating the existing workpad fails with a permission error (it predates the current app identity), create a fresh `## Codex Workpad` and continue in it.

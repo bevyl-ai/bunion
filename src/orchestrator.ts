@@ -675,7 +675,10 @@ export async function start(workflowPath?: string): Promise<void> {
     }
     const issue = lastBoard.find((i) => i.identifier === identifier)
     if (!issue) return { ok: false, msg: 'ticket not on the board' }
-    const host = placement.get(issue.id) ?? null
+    // Teardown host (restart + cancel removeWorkspace). placement is in-memory and empty after a daemon restart, but
+    // a parked/idle ticket's remote checkout still lives on its persisted threadRecs host — fall back to that, or the
+    // remote workspace leaks (removeWorkspace(_, null) only wipes the local path).
+    const host = placement.get(issue.id) ?? threadRecs.get(issue.id)?.host ?? null
     try {
       if (action === 'bump') {
         // Operator budget bump: grant enough headroom to actually clear this ticket's current deficit (plus one

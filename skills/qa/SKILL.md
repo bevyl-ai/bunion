@@ -2,11 +2,11 @@
 name: qa
 description:
   Independently verify a PR against its acceptance criteria — the review/QA pass
-  (status QA Requested). Drive a real browser step by step with browser.mjs
+  (status QA - Testing). Drive a real browser step by step with browser.mjs
   (open, snapshot, click, screenshot) to reproduce a bug and PROVE the fix with
-  a screenshot, and/or run the repo's checks. Then route: PASS → QA Verify (a 2nd
-  adversarial agent re-checks before ship), FAILED (reproduced defect) → In Progress
-  for rework, BLOCKED (cannot verify) → QA blocked for a human. Skeptical,
+  a screenshot, and/or run the repo's checks. Then route: PASS → QA - Requested (a
+  human functionally re-tests + merges), FAILED (reproduced defect) → In Progress
+  for rework, BLOCKED (cannot verify) → QA - blocked for a human. Skeptical,
   behaviour-focused; never changes product code, never merges.
 ---
 
@@ -66,12 +66,13 @@ don't guess. Otherwise authed routes are fully testable.
 ## Route (post the verdict + confidence in the workpad first)
 
 - **PASS** — you OBSERVED the fix working (with a screenshot), every criterion is met, checks
-  are green → move to `QA Verify` (a 2nd, independent agent adversarially re-checks before ship). Do not merge.
+  are green → move to `QA - Requested` (the human QA gate — a person functionally re-tests and owns the
+  merge from there). Do not merge, and don't move it past `QA - Requested`.
 - **FAILED** — you reproduced a defect, a criterion is unmet, or a check is red → move **back to
   `In Progress`** with a precise `[codex]` comment: the URL + steps + the eval/screenshot that
   proves it, and what to change. A build agent reworks it.
 - **BLOCKED** — you cannot actually verify (authed route with no session, a product/human call,
-  not confident) → move to `QA blocked`; record what you checked and what a human must decide.
+  not confident) → move to `QA - blocked`; record what you checked and what a human must decide.
 
 ## Honesty bar
 

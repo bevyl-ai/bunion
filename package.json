@@ -3,9 +3,13 @@
   "version": "0.2.0",
   "description": "A Bun/TS port of OpenAI's Symphony — a thin harness that drives Codex (app-server) to ship Linear tickets end to end.",
   "type": "module",
-  "bin": { "bunion": "src/cli.ts" },
+  "bin": {
+    "bunion": "src/cli.ts"
+  },
   "files": ["src", "skills", "WORKFLOW.md", "README.md", "LICENSE"],
-  "engines": { "bun": ">=1.3" },
+  "engines": {
+    "bun": ">=1.3"
+  },
   "license": "MIT",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
@@ -13,6 +17,7 @@
   },
   "dependencies": {
     "liquidjs": "^10.18.0",
+    "preact": "^10.29.3",
     "yaml": "^2.6.1"
   },
   "devDependencies": {

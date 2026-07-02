@@ -16,7 +16,7 @@ export function Column({
 }) {
   const inert = !!col.inert
   return (
-    <div class={`col${inert ? ' inert' : ''} flex-[0_0_256px] max-w-64 min-w-0 flex flex-col gap-2.5 min-h-0`} ref={colRef}>
+    <div class={`col${inert ? ' inert' : ''} flex-[0_0_256px] max-w-64 min-w-0 flex flex-col gap-2.5 min-h-0`} {...(colRef ? { ref: colRef } : {})}>
       <div class="colh flex items-center gap-2 pt-0.5 px-1 pb-[9px] text-[11px] font-bold text-mut tracking-[.7px] uppercase">
         <i class="w-2 h-2 rounded-full" style={{ background: col.c }} />
         {col.name}

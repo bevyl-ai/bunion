@@ -14,7 +14,7 @@ export type StatKind = 'transition' | 'dispatch' | 'session_done' | 'session_fai
 export interface StatEvent {
   identifier: string
   kind: StatKind
-  threadId?: string | null
+  threadId?: string | null | undefined
   fromState?: string | null
   toState?: string | null
   totalTokens?: number | null

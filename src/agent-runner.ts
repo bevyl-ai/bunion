@@ -14,9 +14,9 @@ import type { AgentEvent, Config, Issue } from './types'
 
 export interface AgentOutcome {
   ok: boolean
-  error?: string
+  error?: string | undefined
   // §10.6 stable error code (CategorizedError.code) for orchestrator routing (setup failures vs transient)
-  code?: string
+  code?: string | undefined
 }
 
 export interface AgentHandle {

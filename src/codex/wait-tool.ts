@@ -124,6 +124,7 @@ export function waitTool(cfg: Config, host: string | null, workspace: string, re
           const met = until === 'stdout_matches' ? (re ? re.test(r.out) : false) : r.ok
           if (met) return { success: true, output: `condition met after ${polls} poll(s):\n${tail(r.out.trim(), 3000)}` }
           if (Date.now() >= deadline) return { success: false, output: `timed out (${timeout}s, ${polls} polls) — condition never met. last output:\n${tail(r.out.trim(), 3000)}` }
+          onEvent({ label: 'waiting' }) // heartbeat, no `log` (would spam the transcript) — keeps the orchestrator's stall-timeout from mistaking a legitimately long wait for a dead session
           await sleep(interval * 1000)
         }
       }
@@ -153,6 +154,7 @@ export function waitTool(cfg: Config, host: string | null, workspace: string, re
           if (g.review.reviewed && !g.review.approved) return verdict('CHANGES_REQUESTED', g.ci, g.review, polls)
           if (g.ci.any && g.ci.pending === 0 && g.review.reviewed && g.review.approved) return verdict('PASS', g.ci, g.review, polls)
           if (Date.now() >= deadline) return verdict(g.ci.pending > 0 || !g.ci.any ? 'PENDING' : 'STUPIFY_FLAKED', g.ci, g.review, polls)
+          onEvent({ label: 'waiting' }) // heartbeat — see the escape-hatch loop's comment above
           await sleep(interval * 1000)
         }
       }
@@ -172,6 +174,7 @@ export function waitTool(cfg: Config, host: string | null, workspace: string, re
         if (rv.reviewed && !rv.approved) return verdict('CHANGES_REQUESTED', ci, rv, polls)
         if (ci.any && ci.pending === 0 && rv.reviewed && rv.approved) return verdict('PASS', ci, rv, polls)
         if (Date.now() >= deadline) break
+        onEvent({ label: 'waiting' }) // heartbeat — see the escape-hatch loop's comment above
         await sleep(interval * 1000)
       }
       // Timed out: CI still pending → PENDING; CI settled but stupify never reviewed → FLAKED (proceed).

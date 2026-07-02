@@ -1,6 +1,7 @@
 import { AppServerSession } from './codex/app-server'
 import { phaseOf, repoFor } from './config'
 import { linearGraphqlTool, linearReadTool } from './codex/dynamic-tool'
+import type { GithubMirror } from './github-mirror'
 import type { TrackerMirror } from './tracker-mirror'
 import { opsReadTool } from './codex/ops-tool'
 import { waitTool } from './codex/wait-tool'
@@ -40,7 +41,13 @@ function continuationPrompt(turn: number, maxTurns: number, state: string): stri
 // One worker session for an issue: prep workspace → run turns on a single app-server thread up to max_turns,
 // refreshing the issue between turns and continuing while it stays active. The AGENT drives Linear/git/gh/merge.
 // `host` null = run locally; else the workspace, clone, and codex all live on that ssh worker (an exe.dev VM).
-export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null, mirror: TrackerMirror, drainOperatorMsgs: () => string[]): AgentHandle {
+// The brain's two local mirrors — tracker (Linear) and GitHub — threaded to the agent's host tools together.
+export interface Mirrors {
+  tracker: TrackerMirror
+  github: GithubMirror
+}
+
+export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null, mirrors: Mirrors, drainOperatorMsgs: () => string[]): AgentHandle {
   let session: AppServerSession | null = null
   let stopped = false
 
@@ -69,7 +76,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
       return { ok: false, error: e instanceof Error ? e.message : String(e), code: e instanceof CategorizedError ? e.code : undefined }
     }
 
-    session = new AppServerSession(cfg, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state), undefined, mirror), linearReadTool(cfg, mirror), waitTool(cfg, host, dir, onEvent), opsReadTool()], onEvent)
+    session = new AppServerSession(cfg, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state), undefined, mirrors.tracker), linearReadTool(cfg, mirrors.tracker), waitTool(cfg, host, dir, repo, mirrors.github, onEvent), opsReadTool()], onEvent)
     let current = issue
     try {
       await session.start(dir, host)
@@ -90,7 +97,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
       // Mirror-first; the hydrated thread is capped at 100 recent comments, and the workpad is an OLD comment
       // (edited in place, early createdAt) — so a full-length thread may have pushed it out of the window. Only
       // trust a mirror miss when the thread is short enough to be complete.
-      const thread = mirror.getComments(issue.id)
+      const thread = mirrors.tracker.getComments(issue.id)
       const cachedWorkpad = thread ? workpadFromComments(thread.map((c) => c.body)) : null
       const workpad = cachedWorkpad ?? (thread && thread.length < 100 ? null : await fetchWorkpad(cfg, issue.id).catch(() => null))
       for (let turn = 1; ; turn++) {

@@ -1,4 +1,6 @@
 import { githubAppToken } from '../github'
+import type { GithubMirror } from '../github-mirror'
+import { gateFromSnapshot, refreshPr } from '../github-sync'
 import { execAsync, shq } from '../ssh'
 import type { AgentEvent, Config, DynamicTool } from '../types'
 
@@ -89,7 +91,7 @@ function parseReview(json: string): Review {
   return { reviewed: true, approved: cover.body.includes('✅'), body: cover.body.replace(/<!--[\s\S]*?-->/g, '').trim(), sha: cover.sha, head, codeSha }
 }
 
-export function waitTool(cfg: Config, host: string | null, workspace: string, onEvent: (e: AgentEvent) => void = () => {}): DynamicTool {
+export function waitTool(cfg: Config, host: string | null, workspace: string, repo: string, ghMirror: GithubMirror | null, onEvent: (e: AgentEvent) => void = () => {}): DynamicTool {
   return {
     spec: { name: 'wait', description: DESCRIPTION, inputSchema: SCHEMA },
     async run(args: unknown): Promise<{ success: boolean; output: string }> {
@@ -128,18 +130,43 @@ export function waitTool(cfg: Config, host: string | null, workspace: string, on
         }
       }
 
-      // DEFAULT — the build gate: wait for CI + stupify together.
-      const ref = a.pr != null && a.pr !== '' ? ` ${shq(String(a.pr))}` : ''
+      // DEFAULT — the build gate. Served from the brain's GitHub mirror when the factory app can see the repo
+      // (one debounced GraphQL request per interval, shared across concurrent waiters, zero VM traffic); the
+      // legacy VM-side `gh` polling remains for repos outside the app installation (e.g. the Octember org).
       onEvent({ label: 'waiting', log: `⏳ wait: build gate (CI + stupify)${a.pr != null && a.pr !== '' ? ` ${String(a.pr)}` : ''} — token-free` })
+      const number = await resolvePrNumber(a.pr, sh)
+      if (number === null) return fail('no PR found for this branch — open/push the PR first')
+      if (typeof number === 'string') return fail(number)
+
+      if (ghMirror && cfg.github) {
+        let polls = 0
+        for (;;) {
+          polls++
+          let snap
+          try {
+            snap = await refreshPr(cfg, ghMirror, repo, number, Math.max(5_000, (interval * 1000) / 2))
+          } catch {
+            break // transient GitHub API failure — the legacy VM gate below is the resilient path, not a hard fail
+          }
+          if (snap === 'not_found') return fail(`PR #${number} not found in ${repo}`)
+          if (snap === 'no_access') break // app not installed on this repo → legacy VM gate below
+          const g = gateFromSnapshot(snap)
+          if (g.ci.failed > 0) return verdict('CI_FAILED', g.ci, g.review, polls)
+          if (g.review.reviewed && !g.review.approved) return verdict('CHANGES_REQUESTED', g.ci, g.review, polls)
+          if (g.ci.any && g.ci.pending === 0 && g.review.reviewed && g.review.approved) return verdict('PASS', g.ci, g.review, polls)
+          if (Date.now() >= deadline) return verdict(g.ci.pending > 0 || !g.ci.any ? 'PENDING' : 'STUPIFY_FLAKED', g.ci, g.review, polls)
+          await sleep(interval * 1000)
+        }
+      }
+
+      // LEGACY gate — VM-side `gh` polling, for setups with no app / repos the app cannot see.
+      const ref = ` ${shq(String(number))}`
       let ci = { pending: 1, failed: 0, passed: 0, failures: [] as string[], any: false }
       let rv: Review = { reviewed: false, approved: false, body: '', sha: '', head: '', codeSha: '' }
       let polls = 0
       for (;;) {
         polls++
         const c = await sh(`gh pr checks${ref} 2>&1`)
-        if (/no pull requests found|no git remote|not a git repository/i.test(c.out) && polls === 1) {
-          return fail(`no PR found for this branch — open/push the PR first (gh said: ${tail(c.out.trim(), 200)})`)
-        }
         ci = parseChecks(c.out)
         if (ci.failed > 0) return verdict('CI_FAILED', ci, rv, polls)
         const v = await sh(`gh pr view${ref} --json headRefOid,commits,reviews 2>&1`)
@@ -152,6 +179,23 @@ export function waitTool(cfg: Config, host: string | null, workspace: string, on
       // Timed out: CI still pending → PENDING; CI settled but stupify never reviewed → FLAKED (proceed).
       return verdict(ci.pending > 0 || !ci.any ? 'PENDING' : 'STUPIFY_FLAKED', ci, rv, polls)
     },
+  }
+}
+
+// The gate needs a concrete PR number for the mirror. A numeric `pr` is used as-is; a branch name (or nothing —
+// the workspace's current branch) resolves with ONE `gh pr view` on the worker. Returns the number, null when no
+// PR exists, or an error string for other gh failures.
+async function resolvePrNumber(pr: unknown, sh: (cmd: string) => Promise<{ ok: boolean; out: string; code: number | null }>): Promise<number | null | string> {
+  if (typeof pr === 'number' && Number.isInteger(pr) && pr > 0) return pr
+  if (typeof pr === 'string' && /^\d+$/.test(pr.trim())) return Number(pr.trim())
+  const ref = typeof pr === 'string' && pr.trim() ? ` ${shq(pr.trim())}` : ''
+  const r = await sh(`gh pr view${ref} --json number 2>&1`)
+  if (/no pull requests found|no git remote|not a git repository/i.test(r.out)) return null
+  try {
+    const n = (JSON.parse(r.out) as { number?: number }).number
+    return typeof n === 'number' ? n : `could not resolve the PR number (gh said: ${tail(r.out.trim(), 200)})`
+  } catch {
+    return `could not resolve the PR number (gh said: ${tail(r.out.trim(), 200)})`
   }
 }
 

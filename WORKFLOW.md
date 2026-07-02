@@ -14,7 +14,7 @@ tracker:
   kind: linear
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project
   api_key: $LINEAR_API_KEY
-  min_request_gap_ms: 1600           # Linear quota is 2,500 req/h; 1600ms gate ≈ 2,250/h ceiling. The 250ms default let a 12-agent burst blow the quota (2026-07-02).
+  min_request_gap_ms: 3800           # ≈947 req/h — Noah capped Linear traffic at 1,000/h tops (quota is 2,500/h; headroom for other API consumers).
   required_labels: [dark-factory]    # opt-in: tickets carrying this label enter the factory
   app_actor_id: 438143c9-a37d-48c5-8e37-259d15f9cde7   # the factory's Linear app actor (Bevyl Factory) — a ticket DELEGATED to it also opts in (OR with required_labels). Assign in Linear: it sets `delegate`, not `assignee`.
   active_states: [Triage, Backlog, Todo, In Progress, QA - Testing, QA - blocked, Verifying in prod]   # NOT active (humans / the train move these): STG - Ready to merge, STG - Merged, Factory - Needs Engineer, and the human-review gates QA - Requested / Factory - UI review / Factory - can't verify

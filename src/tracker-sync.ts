@@ -47,17 +47,12 @@ export async function syncMirror(cfg: Config, mirror: TrackerMirror, warn: (msg:
   }
 }
 
-// The board view the orchestrator dispatches from — same semantics the old fetchBoard server-side query had
-// (non-canceled, active or completed within the last day, opted in by label or delegation), computed locally.
-export function boardFromMirror(cfg: Config, mirror: TrackerMirror, nowMs: number = Date.now()): Issue[] {
+// The board view the orchestrator dispatches from: every live ticket plus the last day of completed ones —
+// the same scope the old fetchBoard server query returned. Opt-in (label/delegation routability) deliberately
+// does NOT live here: the orchestrator's isRoutable is its single owner, and this board is scope only.
+export function boardFromMirror(mirror: TrackerMirror, nowMs: number = Date.now()): Issue[] {
   const cutoff = new Date(nowMs - 24 * 60 * 60_000).toISOString()
-  const optIn = (i: Issue): boolean => {
-    const labels = cfg.tracker.requiredLabels
-    const byLabel = labels.length > 0 && labels.every((l) => i.labels.includes(l))
-    const byDelegate = cfg.tracker.appActorId != null && i.delegateId === cfg.tracker.appActorId
-    return labels.length === 0 && cfg.tracker.appActorId == null ? true : byLabel || byDelegate
-  }
-  return mirror.allIssues().filter((i) => i.stateType !== 'canceled' && (i.completedAt == null || i.completedAt > cutoff) && optIn(i))
+  return mirror.allIssues().filter((i) => i.stateType !== 'canceled' && (i.completedAt == null || i.completedAt > cutoff))
 }
 
 // Drain due queued writes through the shared gate. Success (2xx + no errors) → done; anything else → backoff and
@@ -71,7 +66,7 @@ export async function drainWrites(cfg: Config, mirror: TrackerMirror, warn: (msg
         mirror.completeWrite(w.seq)
       } else {
         mirror.failWrite(w.seq)
-        if (w.attempts === 0 || isRateLimited(r.body)) warn(`mirror: queued write deferred (${w.note ?? 'unlabeled'}, attempt ${w.attempts + 1})`)
+        warn(`mirror: queued write deferred (${w.note ?? 'unlabeled'}, attempt ${w.attempts + 1}${isRateLimited(r.body) ? ', rate-limited' : ''})`)
       }
     } catch (e) {
       mirror.failWrite(w.seq)
@@ -80,8 +75,10 @@ export async function drainWrites(cfg: Config, mirror: TrackerMirror, warn: (msg
   }
 }
 
-// Hourly reconciliation: re-fetch the real board and upsert it wholesale — self-heals any delta the mirror missed
-// (downtime, webhook-less edits that didn't bump updatedAt, etc.) and reports drift instead of hiding it.
+// Hourly reconciliation: re-fetch the real board and heal anything the deltas missed (daemon downtime, edits that
+// didn't bump updatedAt). Reports drift instead of hiding it. Known blind spots, accepted: hard-DELETED issues stay
+// in the mirror (they leave the board via stateType/completedAt anyway), and the check inherits fetchBoard's
+// opt-in scope — unlabeled/undelegated tickets self-heal only via the delta cursor.
 export async function auditMirror(cfg: Config, mirror: TrackerMirror, warn: (msg: string) => void, nowMs: number = Date.now()): Promise<void> {
   const last = Number(mirror.getMeta(META_AUDIT) ?? 0)
   if (nowMs - last < AUDIT_INTERVAL_MS) return

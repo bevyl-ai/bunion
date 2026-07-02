@@ -148,6 +148,16 @@ export async function start(workflowPath?: string): Promise<void> {
   const livePartial = new Map<string, string>() // identifier → the agent's CURRENTLY-streaming reply text (ephemeral; cleared when the message commits as a `● ` log line)
   const claimed = new Set<string>()
   const retries = new Map<string, RetryTimer>()
+  // Tickets terminate()'d THIS tick by the stall-check or deadlock sweep, both of which release the claim
+  // immediately but want a CONTROLLED re-entry (a scheduled retry 10s+ out, or simply "sit in the new state
+  // until a later poll") — not the instant pickup they'd otherwise get. terminate() clears `claimed`/`running`
+  // synchronously, and the main dispatch loop runs LATER in this SAME tick over a `board` snapshot that still
+  // shows the ticket "active": without this guard it gets re-dispatched fresh (attempt 0) within the same tick,
+  // silently discarding the backoff and resetting the retry counter every time — exactly what stall-retry's
+  // "attempt" log kept showing as #1 forever instead of escalating, and what let a deadlocked ticket burn through
+  // its whole token cap via tight restart-thrash instead of pausing in its triage state. Cleared at the top of
+  // every tick so it never suppresses dispatch beyond the tick that caused it.
+  const skipDispatchThisTick = new Set<string>()
   let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
   const mirror = new TrackerMirror(join(STATE_DIR, 'mirror.db')) // the tracker spine: durable local mirror + write queue (tracker-mirror.ts); agents/dispatch/dashboard read here, not Linear
   const ghMirror = new GithubMirror(join(STATE_DIR, 'mirror.db')) // its GitHub twin: PR snapshots for the build gate + pit freshness (github-mirror.ts)
@@ -501,6 +511,7 @@ export async function start(workflowPath?: string): Promise<void> {
         if (now - e.lastActivity > cfg.codex.stallTimeoutMs) {
           const next = e.retryAttempt > 0 ? e.retryAttempt + 1 : 1
           terminate(id, false)
+          skipDispatchThisTick.add(id) // scheduleRetry owns re-entry now — don't let this tick's dispatch loop grab it first
           scheduleRetry(id, e.issue.identifier, next, false)
           warn(`stalled ${e.issue.identifier} → retry#${next}`)
         }
@@ -991,6 +1002,7 @@ export async function start(workflowPath?: string): Promise<void> {
         setPaused(true)
         warn('Linear auth failing repeatedly (likely a dead/blocked token) — AUTO-PAUSED to stop hammering; fix the token, then resume')
       }
+      skipDispatchThisTick.clear() // fresh for this tick — see its declaration for why it exists
       await reconcile()
       let board: Issue[]
       try {
@@ -1074,10 +1086,13 @@ export async function start(workflowPath?: string): Promise<void> {
       }
       for (const id of [...progress.keys()]) if (!board.some((i) => i.id === id)) { progress.delete(id); deadlocked.delete(id); setupFailureStreaks.delete(id) }
       // Deadlock sweep: no forward progress + resource burn → move to the blocked state (the blocked phase triages it),
-      // or to Factory - Needs Engineer if it already deadlocked once. Await the move so it isn't re-dispatched below this poll.
+      // or to Factory - Needs Engineer if it already deadlocked once. skipDispatchThisTick is what ACTUALLY keeps it
+      // from being re-dispatched below this poll — awaiting the move alone doesn't (terminate() already released the
+      // claim above, and the dispatch loop's board snapshot still shows the mutated `target` state as active).
       for (const { issue, target, reason } of stuck) {
         deadlocked.add(issue.id)
         terminate(issue.id, false)
+        skipDispatchThisTick.add(issue.id)
         progress.delete(issue.id)
         lastState.set(issue.id, target)
         issue.state = target
@@ -1093,6 +1108,7 @@ export async function start(workflowPath?: string): Promise<void> {
       if (!paused && slots() > 0) {
         for (const issue of board.filter((i) => isActive(i.state)).sort(byDispatch)) {
           if (slots() <= 0) break
+          if (skipDispatchThisTick.has(issue.id)) continue // just terminate()'d this tick — let scheduleRetry/next poll own its re-entry
           if (!eligible(issue)) continue
           if (stateFull(issue.state)) continue // per-state concurrency cap reached — skip; this issue retries next poll
           const host = placeFor(issue.id)

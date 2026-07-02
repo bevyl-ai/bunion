@@ -67,11 +67,12 @@ export async function start(workflowPath?: string): Promise<void> {
 
   const acct = (h: string | null): string | null => { if (!h) return null; const gw = gatewayHost.get(h); return gw ? (cfg.worker.gatewayAccounts[gw] ?? gw) : null }
 
-  const roles = createRolePool(getCfg, state, placement, () => state.paused, getLastBoard)
+  const getPollHealth = () => ({ failureStreak: pollFailureStreak, lastError: lastPollError, lastOkAt: lastPollOkAt })
+  const roles = createRolePool(getCfg, state, placement, () => state.paused, getLastBoard, getPollHealth)
   const dispatcher = createDispatcher(getCfg, state, placement, mirror, ghMirror, stats, acct, livePartial, summaries, (issueId) => chat.drainPending(issueId))
   const chat = createChat(getCfg, state, placement, mirror, livePartial, (name) => roles.roleRunning.has(name), (id) => dispatcher.running.has(id), getLastBoard, cfg.roles)
   const actions = createActions(getCfg, state, placement, dispatcher, roles, mirror, summaries, notesFetched, getLastBoard)
-  const snapshot = createSnapshot(getCfg, state, placement, dispatcher, roles, summaries, getLastBoard, gatewayHost, () => ({ failureStreak: pollFailureStreak, lastError: lastPollError, lastOkAt: lastPollOkAt }))
+  const snapshot = createSnapshot(getCfg, state, placement, dispatcher, roles, summaries, getLastBoard, gatewayHost, getPollHealth)
 
   // Recover threads from worker rollouts for tickets bunion has no record of, then persist what was found. Runs
   // once on the first board; makes a pre-persistence handoff chattable.

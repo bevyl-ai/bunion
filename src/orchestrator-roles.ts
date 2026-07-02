@@ -1,6 +1,6 @@
 import { startRole, roleWorkspaceKey, type RoleHandle } from './role-runner'
 import { log, recentLogs, warn } from './log'
-import { foldDelta, grandTotal, resolveTokenBase, zeroCounts } from './tokens'
+import { foldDelta, grandTotal, resolveTokenBase, zeroCounts, type TokenTally } from './tokens'
 import type { Placement } from './orchestrator-placement'
 import { utcDay, type PersistedState } from './orchestrator-state'
 import type { Config, Issue, Role, RoleQuota, TokenCounts } from './types'
@@ -14,10 +14,71 @@ interface RoleEntry {
 
 export type RolePool = ReturnType<typeof createRolePool>
 
+export type PollHealth = { failureStreak: number; lastError: string | null; lastOkAt: number | null }
+
+const tok = (n: number): string => (n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${Math.round(n / 1e6)}M` : `${Math.round(n / 1e3)}k`)
+const lc = (s: string): string => s.trim().toLowerCase()
+
+const age = (ms: number): string => {
+  const sec = Math.max(0, Math.round(ms / 1000))
+  if (sec < 90) return `${sec}s`
+  const min = Math.round(sec / 60)
+  if (min < 90) return `${min}m`
+  const hr = Math.round(min / 60)
+  return `${hr}h`
+}
+
+function staleBoardReason(pollHealth: PollHealth, pollIntervalMs: number, nowMs: number): string | null {
+  if (pollHealth.lastOkAt == null) return 'no successful board poll yet'
+  if (pollHealth.failureStreak > 0) {
+    const err = pollHealth.lastError ? `: ${pollHealth.lastError}` : ''
+    return `last poll failed${err}; last successful board poll ${age(nowMs - pollHealth.lastOkAt)} ago`
+  }
+  const staleAfterMs = pollIntervalMs * 2
+  const sinceOk = nowMs - pollHealth.lastOkAt
+  return sinceOk > staleAfterMs
+    ? `last successful board poll ${age(sinceOk)} ago (freshness limit ${age(staleAfterMs)})`
+    : null
+}
+
+export function renderBrainDigest(opts: {
+  board: Issue[]
+  paused: boolean
+  tokens: TokenTally
+  warnings: string[]
+  pollHealth: PollHealth
+  pollIntervalMs: number
+  nowMs?: number
+}): string {
+  const nowMs = opts.nowMs ?? Date.now()
+  const staleReason = staleBoardReason(opts.pollHealth, opts.pollIntervalMs, nowMs)
+  const stuckLine = staleReason
+    ? `- Stuck now: board state unknown/stale (${staleReason}); not showing precise Factory - Needs Engineer / QA - blocked counts`
+    : (() => {
+        const needs = opts.board.filter((i) => lc(i.state) === 'factory - needs engineer').map((i) => i.identifier)
+        const blocked = opts.board.filter((i) => lc(i.state) === 'qa - blocked').map((i) => i.identifier)
+        return `- Stuck now: ${needs.length} Factory - Needs Engineer${needs.length ? ` (${needs.join(', ')})` : ''}; ${blocked.length} QA - blocked${blocked.length ? ` (${blocked.join(', ')})` : ''}`
+      })()
+  const burns = Object.keys(opts.tokens)
+    .filter((id) => /^[A-Z][A-Z0-9]*-\d+$/.test(id))
+    .map((id) => [id, grandTotal(opts.tokens, id)] as const)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+  return [
+    `## Factory state — live from the brain (you run on a worker and cannot see any of this otherwise)`,
+    `- Status: ${opts.paused ? 'PAUSED' : 'running'}`,
+    stuckLine,
+    `- Top token burns: ${burns.length ? burns.map(([id, n]) => `${id} ${tok(n)}`).join(', ') : 'none tracked'}`,
+    `- Recent brain warnings / errors / deadlocks (daemon.log tail):`,
+    ...(opts.warnings.length ? opts.warnings.map((l) => `    ${l}`) : ['    (none recently — factory healthy)']),
+    ``,
+  ].join('\n')
+}
+
 // The pool. Each configured role runs on its own cadence with a persistent thread (resumed each run so it remembers
 // what it filed) and its own model, filing tickets through the Linear tool. A role pins to a worker (round-robin, or
 // the one holding its thread) and does NOT count against the per-ticket cap — roles are few and infrequent.
-export function createRolePool(getCfg: () => Config, state: PersistedState, placement: Placement, getPaused: () => boolean, getLastBoard: () => Issue[]) {
+export function createRolePool(getCfg: () => Config, state: PersistedState, placement: Placement, getPaused: () => boolean, getLastBoard: () => Issue[], getPollHealth: () => PollHealth = () => ({ failureStreak: 0, lastError: null, lastOkAt: Date.now() })) {
   const roleRunning = new Map<string, RoleEntry>() // role name → its current run (the pool — ambient agents)
 
   const roleHostFor = (role: Role, i: number): string | null => {
@@ -44,26 +105,14 @@ export function createRolePool(getCfg: () => Config, state: PersistedState, plac
   // The brain's live operational state, rendered into a pool role's prompt — a worker VM can't see any of this (the
   // daemon log, token burns, what's stuck), so the mechanic especially gets it first-class instead of guessing.
   const brainDigest = (): string => {
-    const lastBoard = getLastBoard()
-    const lc = (s: string): string => s.trim().toLowerCase()
-    const needs = lastBoard.filter((i) => lc(i.state) === 'factory - needs engineer').map((i) => i.identifier)
-    const blocked = lastBoard.filter((i) => lc(i.state) === 'qa - blocked').map((i) => i.identifier)
-    const tok = (n: number): string => (n >= 1e9 ? `${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `${Math.round(n / 1e6)}M` : `${Math.round(n / 1e3)}k`)
-    const burns = Object.keys(state.tokens)
-      .filter((id) => /^[A-Z][A-Z0-9]*-\d+$/.test(id))
-      .map((id) => [id, grandTotal(state.tokens, id)] as const)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-    const warnings = recentLogs().filter((l) => /WARN|deadlock|timed out|not authenticated|unauthorized|✗|429|rate.?limit|auth/i.test(l)).slice(-12)
-    return [
-      `## Factory state — live from the brain (you run on a worker and cannot see any of this otherwise)`,
-      `- Status: ${getPaused() ? 'PAUSED' : 'running'}`,
-      `- Stuck now: ${needs.length} Factory - Needs Engineer${needs.length ? ` (${needs.join(', ')})` : ''}; ${blocked.length} QA - blocked${blocked.length ? ` (${blocked.join(', ')})` : ''}`,
-      `- Top token burns: ${burns.length ? burns.map(([id, n]) => `${id} ${tok(n)}`).join(', ') : 'none tracked'}`,
-      `- Recent brain warnings / errors / deadlocks (daemon.log tail):`,
-      ...(warnings.length ? warnings.map((l) => `    ${l}`) : ['    (none recently — factory healthy)']),
-      ``,
-    ].join('\n')
+    return renderBrainDigest({
+      board: getLastBoard(),
+      paused: getPaused(),
+      tokens: state.tokens,
+      warnings: recentLogs().filter((l) => /WARN|deadlock|timed out|not authenticated|unauthorized|✗|429|rate.?limit|auth/i.test(l)).slice(-12),
+      pollHealth: getPollHealth(),
+      pollIntervalMs: getCfg().pollIntervalMs,
+    })
   }
 
   const dispatchRole = (role: Role, i: number, force = false): void => {

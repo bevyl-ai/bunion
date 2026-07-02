@@ -107,6 +107,11 @@ const QUOTA_FILE = join(STATE_DIR, 'role-quota.json') // role name → { day, co
 const GRANTS_FILE = join(STATE_DIR, 'ticket-grants.json') // identifier → extra token budget granted on top of the hard cap, persisted
 const ROLE_LAST_FILE = join(STATE_DIR, 'role-last.json') // role name → ms timestamp of its last completed run, persisted so a daemon restart doesn't re-fire every role within the first minute regardless of true cadence
 const PAUSED_FILE = join(STATE_DIR, 'paused.json') // operator panic switch — { paused: bool }, persisted so a restart mid-incident stays paused
+// issue.id → forward-progress clock, persisted so a restart doesn't reset every currently-active ticket's "since" to
+// the restart moment — BEV audit: it wasn't, and every ticket still sitting in the same state hardStallMs (90min)
+// after ANY restart got wrongly deadlocked in lockstep, with a Linear comment falsely claiming it had been looping,
+// even for tickets that had never once been dispatched (simply capacity-starved the whole time).
+const PROGRESS_FILE = join(STATE_DIR, 'progress.json')
 const ROLE_PAUSED_FILE = join(STATE_DIR, 'role-paused.json') // per-role pause — [name,…] poolers stopped independently of the global pause, persisted
 
 // One codex thread per ticket / role, persisted (key → thread id + the worker holding its rollout) so the next
@@ -245,7 +250,16 @@ export async function start(workflowPath?: string): Promise<void> {
   // pipeline state it hasn't been in this lifecycle; while it sits in already-seen states it burns down. A ticket
   // that spends tokens/time without resetting is looping → auto-block it. `deadlocked` remembers a first offense so
   // a second one escalates past the blocked phase straight to a human.
-  const progress = new Map<string, { since: number; tokensAtProgress: number; seen: Set<string> }>()
+  // Persisted (like threadRecs/tokens/logs above) — BEV audit: it wasn't, so every restart reset every currently-
+  // active ticket's clock to the restart moment, and any ticket still in the same state hardStallMs (90min) later
+  // got wrongly auto-blocked in lockstep, including tickets that had never once been dispatched (just capacity-
+  // starved the whole time) — the Linear comment it posts falsely claims looping happened.
+  const progress = new Map<string, { since: number; tokensAtProgress: number; seen: Set<string> }>(
+    Object.entries(readJson<Record<string, { since: number; tokensAtProgress: number; seen: string[] }>>(PROGRESS_FILE, {})).map(
+      ([id, p]) => [id, { since: p.since, tokensAtProgress: p.tokensAtProgress, seen: new Set(p.seen) }],
+    ),
+  )
+  const saveProgress = throttledWriter(PROGRESS_FILE, () => Object.fromEntries([...progress].map(([id, p]) => [id, { since: p.since, tokensAtProgress: p.tokensAtProgress, seen: [...p.seen] }])))
   const deadlocked = new Set<string>()
   // BEV-3969/3971: consecutive WORKER_SETUP_CODES failures per ticket — reset on success or a non-setup code;
   // escalated to Factory - Needs Engineer once it hits WORKER_SETUP_STREAK_LIMIT (ensureWorkspace's self-heal gets first crack).
@@ -742,6 +756,7 @@ export async function start(workflowPath?: string): Promise<void> {
           // new headroom; the thread resumes on the next dispatch.
           stopRun(issue.id)
           progress.delete(issue.id)
+          saveProgress()
           deadlocked.delete(issue.id) // BEV audit: a fresh no-progress clock must also clear first-offense memory, or the next deadlock skips QA-blocked triage and jumps straight to Factory - Needs Engineer
           notesFetched.delete(issue.id)
           summaries.delete(issue.identifier)
@@ -760,6 +775,7 @@ export async function start(workflowPath?: string): Promise<void> {
         logs.set(issue.identifier, []) // from-scratch run: clear the transcript too
         saveLogs()
         progress.delete(issue.id) // BEV audit: "fresh thread" must also mean a fresh no-progress clock and first-offense memory — otherwise a ticket that deadlocked once before the restart skips straight to Factory - Needs Engineer on its very next deadlock
+        saveProgress()
         deadlocked.delete(issue.id)
         log(`action: ${identifier} restart (operator, fresh thread)`)
         return { ok: true, msg: 'restarting fresh' }
@@ -777,6 +793,7 @@ export async function start(workflowPath?: string): Promise<void> {
         threadRecs.delete(issue.id)
         saveThreads()
         progress.delete(issue.id)
+        saveProgress()
         deadlocked.delete(issue.id)
         await moveIssue(cfg, issue.id, 'Canceled', mirror)
         log(`action: ${identifier} canceled (operator) — moved to Canceled`)
@@ -1062,6 +1079,7 @@ export async function start(workflowPath?: string): Promise<void> {
           pr.tokensAtProgress = grandTotal(tokens, i.identifier)
         }
         progress.set(i.id, pr)
+        saveProgress()
         if (isActive(i.state) && !isTerminal(i.state)) {
           const total = grandTotal(tokens, i.identifier)
           const cap = effectiveCap(i.identifier)
@@ -1089,6 +1107,7 @@ export async function start(workflowPath?: string): Promise<void> {
         }
       }
       for (const id of [...progress.keys()]) if (!board.some((i) => i.id === id)) { progress.delete(id); deadlocked.delete(id); setupFailureStreaks.delete(id) }
+      saveProgress()
       // Deadlock sweep: no forward progress + resource burn → move to the blocked state (the blocked phase triages it),
       // or to Factory - Needs Engineer if it already deadlocked once. skipDispatchThisTick is what ACTUALLY keeps it
       // from being re-dispatched below this poll — awaiting the move alone doesn't (terminate() already released the
@@ -1098,6 +1117,7 @@ export async function start(workflowPath?: string): Promise<void> {
         terminate(issue.id, false)
         skipDispatchThisTick.add(issue.id)
         progress.delete(issue.id)
+        saveProgress()
         lastState.set(issue.id, target)
         issue.state = target
         log(`deadlock: ${issue.identifier} ${reason} → ${target}`)

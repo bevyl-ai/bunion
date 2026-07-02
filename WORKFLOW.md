@@ -16,6 +16,7 @@ tracker:
   api_key: $LINEAR_API_KEY
   min_request_gap_ms: 500            # safety net only — the tracker mirror (tracker-mirror.ts) serves all reads brain-side, so steady-state Linear traffic is two delta requests per poll + writes; the RATELIMITED body cooldown (linear.ts) is the backstop.
   required_labels: [dark-factory]    # opt-in: tickets carrying this label enter the factory
+  opt_in_projects: [6a509c29-929b-45d7-a8d1-5bbe6a982634, factory-fc8d8a37a6b8] # opt-in: tickets in the Factory project enter even without the label/delegate routes
   app_actor_id: 438143c9-a37d-48c5-8e37-259d15f9cde7   # the factory's Linear app actor (Bevyl Factory) — a ticket DELEGATED to it also opts in (OR with required_labels). Assign in Linear: it sets `delegate`, not `assignee`.
   active_states: [Triage, Backlog, Todo, In Progress, QA - Testing, QA - blocked, Verifying in prod]   # NOT active (humans / the train move these): STG - Ready to merge, STG - Merged, Factory - Needs Engineer, and the human-review gates QA - Requested / Factory - UI review / Factory - can't verify
   terminal_states: [Done, Canceled, Cancelled, Duplicate, Factory - Needs Engineer]   # Factory - Needs Engineer = the factory stops + a person must decide

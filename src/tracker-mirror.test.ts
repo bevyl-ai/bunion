@@ -8,7 +8,7 @@ import type { Issue } from './types'
 const issue = (id: string, identifier: string, extra: Partial<Issue> = {}): Issue => ({
   id, identifier, title: 't', description: '', url: '', state: 'Todo', stateType: 'unstarted', priority: 0,
   branchName: null, createdAt: '2026-07-01T00:00:00Z', updatedAt: '2026-07-01T00:00:00Z', startedAt: null,
-  completedAt: null, labels: [], delegateId: null, blockers: [], prUrl: null, ...extra,
+  completedAt: null, labels: [], delegateId: null, project: null, blockers: [], prUrl: null, ...extra,
 })
 const UUID = '11111111-2222-3333-4444-555555555555'
 const OTHER = '99999999-8888-7777-6666-555555555555'

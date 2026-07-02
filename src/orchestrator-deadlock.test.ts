@@ -35,7 +35,7 @@ test('exactly at the thresholds counts as deadlocked', () => {
 // trackProgress — the per-tick forward-progress clock + escalation decision.
 const issue = (state: string): Issue => ({
   id: 'i1', identifier: 'BEV-1', title: 't', description: '', state, stateType: 'started', priority: 0, url: '', prUrl: null,
-  branchName: null, labels: [], delegateId: null, createdAt: '2026-01-01', updatedAt: null, startedAt: null, completedAt: null, blockers: [],
+  branchName: null, labels: [], delegateId: null, project: null, createdAt: '2026-01-01', updatedAt: null, startedAt: null, completedAt: null, blockers: [],
 })
 const freshPr = (): ProgressRec => ({ since: 0, tokensAtProgress: 0, seen: new Set() })
 const isActive = (s: string): boolean => s === 'In Progress'

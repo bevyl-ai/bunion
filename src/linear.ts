@@ -149,6 +149,7 @@ interface RawIssue {
   completedAt: string | null
   state: { name: string; type: string }
   delegate: { id: string } | null
+  project: { id: string; slugId: string | null } | null
   labels: { nodes: { name: string }[] }
   inverseRelations: { nodes: { type: string; issue: { id: string; identifier: string; state: { name: string } | null } | null }[] }
   attachments: { nodes: { url: string }[] }
@@ -157,6 +158,7 @@ interface RawIssue {
 const ISSUE_FIELDS = `id identifier title description url priority branchName createdAt updatedAt startedAt completedAt
   state { name type }
   delegate { id }
+  project { id slugId }
   labels { nodes { name } }
   inverseRelations { nodes { type issue { id identifier state { name } } } }
   attachments { nodes { url } }`
@@ -184,6 +186,7 @@ const BOARD = (after: string | null) => `query Board($filter: IssueFilter${after
 const BY_KEY = `query ByKey($id: String!) { issue(id: $id) { ${ISSUE_FIELDS} } }`
 
 type PagedIssues = { issues: { nodes: RawIssue[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } }
+const UUIDISH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 // Base scope every issue query shares: the configured team and/or project.
 function scopeFilter(cfg: Config): LinearDocument.IssueFilter {
@@ -216,6 +219,11 @@ export async function fetchBoard(cfg: Config): Promise<Issue[]> {
   const optIn: LinearDocument.IssueFilter[] = []
   if (cfg.tracker.requiredLabels.length) optIn.push({ labels: { name: { in: cfg.tracker.requiredLabels } } })
   if (cfg.tracker.appActorId) optIn.push({ delegate: { id: { eq: cfg.tracker.appActorId } } })
+  if (cfg.tracker.optInProjects.length) {
+    const ids = cfg.tracker.optInProjects.filter((p) => UUIDISH.test(p))
+    if (ids.length) optIn.push({ project: { id: { in: ids } } })
+    optIn.push({ project: { slugId: { in: cfg.tracker.optInProjects } } })
+  }
   if (optIn.length) filter.and = [{ or: optIn }]
   const nodes = await queryPaginated<RawIssue>(cfg, BOARD, { filter }, (d) => (d as PagedIssues).issues)
   return nodes.map(toIssue)
@@ -417,6 +425,7 @@ function toIssue(r: RawIssue): Issue {
     completedAt: r.completedAt,
     labels: r.labels.nodes.map((n) => n.name.trim().toLowerCase()), // §4.1.1: labels normalized lowercase
     delegateId: r.delegate?.id ?? null,
+    project: r.project ? { id: r.project.id, slugId: r.project.slugId ?? null } : null,
     blockers: r.inverseRelations.nodes
       .filter((n) => n.type === 'blocks')
       .map((n) => ({ id: n.issue?.id ?? null, identifier: n.issue?.identifier ?? null, state: n.issue?.state?.name ?? null })),

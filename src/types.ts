@@ -15,6 +15,7 @@ export interface Issue {
   completedAt: string | null // ISO — when it reached Done
   labels: string[] // normalized: trimmed + lowercased (Symphony §4.1.1)
   delegateId: string | null // the app actor an issue is delegated to (Linear sets `delegate`, not `assignee`, for apps), null if none
+  project: { id: string; slugId: string | null } | null // Linear project membership; used as an additive factory opt-in route
   blockers: { id: string | null; identifier: string | null; state: string | null }[] // each "blocks" relation's source
   prUrl: string | null // the GitHub PR attached to the issue, if any
 }
@@ -53,6 +54,7 @@ export interface TrackerConfig {
   team: string | null // scope to a whole team (key, e.g. BEV) — pair with required_labels for opt-in
   appActorId: string | null // the app's own actor id: a ticket delegated to it opts in, alongside required_labels (OR)
   requiredLabels: string[] // normalized: trim + lowercase + dedupe; matched host-side (AND)
+  optInProjects: string[] // project ids or slugIds that opt a scoped issue into the factory; matched host-side (OR)
   activeStates: string[]
   terminalStates: string[]
   minRequestGapMs: number // global min gap (ms) between Linear API requests — paces ALL traffic so we never hammer the API

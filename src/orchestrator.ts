@@ -217,7 +217,7 @@ export async function start(workflowPath?: string): Promise<void> {
           else void fetchLatestNote(cfg, i.id).then((n) => n && summaries.set(i.identifier, n)).catch(() => {})
         }
       }
-      for (const id of [...state.progress.keys()]) if (!board.some((i) => i.id === id)) { state.progress.delete(id); state.deadlocked.delete(id); dispatcher.setupFailureStreaks.delete(id) }
+      for (const id of state.progress.keys()) if (!board.some((i) => i.id === id)) { state.progress.delete(id); state.deadlocked.delete(id); dispatcher.setupFailureStreaks.delete(id) } // safe: deletes exactly the key being visited, which Map iterators handle correctly without a snapshot
       state.saveProgress()
       state.saveDeadlocked()
       // Deadlock sweep: no forward progress + resource burn → move to the blocked state (the blocked phase triages it),

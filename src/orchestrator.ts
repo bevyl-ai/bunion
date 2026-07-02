@@ -5,6 +5,7 @@ import { startAgent, type AgentHandle } from './agent-runner'
 import { roleWorkspaceKey, startRole, type RoleHandle } from './role-runner'
 import { AppServerSession } from './codex/app-server'
 import { linearGraphqlTool, linearReadTool } from './codex/dynamic-tool'
+import { LinearStore } from './linear-store'
 import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
 import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment, recentAuthFailures } from './linear'
@@ -145,6 +146,7 @@ export async function start(workflowPath?: string): Promise<void> {
   const claimed = new Set<string>()
   const retries = new Map<string, RetryTimer>()
   let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
+  const store = new LinearStore() // the brain's normalized tracker view — agents read from this, not from Linear (linear-store.ts)
   // BEV-4025: poll health, surfaced on the dashboard — a Linear poll failure used to only `warn()` to the daemon log
   // (operator-invisible) and silently keep `lastBoard` stale forever with no on-screen signal it was happening.
   let pollFailureStreak = 0
@@ -426,7 +428,7 @@ export async function start(workflowPath?: string): Promise<void> {
         if (rec) { threadRecs.set(issue.id, { ...rec, lastTokenBase: e.tokens }); saveThreads() } // keep the persisted seed current turn-by-turn, not just at thread-start
       }
       if (e.rateLimits) lastRateLimits = e.rateLimits // newest coding-agent rate-limit snapshot for the dashboard
-    }, threadRecs.get(issue.id)?.threadId ?? null, (id) => lastBoard.find((i) => i.id === id || i.identifier === id) ?? null, () => { const q = pendingChat.get(issue.id) ?? []; pendingChat.delete(issue.id); return q })
+    }, threadRecs.get(issue.id)?.threadId ?? null, store, () => { const q = pendingChat.get(issue.id) ?? []; pendingChat.delete(issue.id); return q })
     void entry.handle.done.then(async (outcome) => {
       if (running.get(issue.id) !== entry) return // already terminated by reconcile
       running.delete(issue.id)
@@ -660,7 +662,7 @@ export async function start(workflowPath?: string): Promise<void> {
     const rec = threadRecs.get(issue.id)
     if (!rec?.threadId) return { ok: false, msg: 'no thread yet — this ticket has not run' }
     // First-class ticket chat: give it the Linear tools so it can move state + update the workpad on the operator's steering.
-    return chatTurn(identifier, rec.threadId, placement.get(issue.id) ?? rec.host, msg, chatPrompt(msg), `${identifier}: operator chat`, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state)), linearReadTool((id) => lastBoard.find((i) => i.id === id || i.identifier === id) ?? null)])
+    return chatTurn(identifier, rec.threadId, placement.get(issue.id) ?? rec.host, msg, chatPrompt(msg), `${identifier}: operator chat`, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state), undefined, store), linearReadTool(cfg, store)])
   }
 
   // Operator actions = pure pipeline transitions. The thread carries context (chat + prior phases), so an action just
@@ -1008,6 +1010,7 @@ export async function start(workflowPath?: string): Promise<void> {
         continue
       }
       lastBoard = board
+      store.hydrateBoard(board)
       // Resolve one worker's LLM-gateway hostname per poll (cached for the daemon's life) → display-only account tracking.
       const unresolvedHost = hosts().find((h) => !gatewayHost.has(h))
       if (unresolvedHost) {

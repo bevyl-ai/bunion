@@ -1,3 +1,4 @@
+import type { StoredComment } from './linear-store'
 import { CategorizedError, type Config, type Issue } from './types'
 
 export interface GraphqlResult {
@@ -329,6 +330,17 @@ export async function fetchWorkpad(cfg: Config, issueId: string): Promise<string
   )
   const bodies = (d.issue?.comments.nodes ?? []).map((n) => n.body).filter(Boolean)
   return bodies.find((b) => /codex workpad/i.test(b)) ?? null
+}
+
+// Full comment thread for the LinearStore — fetched ONCE per ticket by linear_read, then kept current in the store
+// by applying mutation payloads (see linear-store.ts). This is the read that used to happen every agent turn.
+export async function fetchIssueComments(cfg: Config, issueId: string): Promise<StoredComment[]> {
+  const d = await query<{ issue: { comments: { nodes: { id: string; body: string; createdAt: string; user: { displayName: string } | null; botActor: { name: string } | null }[] } } | null }>(
+    cfg,
+    `query Thread($id: String!) { issue(id: $id) { comments(last: 60) { nodes { id body createdAt user { displayName } botActor { name } } } } }`,
+    { id: issueId },
+  )
+  return (d.issue?.comments.nodes ?? []).map((n) => ({ id: n.id, body: n.body, createdAt: n.createdAt, author: n.user?.displayName ?? n.botActor?.name ?? null }))
 }
 
 function toIssue(r: RawIssue): Issue {

@@ -1,6 +1,7 @@
 import { AppServerSession } from './codex/app-server'
 import { phaseOf, repoFor } from './config'
 import { linearGraphqlTool, linearReadTool } from './codex/dynamic-tool'
+import type { LinearStore } from './linear-store'
 import { opsReadTool } from './codex/ops-tool'
 import { waitTool } from './codex/wait-tool'
 import { fetchById, fetchWorkpad } from './linear'
@@ -39,7 +40,7 @@ function continuationPrompt(turn: number, maxTurns: number, state: string): stri
 // One worker session for an issue: prep workspace → run turns on a single app-server thread up to max_turns,
 // refreshing the issue between turns and continuing while it stays active. The AGENT drives Linear/git/gh/merge.
 // `host` null = run locally; else the workspace, clone, and codex all live on that ssh worker (an exe.dev VM).
-export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null, getCachedIssue: (id: string) => Issue | null, drainOperatorMsgs: () => string[]): AgentHandle {
+export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null, store: LinearStore, drainOperatorMsgs: () => string[]): AgentHandle {
   let session: AppServerSession | null = null
   let stopped = false
 
@@ -68,7 +69,7 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
       return { ok: false, error: e instanceof Error ? e.message : String(e), code: e instanceof CategorizedError ? e.code : undefined }
     }
 
-    session = new AppServerSession(cfg, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state)), linearReadTool(getCachedIssue), waitTool(cfg, host, dir, onEvent), opsReadTool()], onEvent)
+    session = new AppServerSession(cfg, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state), undefined, store), linearReadTool(cfg, store), waitTool(cfg, host, dir, onEvent), opsReadTool()], onEvent)
     let current = issue
     try {
       await session.start(dir, host)

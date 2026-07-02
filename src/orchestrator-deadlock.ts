@@ -6,6 +6,10 @@ export interface StuckTicket {
   target: string
   reason: string
 }
+export interface DeadlockNotice {
+  key: string
+  at: number
+}
 
 const norm = (s: string): string => s.trim().toLowerCase()
 
@@ -26,7 +30,7 @@ export function trackProgress(
   dispatchBlocked: boolean,
   totalTokens: number,
   effectiveCap: number,
-  dl: Omit<Config['deadlock'], 'hardTokenCap'>,
+  dl: Omit<Config['deadlock'], 'hardTokenCap' | 'maxEffectiveTokenCap'>,
   hasDeadlockedBefore: boolean,
 ): StuckTicket | null {
   if (!pr.seen.has(norm(issue.state))) {
@@ -55,10 +59,25 @@ export function trackProgress(
 // A ticket is deadlocked when it keeps spending tokens/time without advancing to a pipeline state it hasn't
 // reached this lifecycle (e.g. oscillating In Progress ↔ QA - Testing, or a fix that never lands). Returns a
 // human-readable reason or null. Pure so it's unit-testable.
-export function deadlockReason(tokensSinceProgress: number, msSinceProgress: number, dl: Omit<Config['deadlock'], 'hardTokenCap'>): string | null {
+export function deadlockReason(tokensSinceProgress: number, msSinceProgress: number, dl: Omit<Config['deadlock'], 'hardTokenCap' | 'maxEffectiveTokenCap'>): string | null {
   const mins = Math.round(msSinceProgress / 60_000)
   if (msSinceProgress >= dl.hardStallMs) return `stuck ${mins}min with no forward progress`
   if (tokensSinceProgress >= dl.tokens && msSinceProgress >= dl.stallMs)
     return `burned ${(tokensSinceProgress / 1e6).toFixed(0)}M tokens over ${mins}min with no forward progress`
   return null
+}
+
+export function shouldAnnounceDeadlockNotice(
+  notices: Map<string, DeadlockNotice>,
+  issueId: string,
+  target: string,
+  reason: string,
+  now: number,
+  coalesceMs = 10 * 60_000,
+): boolean {
+  const key = `${target}\n${reason}`
+  const previous = notices.get(issueId)
+  const repeatedCapHit = reason.includes('per-ticket cap') && previous?.key === key && now - previous.at < coalesceMs
+  if (!repeatedCapHit) notices.set(issueId, { key, at: now })
+  return !repeatedCapHit
 }

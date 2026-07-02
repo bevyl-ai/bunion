@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { deadlockReason, trackProgress } from './orchestrator-deadlock'
+import { deadlockReason, shouldAnnounceDeadlockNotice, trackProgress } from './orchestrator-deadlock'
 import type { ProgressRec } from './orchestrator-state'
 import type { Issue } from './types'
 
@@ -68,6 +68,13 @@ test('hitting the hard token cap escalates straight to Factory - Needs Engineer 
   expect(r?.reason).toContain('per-ticket cap')
 })
 
+test('a multi-billion token ticket parks against the configured effective cap, not a multi-billion grant', () => {
+  const pr: ProgressRec = { since: 999, tokensAtProgress: 0, seen: new Set(['in progress']) }
+  const r = trackProgress(issue('In Progress'), 1000, pr, isActive, isTerminal, false, 6_300_000_000, 400_000_000, dl, false)
+  expect(r?.target).toBe('Factory - Needs Engineer')
+  expect(r?.reason).toContain('hit the 400M per-ticket cap')
+})
+
 // The bug this fixes: a ticket blocked by another Linear issue is dispatch-ineligible by design, so its clock must
 // never accrue "no forward progress" time — it isn't stuck, it's correctly waiting.
 test('a blocked ticket never deadlocks no matter how long it sits, and its clock keeps pinning to now', () => {
@@ -83,4 +90,19 @@ test('once unblocked, the clock starts fresh from that moment rather than readin
   // Unblocks at t=1001 — only 1ms has "elapsed" on the clock, nowhere near hardStallMs.
   const r = trackProgress(issue('In Progress'), 1001, pr, isActive, isTerminal, false, 0, 200_000_000, dl, false)
   expect(r).toBeNull()
+})
+
+test('duplicate cap-hit notices are coalesced while Linear catches up', () => {
+  const notices = new Map()
+  const reason = 'burned 6608M tokens — hit the 400M per-ticket cap'
+
+  expect(shouldAnnounceDeadlockNotice(notices, 'i1', 'Factory - Needs Engineer', reason, 1000)).toBe(true)
+  expect(shouldAnnounceDeadlockNotice(notices, 'i1', 'Factory - Needs Engineer', reason, 2000)).toBe(false)
+})
+
+test('cap-hit notice coalescing emits again when the cap-hit reason changes', () => {
+  const notices = new Map()
+
+  expect(shouldAnnounceDeadlockNotice(notices, 'i1', 'Factory - Needs Engineer', 'burned 401M tokens — hit the 400M per-ticket cap', 1000)).toBe(true)
+  expect(shouldAnnounceDeadlockNotice(notices, 'i1', 'Factory - Needs Engineer', 'burned 450M tokens — hit the 400M per-ticket cap', 2000)).toBe(true)
 })

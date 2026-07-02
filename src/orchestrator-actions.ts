@@ -1,6 +1,6 @@
 import { log } from './log'
 import { moveIssue } from './linear'
-import { norm } from './orchestrator-predicates'
+import { isActive, norm } from './orchestrator-predicates'
 import type { Dispatcher } from './orchestrator-dispatch'
 import type { Placement } from './orchestrator-placement'
 import type { RolePool } from './orchestrator-roles'
@@ -13,6 +13,8 @@ import type { Config, Issue } from './types'
 export type Actions = ReturnType<typeof createActions>
 
 export function createActions(getCfg: () => Config, state: PersistedState, placement: Placement, dispatcher: Dispatcher, roles: RolePool, mirror: TrackerMirror, summaries: Map<string, string>, notesFetched: Set<string>, getLastBoard: () => Issue[]) {
+  const mtok = (tokens: number): string => `${Math.round(tokens / 1e6)}M`
+
   // Toggle the panic switch. On pause, halt every running pipeline agent + pool role so the gateway/Linear stop being
   // hit immediately; dispatch stays off (guarded in the loop/retry/role paths) until resumed. The poll keeps running.
   const setPaused = (v: boolean): void => {
@@ -32,13 +34,18 @@ export function createActions(getCfg: () => Config, state: PersistedState, place
   // the very next poll's blast-radius check re-trips it straight back to Factory - Needs Engineer — silently discarding the
   // reopen. Call this before any move that might reopen a capped ticket; it's a no-op unless the ticket is
   // currently Factory - Needs Engineer AND genuinely over its cap (not parked there for some other reason).
-  const grantIfCapped = (identifier: string, issue: Issue): void => {
-    if (norm(issue.state) !== 'factory - needs engineer') return
-    if (grandTotal(state.tokens, identifier) < state.effectiveCap(identifier)) return
-    const inc = state.capClearIncrementFor(identifier)
-    state.ticketGrants.set(identifier, (state.ticketGrants.get(identifier) ?? 0) + inc)
-    state.saveGrants()
-    log(`action: ${identifier} budget +${Math.round(inc / 1e6)}M (auto, reopening a capped ticket)`)
+  const grantIfCapped = (identifier: string, issue: Issue, source: string, rationale: string): { ok: boolean; msg?: string } => {
+    if (norm(issue.state) !== 'factory - needs engineer') return { ok: true }
+    if (grandTotal(state.tokens, identifier) < state.effectiveCap(identifier)) return { ok: true }
+    const plan = state.capGrantPlanFor(identifier)
+    if (!plan.ok) {
+      const msg = plan.deniedReason ?? 'budget grant exceeds configured max effective token cap'
+      log(`action: ${identifier} budget denied (${source}) — ${msg}`)
+      return { ok: false, msg }
+    }
+    state.recordCapGrant(identifier, plan, source, 'dashboard-operator', rationale)
+    log(`action: ${identifier} budget +${mtok(plan.increment)} → ${mtok(plan.newCap)} cap (${source}; old ${mtok(plan.oldCap)}; ${rationale})`)
+    return { ok: true }
   }
 
   // Operator actions = pure pipeline transitions. The thread carries context (chat + prior phases), so an action just
@@ -91,14 +98,15 @@ export function createActions(getCfg: () => Config, state: PersistedState, place
     const host = placement.placement.get(issue.id) ?? state.threadRecs.get(issue.id)?.host ?? null
     try {
       if (action === 'bump') {
-        // Operator budget bump: grant enough headroom to actually clear this ticket's current deficit (plus one
-        // full cap's worth of real working room), kept cumulative — its spend is not erased. BEV re-audit: a flat
-        // +hardTokenCap used to require dozens of repeated clicks to unstick a ticket that was wildly over cap.
-        const inc = state.capClearIncrementFor(identifier)
-        state.ticketGrants.set(identifier, (state.ticketGrants.get(identifier) ?? 0) + inc)
-        state.saveGrants()
-        const cap = state.effectiveCap(identifier)
-        log(`action: ${identifier} budget +${Math.round(inc / 1e6)}M → ${Math.round(cap / 1e6)}M cap (operator)`)
+        const plan = state.capGrantPlanFor(identifier)
+        if (!plan.ok) {
+          const msg = plan.deniedReason ?? 'budget grant exceeds configured max effective token cap'
+          log(`action: ${identifier} budget denied (operator bump) — ${msg}`)
+          return { ok: false, msg }
+        }
+        const rationale = 'operator clicked budget bump to reopen a capped ticket'
+        state.recordCapGrant(identifier, plan, 'operator:bump', 'dashboard-operator', rationale)
+        log(`action: ${identifier} budget +${mtok(plan.increment)} → ${mtok(plan.newCap)} cap (operator:bump; old ${mtok(plan.oldCap)}; ${rationale})`)
         const s = norm(issue.state)
         if (s === 'factory - needs engineer' || s === 'qa - blocked') {
           // It was parked (likely by the cap) — re-open to In Progress with a fresh no-progress clock so it can use the
@@ -112,9 +120,9 @@ export function createActions(getCfg: () => Config, state: PersistedState, place
           summaries.delete(issue.identifier)
           await moveIssue(getCfg(), issue.id, 'In Progress', mirror)
           dispatcher.scheduleRetry(issue.id, issue.identifier, 1, true)
-          return { ok: true, msg: `+${Math.round(inc / 1e6)}M budget → re-opened to In Progress` }
+          return { ok: true, msg: `+${mtok(plan.increment)} budget → re-opened to In Progress` }
         }
-        return { ok: true, msg: `+${Math.round(inc / 1e6)}M budget (cap now ${Math.round(cap / 1e6)}M)` }
+        return { ok: true, msg: `+${mtok(plan.increment)} budget (cap now ${mtok(plan.newCap)})` }
       }
       if (action === 'restart') {
         dispatcher.terminate(issue.id, false)
@@ -153,7 +161,8 @@ export function createActions(getCfg: () => Config, state: PersistedState, place
       }
       if (action === 'to-qa' || action === 'to-build') {
         const target = action === 'to-qa' ? 'QA - Testing' : 'In Progress'
-        grantIfCapped(identifier, issue)
+        const grant = grantIfCapped(identifier, issue, `operator:${action}`, `operator moved capped ticket to ${target}`)
+        if (!grant.ok) return grant
         dispatcher.stopRun(issue.id) // stop the current turn but keep the pin + workspace + thread → the move resumes it
         await moveIssue(getCfg(), issue.id, target, mirror)
         notesFetched.delete(issue.id)
@@ -164,7 +173,10 @@ export function createActions(getCfg: () => Config, state: PersistedState, place
       }
       if (action.startsWith('move:')) {
         const target = action.slice('move:'.length)
-        grantIfCapped(identifier, issue)
+        if (isActive(getCfg(), target)) {
+          const grant = grantIfCapped(identifier, issue, 'operator:move', `operator moved capped ticket to ${target}`)
+          if (!grant.ok) return grant
+        }
         dispatcher.stopRun(issue.id) // stop any current turn; keep pin + workspace + thread
         await moveIssue(getCfg(), issue.id, target, mirror)
         notesFetched.delete(issue.id)

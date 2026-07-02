@@ -15,7 +15,7 @@ import { openStats } from './stats'
 import { createChat } from './orchestrator-chat'
 import { createDispatcher } from './orchestrator-dispatch'
 import { createActions } from './orchestrator-actions'
-import { trackProgress } from './orchestrator-deadlock'
+import { shouldAnnounceDeadlockNotice, trackProgress, type DeadlockNotice } from './orchestrator-deadlock'
 import { createPlacement } from './orchestrator-placement'
 import { dispatchBlocked, isActive, isRoutable, isTerminal, norm } from './orchestrator-predicates'
 import { pruneWorkspaces } from './orchestrator-prune'
@@ -57,6 +57,7 @@ export async function start(workflowPath?: string): Promise<void> {
   const summaries = new Map<string, string>() // last agent message per ticket — survives the log buffer, surfaces the human action
   const notesFetched = new Set<string>() // stuck tickets whose verdict comment we've pulled once for display
   const lastState = new Map<string, string>() // last-seen Linear state per ticket — drops a stale note on transition
+  const deadlockNotices = new Map<string, DeadlockNotice>() // coalesce duplicate cap-hit log/comment spam while Linear catches up
   const gatewayHost = new Map<string, string>() // worker host → its codex base_url's llm-integration hostname (resolved once; display-only LLM-account tracking)
   let backfilled = false // one-shot: recover unknown threads from worker rollouts on the first board
   // BEV-4025: poll health, surfaced on the dashboard — a Linear poll failure used to only `warn()` to the daemon log
@@ -225,6 +226,7 @@ export async function start(workflowPath?: string): Promise<void> {
       // from being re-dispatched below this poll — awaiting the move alone doesn't (terminate() already released the
       // claim above, and the dispatch loop's board snapshot still shows the mutated `target` state as active).
       for (const { issue, target, reason } of stuck) {
+        const announceDeadlock = shouldAnnounceDeadlockNotice(deadlockNotices, issue.id, target, reason, now)
         state.deadlocked.add(issue.id)
         state.saveDeadlocked()
         dispatcher.terminate(issue.id, false)
@@ -233,11 +235,13 @@ export async function start(workflowPath?: string): Promise<void> {
         state.saveProgress()
         lastState.set(issue.id, target)
         issue.state = target
-        log(`deadlock: ${issue.identifier} ${reason} → ${target}`)
-        stats.record({ identifier: issue.identifier, kind: reason.includes('per-ticket cap') ? 'cap' : 'deadlock', toState: target, threadId: state.threadRecs.get(issue.id)?.threadId, totalTokens: grandTotal(state.tokens, issue.identifier), account: acct(placement.placement.get(issue.id) ?? null), detail: reason })
+        if (announceDeadlock) {
+          log(`deadlock: ${issue.identifier} ${reason} → ${target}`)
+          stats.record({ identifier: issue.identifier, kind: reason.includes('per-ticket cap') ? 'cap' : 'deadlock', toState: target, threadId: state.threadRecs.get(issue.id)?.threadId, totalTokens: grandTotal(state.tokens, issue.identifier), account: acct(placement.placement.get(issue.id) ?? null), detail: reason })
+        }
         try {
           await moveIssue(cfg, issue.id, target, mirror)
-          await postComment(cfg, issue.id, `## 🔁 Auto-blocked — deadlock\nThe factory ${reason} on this ticket, so I moved it to \`${target}\` instead of looping further.${target === 'QA - blocked' ? '\n\n**Blocked phase:** if there is no concrete, fixable meta-problem here, escalate to `Factory - Needs Engineer` — do not just send it back to loop again.' : ''}`, mirror)
+          if (announceDeadlock) await postComment(cfg, issue.id, `## 🔁 Auto-blocked — deadlock\nThe factory ${reason} on this ticket, so I moved it to \`${target}\` instead of looping further.${target === 'QA - blocked' ? '\n\n**Blocked phase:** if there is no concrete, fixable meta-problem here, escalate to `Factory - Needs Engineer` — do not just send it back to loop again.' : ''}`, mirror)
         } catch (e) {
           warn(`deadlock move ${issue.identifier}: ${e instanceof Error ? e.message : String(e)}`)
         }

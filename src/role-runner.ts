@@ -5,7 +5,7 @@ import { ensureWorkspace, installSkills, removeWorkspace, runHook } from './work
 import type { AgentEvent, Config, Role, RoleQuota } from './types'
 
 export interface RoleHandle {
-  done: Promise<{ ok: boolean; error?: string }>
+  done: Promise<{ ok: boolean; error?: string | undefined }>
   stop(): void
 }
 
@@ -25,7 +25,7 @@ export function startRole(cfg: Config, role: Role, host: string | null, onEvent:
   let stopped = false
   const wsKey = roleWorkspaceKey(role.name)
 
-  const done = (async (): Promise<{ ok: boolean; error?: string }> => {
+  const done = (async (): Promise<{ ok: boolean; error?: string | undefined }> => {
     let dir = ''
     const repo = cfg.repo // pool roles operate on the default repo
     try {

@@ -139,7 +139,7 @@ export function opsReadTool(): DynamicTool {
       let res: Response
       try {
         // 30s network timeout, same as linear.ts — a hung upstream must never wedge the agent's turn.
-        res = await fetch(req.url, { method, headers: body ? { ...headers, 'content-type': 'application/json' } : headers, body, signal: AbortSignal.timeout(30_000) })
+        res = await fetch(req.url, { method, headers: body ? { ...headers, 'content-type': 'application/json' } : headers, ...(body ? { body } : {}), signal: AbortSignal.timeout(30_000) })
       } catch (e) {
         return fail(`${service}: request failed — ${e instanceof Error ? e.message : String(e)}`)
       }

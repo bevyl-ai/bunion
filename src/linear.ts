@@ -123,7 +123,7 @@ async function queryPaginated<N>(
 ): Promise<N[]> {
   const all: N[] = []
   let cursor: string | null = null
-  do {
+  for (;;) {
     const q = buildQuery(cursor)
     const data = await query<unknown>(cfg, q, { ...variables, after: cursor })
     const page = extract(data)
@@ -131,7 +131,7 @@ async function queryPaginated<N>(
     if (!page.pageInfo.hasNextPage) break
     if (!page.pageInfo.endCursor) throw new CategorizedError('linear_missing_end_cursor', 'linear gql: hasNextPage=true but endCursor missing')
     cursor = page.pageInfo.endCursor
-  } while (true)
+  }
   return all
 }
 

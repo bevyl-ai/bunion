@@ -242,7 +242,7 @@ export function createDispatcher(getCfg: () => Config, state: PersistedState, pl
     const cfg = getCfg()
     if (cfg.codex.stallTimeoutMs > 0) {
       const now = Date.now()
-      for (const [id, e] of [...running]) {
+      for (const [id, e] of running) { // safe: terminate() deletes exactly the entry being visited, which Map iterators handle correctly without a snapshot
         if (now - e.lastActivity > cfg.codex.stallTimeoutMs) {
           const next = e.retryAttempt > 0 ? e.retryAttempt + 1 : 1
           terminate(id, false)

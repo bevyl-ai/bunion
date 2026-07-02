@@ -18,7 +18,7 @@ export function createActions(getCfg: () => Config, state: PersistedState, place
   const setPaused = (v: boolean): void => {
     state.setPaused(v)
     if (v) {
-      for (const id of [...dispatcher.running.keys()]) dispatcher.stopRun(id)
+      for (const id of dispatcher.running.keys()) dispatcher.stopRun(id) // safe: stopRun deletes exactly the key being visited, which Map iterators handle correctly without a snapshot
       roles.stopAll()
       log('■ factory PAUSED by operator — dispatch off, all running agents halted')
     } else {

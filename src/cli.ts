@@ -2,6 +2,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { startAgent } from './agent-runner'
+import { LinearStore } from './linear-store'
 import { loadConfig, validateConfig } from './config'
 import { fetchById, fetchCandidates } from './linear'
 import { start } from './orchestrator'
@@ -35,7 +36,9 @@ async function main(): Promise<void> {
       validateConfig(cfg)
       const issue = await fetchById(cfg, arg)
       const host = cfg.worker.sshHosts[0] ?? null // one-shot runs on the first configured worker VM, else local
-      const outcome = await startAgent(cfg, issue, null, host, (e) => e.log && console.error(e.log), null, () => null, () => []).done
+      const oneShotStore = new LinearStore()
+      oneShotStore.hydrateBoard([issue]) // one-shot run: the store sees just this ticket, fetched fresh above
+      const outcome = await startAgent(cfg, issue, null, host, (e) => e.log && console.error(e.log), null, oneShotStore, () => []).done
       console.log(JSON.stringify(outcome, null, 2))
       process.exit(outcome.ok ? 0 : 1)
     }

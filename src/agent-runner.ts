@@ -38,6 +38,13 @@ function continuationPrompt(turn: number, maxTurns: number, state: string): stri
   return `Continuation — turn #${turn} of ${maxTurns}, same thread, same ticket. The ticket is now in \`${state}\`, so work the stage that matches that status from your original instructions. Resume from the workspace + workpad and what you've already done — don't restate or redo finished work. Keep carrying the ticket forward through its stages; stop only when it reaches a handoff state (STG - Ready to merge / Needs Engineer) or you're truly blocked.`
 }
 
+// An operator chat turn: read-only, answer from the thread's own context. Terse so it doesn't crowd the history.
+// Shared by the idle-ticket chat path (orchestrator.ts's chatTurn, a fresh session) and the mid-run path below
+// (same session, same thread, run as its own turn between continuation turns) — one prompt, one contract either way.
+export function chatPrompt(msg: string): string {
+  return `The operator is messaging you directly about this ticket, with this thread's full context. You can ACT on their steering through Linear via \`linear_graphql\`: update the \`## Codex Workpad\` and move the ticket's status. Narrate what you do plainly (e.g. "ok — recording the simpler plan in the workpad and moving this to In Progress so the build picks it up"). When their steering means the code should change, capture the concrete change in the workpad and move the ticket to \`In Progress\` — do this even if it is parked in STG - Ready to merge / QA - blocked, because that re-enters it into the pipeline and the build agent resumes THIS thread to make the edits. Do NOT edit files, run commands, or push in this turn — only Linear. If the operator is just asking a question, answer it and change nothing. Operator:\n\n${msg}`
+}
+
 // One worker session for an issue: prep workspace → run turns on a single app-server thread up to max_turns,
 // refreshing the issue between turns and continuing while it stays active. The AGENT drives Linear/git/gh/merge.
 // `host` null = run locally; else the workspace, clone, and codex all live on that ssh worker (an exe.dev VM).
@@ -102,11 +109,19 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
       const workpad = cachedWorkpad ?? (thread && thread.length < 100 ? null : await fetchWorkpad(cfg, issue.id).catch(() => null))
       for (let turn = 1; ; turn++) {
         if (stopped) return { ok: false, error: 'terminated' }
+        // Operator messages sent live while this agent was mid-turn get their OWN dedicated turn here — same
+        // session/thread (no collision, since this loop only ever has one turn in flight), same Linear tools, a
+        // real reply — not smushed into the next continuation prompt as an addendum. Doesn't count against maxTurns.
+        const pending = drainOperatorMsgs()
+        if (pending.length) {
+          onEvent({ log: '\n── operator chat ──' })
+          await session.runTurn(threadId, dir, chatPrompt(pending.join('\n\n')), `${current.identifier}: operator chat`, { type: 'readOnly' })
+          current = await fetchById(cfg, issue.id) // the chat turn may have moved state via linear_graphql
+          if (!isActive(cfg, current.state)) break // operator steering handed it off directly
+        }
         onEvent({ turn, log: `\n── turn ${turn} ──` })
         const base = turn === 1 ? renderPrompt(cfg.promptTemplate, { attempt, issue: current, workpad }) : continuationPrompt(turn, cfg.agent.maxTurns, current.state)
-        const pending = drainOperatorMsgs() // operator messages queued via chat while this agent was mid-turn
-        const prompt = pending.length ? `${base}\n\n## Operator messages — sent live while you were working; address these now\n${pending.map((m) => `- ${m}`).join('\n')}` : base
-        await session.runTurn(threadId, dir, prompt, `${current.identifier}: ${current.title}`)
+        await session.runTurn(threadId, dir, base, `${current.identifier}: ${current.title}`)
         // Deliberately a LIVE fetch, not mirrors.tracker.getIssue(): the mirror's issue cache only refreshes on the
         // ~30s poll delta and mutation write-back never touches it (applyMutation only updates comments), so it
         // could easily miss the state change THIS turn's own linear_graphql call just made — and the loop-exit

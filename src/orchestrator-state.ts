@@ -55,6 +55,27 @@ export interface ProgressRec {
   tokensAtProgress: number
   seen: Set<string>
 }
+export interface TicketGrantAuditEntry {
+  at: string
+  source: string
+  actor: string
+  oldCap: number
+  newCap: number
+  increment: number
+  rationale: string
+}
+export interface TicketGrantRecord {
+  total: number
+  audit: TicketGrantAuditEntry[]
+}
+export interface CapGrantPlan {
+  ok: boolean
+  oldCap: number
+  newCap: number
+  increment: number
+  desiredCap: number
+  deniedReason?: string
+}
 
 export function utcDay(): string {
   return new Date().toISOString().slice(0, 10)
@@ -118,14 +139,29 @@ export function createPersistedState(getCfg: () => Config, getLastBoard: () => I
   const roleLast = new Map<string, number>(Object.entries(readJson<Record<string, number>>(ROLE_LAST_FILE, {}))) // role name → last completed run (ms), persisted
   const saveRoleLast = throttledWriter(ROLE_LAST_FILE, () => Object.fromEntries(roleLast))
 
-  // Per-ticket token-budget grants (identifier → extra tokens on top of deadlock.hardTokenCap), persisted. The
-  // operator "bumps" a capped ticket to give it more headroom WITHOUT erasing its cumulative spend.
-  const ticketGrants = new Map<string, number>(Object.entries(readJson<Record<string, number>>(GRANTS_FILE, {})))
+  // Per-ticket token-budget grants, persisted. Older state was identifier → number; normalize it to the audited
+  // record shape on read so old grants still load, but every new raise records source/actor/rationale.
+  const ticketGrants = new Map<string, TicketGrantRecord>(
+    Object.entries(readJson<Record<string, unknown>>(GRANTS_FILE, {})).map(([identifier, value]) => [identifier, normalizeTicketGrantRecord(value)]),
+  )
   const saveGrants = throttledWriter(GRANTS_FILE, () => Object.fromEntries(ticketGrants))
-  const effectiveCap = (identifier: string): number => getCfg().deadlock.hardTokenCap + (ticketGrants.get(identifier) ?? 0)
-  // BEV re-audit: a flat +hardTokenCap grant is fine for a ticket just barely over cap, but USELESS for one that's
-  // wildly over it. Size the grant to actually clear the current deficit, plus one full cap's worth of headroom.
-  const capClearIncrementFor = (identifier: string): number => capClearIncrement(grandTotal(tokens, identifier), effectiveCap(identifier), getCfg().deadlock.hardTokenCap)
+  const grantTotal = (identifier: string): number => ticketGrants.get(identifier)?.total ?? 0
+  const effectiveCap = (identifier: string): number => Math.min(getCfg().deadlock.maxEffectiveTokenCap, getCfg().deadlock.hardTokenCap + grantTotal(identifier))
+  const capGrantPlanFor = (identifier: string): CapGrantPlan => planCapGrant({
+    currentTotal: grandTotal(tokens, identifier),
+    currentEffectiveCap: effectiveCap(identifier),
+    hardTokenCap: getCfg().deadlock.hardTokenCap,
+    maxEffectiveTokenCap: getCfg().deadlock.maxEffectiveTokenCap,
+  })
+  const recordCapGrant = (identifier: string, plan: CapGrantPlan, source: string, actor: string, rationale: string): void => {
+    if (!plan.ok) return
+    const rec = ticketGrants.get(identifier) ?? { total: 0, audit: [] }
+    rec.total += plan.increment
+    rec.audit.push({ at: new Date().toISOString(), source, actor, oldCap: plan.oldCap, newCap: plan.newCap, increment: plan.increment, rationale })
+    if (rec.audit.length > 50) rec.audit.splice(0, rec.audit.length - 50)
+    ticketGrants.set(identifier, rec)
+    saveGrants()
+  }
 
   let paused = readJson<{ paused: boolean }>(PAUSED_FILE, { paused: false }).paused
   const savePaused = (v: boolean): void => writeJson(PAUSED_FILE, { paused: v })
@@ -150,18 +186,68 @@ export function createPersistedState(getCfg: () => Config, getLastBoard: () => I
     deadlocked, saveDeadlocked,
     roleQuota, saveQuota, countToday, grantedToday,
     roleLast, saveRoleLast,
-    ticketGrants, saveGrants, effectiveCap, capClearIncrementFor,
+    ticketGrants, saveGrants, effectiveCap, capGrantPlanFor, recordCapGrant,
     get paused() { return paused },
     setPaused(v: boolean) { paused = v; savePaused(v) },
     rolePaused, saveRolePaused,
   }
 }
 
-// BEV re-audit: a flat +hardTokenCap grant left a wildly-over-cap ticket (e.g. one corrupted into the billions by
-// the now-fixed token-accounting bug) just as capped as before — silently. Size the grant to clear the CURRENT
-// deficit, plus one full cap's worth of real working headroom on top. Pure + exported so it's unit-testable.
-export function capClearIncrement(currentTotal: number, currentEffectiveCap: number, hardTokenCap: number): number {
-  return Math.max(0, currentTotal - currentEffectiveCap) + hardTokenCap
+function finiteNonNegative(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+export function normalizeTicketGrantRecord(value: unknown): TicketGrantRecord {
+  const numeric = finiteNonNegative(value)
+  if (numeric != null) return { total: numeric, audit: [] }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { total: 0, audit: [] }
+  const raw = value as Record<string, unknown>
+  const total = finiteNonNegative(raw.total) ?? 0
+  const audit = Array.isArray(raw.audit)
+    ? raw.audit.flatMap((entry): TicketGrantAuditEntry[] => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+        const item = entry as Record<string, unknown>
+        const oldCap = finiteNonNegative(item.oldCap)
+        const newCap = finiteNonNegative(item.newCap)
+        const increment = finiteNonNegative(item.increment)
+        if (oldCap == null || newCap == null || increment == null) return []
+        return [{
+          at: typeof item.at === 'string' ? item.at : '',
+          source: typeof item.source === 'string' ? item.source : 'unknown',
+          actor: typeof item.actor === 'string' ? item.actor : 'unknown',
+          oldCap,
+          newCap,
+          increment,
+          rationale: typeof item.rationale === 'string' ? item.rationale : '',
+        }]
+      })
+    : []
+  return { total, audit }
+}
+
+// Grants may raise a ticket above the normal hard cap, but never above the global max effective cap. If the capped
+// raise would still leave current spend at/over cap, refuse it instead of creating a silent multi-billion cap.
+export function planCapGrant(params: {
+  currentTotal: number
+  currentEffectiveCap: number
+  hardTokenCap: number
+  maxEffectiveTokenCap: number
+}): CapGrantPlan {
+  const oldCap = Math.min(params.currentEffectiveCap, params.maxEffectiveTokenCap)
+  const desiredCap = Math.max(oldCap + params.hardTokenCap, params.currentTotal + params.hardTokenCap)
+  const newCap = Math.min(desiredCap, params.maxEffectiveTokenCap)
+  const increment = Math.max(0, newCap - oldCap)
+  if (increment <= 0 || params.currentTotal >= newCap) {
+    return {
+      ok: false,
+      oldCap,
+      newCap: oldCap,
+      increment: 0,
+      desiredCap,
+      deniedReason: `current spend ${Math.round(params.currentTotal / 1e6)}M would require ${Math.round(desiredCap / 1e6)}M cap, above max ${Math.round(params.maxEffectiveTokenCap / 1e6)}M`,
+    }
+  }
+  return { ok: true, oldCap, newCap, increment, desiredCap }
 }
 
 export { flushAllPending }

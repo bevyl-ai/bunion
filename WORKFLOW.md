@@ -149,6 +149,7 @@ codex:
                                          # VM the initialize can exceed 15s, so a tight read timeout caused restart retry-storms
 deadlock:                                # auto-stop a runaway ticket — two independent triggers, both terminate the agent:
   hard_token_cap: 200000000              # ABSOLUTE per-ticket total-spend ceiling → `Factory - Needs Engineer`, no matter how much "progress" it claims (the blast-radius cap)
+  max_effective_token_cap: 400000000     # GLOBAL maximum after audited budget bumps; higher spend needs a code/config change, not a silent dashboard grant
   tokens: 20000000                       # no-progress trigger: 20M tokens with no NEW pipeline state reached (once stalled ≥ stall_ms) → `QA - blocked`, then `Factory - Needs Engineer`
   stall_ms: 1800000                      # 30min — min time with no forward progress before the token rule trips
   hard_stall_ms: 5400000                 # 90min with no forward progress → blocked regardless of token spend. 2nd deadlock → `Factory - Needs Engineer`

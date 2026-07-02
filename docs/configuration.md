@@ -109,6 +109,8 @@ Shell run in the workspace at lifecycle points (local, or over ssh on the worker
 
 | Key | Default | Notes |
 |---|---|---|
+| `hard_token_cap` | `200000000` | absolute per-ticket total-spend ceiling before the factory parks the ticket in `Factory - Needs Engineer` |
+| `max_effective_token_cap` | `hard_token_cap * 2` | maximum cap after audited budget grants; a grant that would still leave the ticket capped is refused instead of silently creating a multi-billion cap |
 | `tokens` | `20000000` | tokens burned with no new pipeline state (once stalled ≥ `stall_ms`) → block |
 | `stall_ms` | `1800000` (30 min) | min time with no forward progress before the token rule trips |
 | `hard_stall_ms` | `5400000` (90 min) | no forward progress this long → block regardless of token spend |

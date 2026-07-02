@@ -110,6 +110,8 @@ export function loadConfig(path?: string): Config {
   const wk = obj(fm.worker)
   const cx = obj(fm.codex)
   const dl = obj(fm.deadlock)
+  const hardTokenCap = num(dl.hard_token_cap, 200_000_000)
+  const maxEffectiveTokenCap = Math.max(hardTokenCap, num(dl.max_effective_token_cap, hardTokenCap * 2))
   // The factory's GitHub App identity. Requires app id + installation id + private-key path (all resolvable, usually
   // from ~/.bevyl/.env); missing any of the three → null (agents fall back to the ambient gh/git identity).
   const gh = obj(fm.github)
@@ -174,7 +176,8 @@ export function loadConfig(path?: string): Config {
       tokens: num(dl.tokens, 20_000_000), // tokens burned with no new pipeline state (within stallMs) → blocked
       stallMs: num(dl.stall_ms, 30 * 60_000), // ...with no forward progress for at least this long
       hardStallMs: num(dl.hard_stall_ms, 90 * 60_000), // OR this long with no progress, regardless of token spend
-      hardTokenCap: num(dl.hard_token_cap, 200_000_000), // absolute per-ticket total-spend ceiling → Factory - Needs Engineer, regardless of progress (blast-radius cap)
+      hardTokenCap, // absolute per-ticket total-spend ceiling → Factory - Needs Engineer, regardless of progress (blast-radius cap)
+      maxEffectiveTokenCap, // maximum effective cap after grants; prevents deficit-sized bumps from becoming multi-billion caps
     },
     dashboardPort: portRaw && Number.isFinite(Number(portRaw)) ? Number(portRaw) : null,
     boardColumns: parseColumns(obj(fm.board).columns),

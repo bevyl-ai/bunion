@@ -1090,7 +1090,15 @@ export async function start(workflowPath?: string): Promise<void> {
         }
         progress.set(i.id, pr)
         saveProgress()
-        if (isActive(i.state) && !isTerminal(i.state)) {
+        if (planBlocked(i)) {
+          // Blocked-by-another-issue is semi-terminal for the no-progress clock: it isn't dispatch-eligible (see
+          // `eligible()`), so it genuinely can't make progress — that's correct, not stuck. Keep pinning the clock
+          // to "now" every tick it stays blocked, so the moment the blocker clears it starts fresh and fair instead
+          // of instantly reading as having silently deadlocked for however long the block lasted.
+          pr.since = now
+          pr.tokensAtProgress = grandTotal(tokens, i.identifier)
+          saveProgress()
+        } else if (isActive(i.state) && !isTerminal(i.state)) {
           const total = grandTotal(tokens, i.identifier)
           const cap = effectiveCap(i.identifier)
           if (total >= cap) {

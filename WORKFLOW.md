@@ -28,8 +28,9 @@ phases:                              # display + token-accounting labels only; O
   blocked: [QA - blocked]              # BLOCKED: triage a stuck ticket — clear the meta-problem or escalate to a human
   verify_prod: [Verifying in prod]   # VERIFY:PROD: the train shipped it to prod — confirm it's live + healthy, then Done
 roles:                               # the pool — ambient agents on a clock, BESIDE the per-ticket pipeline. Each runs
-                                     # on its cadence with a persistent thread + its own model, FILING tickets (never
-                                     # fixing). Add a row to add a role; the engine is generic — nothing else changes.
+                                     # on its cadence with a persistent thread + its own model, working the tracker —
+                                     # filing or grooming tickets, never fixing code. Add a row to add a role; the
+                                     # engine is generic — nothing else changes.
   - name: mechanic
     cadence: 2h
     model: gpt-5.5                      # the gateway only serves gpt-5.5 today; gpt-5 / -codex return empty turns
@@ -72,6 +73,37 @@ roles:                               # the pool — ambient agents on a clock, B
       event names), and a hypothesis for the fix. DEDUPE first — search open issues; never re-file. Never open a PR
       or touch code — you only find + frame. High-signal only: a few real, evidenced stuck points, not micro-noise.
       If nothing is stuck, file nothing and say so.
+  - name: clerk
+    cadence: 6h                        # replaces the Mac-side bevyl-clerk-sweep (was 2×/day × ≤40 tickets); 4×/day × ≤10 keeps each single-turn run small
+    model: gpt-5.5
+    prompt: |
+      You are the factory's clerk — groom raw Linear backlog tickets (team BEV) into tasks an agent can START, and
+      keep the backlog organized. You only EDIT existing tickets: never write code or open PRs, never file new
+      tickets, never change a ticket's status. Each run:
+      1. Through linear_graphql, pick up to 10 open tickets (state type backlog/unstarted/started — never
+         completed/canceled/duplicate) that either lack the `clerk reviewed` label or whose latest `🧹 clerk
+         reviewed` marker comment is older than 14 days. If none qualify, do nothing and say so.
+      2. Gather facts per ticket before writing — verified facts only, invent nothing:
+         - Prior work: `gh pr list --search <ID> --state all`, `git log --grep <ID> --oneline`, and confirm with
+           `git merge-base --is-ancestor` whether a found commit is actually in origin/main. A ticket labeled
+           `repo:<slug>` targets another repo — run the gh checks with `-R` there instead of this checkout.
+         - The real code: rg/read this checkout for the files the ticket touches and the likely root-cause spot.
+      3. Route by what you verified:
+         - Already merged into main → **skip-stale**: leave the description alone; note the PR/commit.
+         - Can't start without a human product/design decision (the WHAT is genuinely undecided, or no root cause
+           found) → **needs-scoping**: set the description to 2-4 plain lines (the problem, where it lives, the one
+           decision needed — no options, no steps) and add the `needs-scoping` label.
+         - Startable → **write**: replace the description with a SHORT starter that only orients — one-line goal,
+           the verified root cause / where the code lives, the starting files (real paths), the method (reproduce
+           first / failing test / run the eval / manual QA), and "Done when: <observable condition>". Preserve
+           every link/id. Do NOT scope the full solution or make design decisions — if you catch yourself deciding
+           what to build, the verdict is needs-scoping.
+         On every verdict: add the `clerk reviewed` label (keep existing labels) and post a marker comment
+         `🧹 clerk reviewed — <verdict>: <one line>` — its date is what makes future runs skip the ticket.
+      4. Epic grouping is LABELS, never tickets: give each groomed ticket the one fitting label from the `Epic`
+         label group (Trends & Sounds, Editor & Timeline UX, Voiceover, …). NEVER create umbrella/parent "[Epic]"
+         tickets — the old ones were deliberately canceled (parent tickets hide their sub-issues from filtered
+         views); add a new label to the group only for a genuinely new product area.
 server:
   port: 4319                       # live status dashboard at http://localhost:4319 (or set BUNION_PORT)
 board:                               # dashboard lanes (name + colour + the states each holds), left→right. Hot-reloaded

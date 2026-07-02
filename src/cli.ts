@@ -2,6 +2,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { startAgent } from './agent-runner'
+import { GithubMirror } from './github-mirror'
 import { TrackerMirror } from './tracker-mirror'
 import { loadConfig, validateConfig } from './config'
 import { fetchById, fetchCandidates } from './linear'
@@ -36,9 +37,9 @@ async function main(): Promise<void> {
       validateConfig(cfg)
       const issue = await fetchById(cfg, arg)
       const host = cfg.worker.sshHosts[0] ?? null // one-shot runs on the first configured worker VM, else local
-      const mirror = new TrackerMirror(':memory:') // one-shot run: an ephemeral mirror seeded with just this ticket
+      const mirror = new TrackerMirror(':memory:') // one-shot run: ephemeral mirrors seeded with just this ticket
       mirror.upsertIssues([issue])
-      const outcome = await startAgent(cfg, issue, null, host, (e) => e.log && console.error(e.log), null, mirror, () => []).done
+      const outcome = await startAgent(cfg, issue, null, host, (e) => e.log && console.error(e.log), null, { tracker: mirror, github: new GithubMirror(':memory:') }, () => []).done
       console.log(JSON.stringify(outcome, null, 2))
       process.exit(outcome.ok ? 0 : 1)
     }

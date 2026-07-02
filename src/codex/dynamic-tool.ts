@@ -1,3 +1,4 @@
+import type { LinearDocument } from '@linear/sdk'
 import { fetchIssueComments, graphql } from '../linear'
 import type { TrackerMirror } from '../tracker-mirror'
 import type { Config, DynamicTool, RoleQuota } from '../types'
@@ -123,7 +124,7 @@ function inputObj(variables: Record<string, unknown>): Record<string, unknown> {
 // BEV-3973: find an OPEN (non-canceled) issue with this EXACT title in the configured team/project — so a role's
 // issueCreate can be skipped as a duplicate. Best-effort: any error returns null so a real file is never blocked.
 async function findOpenDuplicate(cfg: Config, token: string, title: string): Promise<string | null> {
-  const filter: Record<string, unknown> = { title: { eq: title }, state: { type: { neq: 'canceled' } } }
+  const filter: LinearDocument.IssueFilter = { title: { eq: title }, state: { type: { neq: 'canceled' } } }
   if (cfg.tracker.team) filter.team = { key: { eq: cfg.tracker.team } }
   if (cfg.tracker.projectSlug) filter.project = { slugId: { eq: cfg.tracker.projectSlug } }
   try {

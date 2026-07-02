@@ -5,6 +5,8 @@ import { startAgent, type AgentHandle } from './agent-runner'
 import { roleWorkspaceKey, startRole, type RoleHandle } from './role-runner'
 import { AppServerSession } from './codex/app-server'
 import { linearGraphqlTool, linearReadTool } from './codex/dynamic-tool'
+import { GithubMirror } from './github-mirror'
+import { sweepBoardPrs } from './github-sync'
 import { TrackerMirror } from './tracker-mirror'
 import { auditMirror, boardFromMirror, drainWrites, syncMirror } from './tracker-sync'
 import { loadConfig, phaseOf, validateConfig } from './config'
@@ -148,6 +150,7 @@ export async function start(workflowPath?: string): Promise<void> {
   const retries = new Map<string, RetryTimer>()
   let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
   const mirror = new TrackerMirror(join(STATE_DIR, 'mirror.db')) // the tracker spine: durable local mirror + write queue (tracker-mirror.ts); agents/dispatch/dashboard read here, not Linear
+  const ghMirror = new GithubMirror(join(STATE_DIR, 'mirror.db')) // its GitHub twin: PR snapshots for the build gate + pit freshness (github-mirror.ts)
   // BEV-4025: poll health, surfaced on the dashboard — a Linear poll failure used to only `warn()` to the daemon log
   // (operator-invisible) and silently keep `lastBoard` stale forever with no on-screen signal it was happening.
   let pollFailureStreak = 0
@@ -429,7 +432,7 @@ export async function start(workflowPath?: string): Promise<void> {
         if (rec) { threadRecs.set(issue.id, { ...rec, lastTokenBase: e.tokens }); saveThreads() } // keep the persisted seed current turn-by-turn, not just at thread-start
       }
       if (e.rateLimits) lastRateLimits = e.rateLimits // newest coding-agent rate-limit snapshot for the dashboard
-    }, threadRecs.get(issue.id)?.threadId ?? null, mirror, () => { const q = pendingChat.get(issue.id) ?? []; pendingChat.delete(issue.id); return q })
+    }, threadRecs.get(issue.id)?.threadId ?? null, { tracker: mirror, github: ghMirror }, () => { const q = pendingChat.get(issue.id) ?? []; pendingChat.delete(issue.id); return q })
     void entry.handle.done.then(async (outcome) => {
       if (running.get(issue.id) !== entry) return // already terminated by reconcile
       running.delete(issue.id)
@@ -1000,6 +1003,7 @@ export async function start(workflowPath?: string): Promise<void> {
         lastPollOkAt = Date.now()
         await drainWrites(cfg, mirror, warn) // durable orchestrator writes (deadlock moves, sweep comments) retry here
         await auditMirror(cfg, mirror, warn).catch((e) => warn(`mirror audit failed: ${e instanceof Error ? e.message : String(e)}`))
+        await sweepBoardPrs(cfg, ghMirror, board, warn) // keep board-attached PR snapshots fresh (per-PR errors logged inside)
       } catch (e) {
         pollFailureStreak++
         lastPollError = e instanceof Error ? e.message : String(e)

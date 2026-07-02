@@ -16,6 +16,8 @@
     "start": "bun src/cli.ts start"
   },
   "dependencies": {
+    "@linear/sdk": "^88.0.0",
+    "@octokit/graphql": "^9.0.3",
     "bun-plugin-tailwind": "^0.1.2",
     "liquidjs": "^10.18.0",
     "preact": "^10.29.3",

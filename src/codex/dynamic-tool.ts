@@ -1,12 +1,12 @@
 import { fetchIssueComments, graphql } from '../linear'
-import type { LinearStore } from '../linear-store'
+import type { TrackerMirror } from '../tracker-mirror'
 import type { Config, DynamicTool, RoleQuota } from '../types'
 
 // THE read path for tickets: issue state straight from the brain's LinearStore (hydrated by the 30s poll — zero API
 // cost), and the comment thread store-first (one Linear fetch per ticket, then kept current by mutation payloads +
 // TTL; see linear-store.ts). This replaces agents re-reading their ticket from Linear every turn — the demand that
 // blew the 2,500 req/h quota. linear_graphql stays for writes + genuinely uncachable reads.
-export function linearReadTool(cfg: Config, store: LinearStore): DynamicTool {
+export function linearReadTool(cfg: Config, store: TrackerMirror): DynamicTool {
   return {
     spec: {
       name: 'linear_read',
@@ -65,7 +65,7 @@ const INPUT_SCHEMA = {
 // body. This is how the agent drives Linear (state, the workpad, links). When an OAuth app token is configured, the
 // agent acts AS the app ("Bevyl Factory") and each phase's comments are stamped with its own name via createAsUser
 // ("bunion-<phase> (via Bevyl Factory)"). `phase` is the worker's current pipeline phase.
-export function linearGraphqlTool(cfg: Config, phase?: string | null, quota?: RoleQuota, store?: LinearStore): DynamicTool {
+export function linearGraphqlTool(cfg: Config, phase?: string | null, quota?: RoleQuota, store?: TrackerMirror): DynamicTool {
   const appToken = cfg.tracker.appToken
   const actorName = phase ? `bunion-${phase}` : null
   return {

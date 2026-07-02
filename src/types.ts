@@ -6,6 +6,7 @@ export interface Issue {
   description: string
   url: string
   state: string
+  stateType: string // workflow state TYPE (triage/backlog/unstarted/started/completed/canceled) — lets the mirror filter without name lists
   priority: number // 0=none, 1=urgent … 4=low
   branchName: string | null // tracker-suggested git branch for the issue (Symphony §4.1.1), null if none
   createdAt: string // ISO

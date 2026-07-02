@@ -5,10 +5,11 @@ import { startAgent, type AgentHandle } from './agent-runner'
 import { roleWorkspaceKey, startRole, type RoleHandle } from './role-runner'
 import { AppServerSession } from './codex/app-server'
 import { linearGraphqlTool, linearReadTool } from './codex/dynamic-tool'
-import { LinearStore } from './linear-store'
+import { TrackerMirror } from './tracker-mirror'
+import { auditMirror, boardFromMirror, drainWrites, syncMirror } from './tracker-sync'
 import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
-import { fetchBoard, fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, postComment, recentAuthFailures } from './linear'
+import { fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, noteFromComments, postComment, recentAuthFailures } from './linear'
 import { log, recentLogs, warn } from './log'
 import { flushAllPending, readJson, throttledWriter, writeJson } from './persist'
 import { remoteHome, sshExec } from './ssh'
@@ -146,7 +147,7 @@ export async function start(workflowPath?: string): Promise<void> {
   const claimed = new Set<string>()
   const retries = new Map<string, RetryTimer>()
   let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
-  const store = new LinearStore() // the brain's normalized tracker view — agents read from this, not from Linear (linear-store.ts)
+  const store = new TrackerMirror(join(STATE_DIR, 'mirror.db')) // the tracker spine: durable local mirror + write queue (tracker-mirror.ts); agents/dispatch/dashboard read here, not Linear
   // BEV-4025: poll health, surfaced on the dashboard — a Linear poll failure used to only `warn()` to the daemon log
   // (operator-invisible) and silently keep `lastBoard` stale forever with no on-screen signal it was happening.
   let pollFailureStreak = 0
@@ -454,8 +455,8 @@ export async function start(workflowPath?: string): Promise<void> {
         if (isSetupFailure) {
           log(`setup failure ${issue.identifier} (${code}${streak > 1 ? ` x${streak}` : ''}) → Factory - Needs Engineer`)
           try {
-            await moveIssue(cfg, issue.id, 'Factory - Needs Engineer')
-            await postComment(cfg, issue.id, `## ⚠️ Setup failure — needs operator\nThe factory cannot run this ticket: \`${code}\`${streak >= WORKER_SETUP_STREAK_LIMIT ? ` (${streak} consecutive worker-setup failures — recreating the workspace did not resolve it)` : ''}.\n\n> ${(outcome.error ?? '').slice(0, 400)}\n\nManual intervention required before it can retry.`)
+            await moveIssue(cfg, issue.id, 'Factory - Needs Engineer', store)
+            await postComment(cfg, issue.id, `## ⚠️ Setup failure — needs operator\nThe factory cannot run this ticket: \`${code}\`${streak >= WORKER_SETUP_STREAK_LIMIT ? ` (${streak} consecutive worker-setup failures — recreating the workspace did not resolve it, store)` : ''}.\n\n> ${(outcome.error ?? '').slice(0, 400)}\n\nManual intervention required before it can retry.`)
           } catch (e) {
             warn(`setup failure move ${issue.identifier}: ${e instanceof Error ? e.message : String(e)}`)
           }
@@ -732,7 +733,7 @@ export async function start(workflowPath?: string): Promise<void> {
           deadlocked.delete(issue.id) // BEV audit: a fresh no-progress clock must also clear first-offense memory, or the next deadlock skips QA-blocked triage and jumps straight to Factory - Needs Engineer
           notesFetched.delete(issue.id)
           summaries.delete(issue.identifier)
-          await moveIssue(cfg, issue.id, 'In Progress')
+          await moveIssue(cfg, issue.id, 'In Progress', store)
           scheduleRetry(issue.id, issue.identifier, 1, true)
           return { ok: true, msg: `+${Math.round(inc / 1e6)}M budget → re-opened to In Progress` }
         }
@@ -765,7 +766,7 @@ export async function start(workflowPath?: string): Promise<void> {
         saveThreads()
         progress.delete(issue.id)
         deadlocked.delete(issue.id)
-        await moveIssue(cfg, issue.id, 'Canceled')
+        await moveIssue(cfg, issue.id, 'Canceled', store)
         log(`action: ${identifier} canceled (operator) — moved to Canceled`)
         return { ok: true, msg: 'canceled — moved to Canceled' }
       }
@@ -773,7 +774,7 @@ export async function start(workflowPath?: string): Promise<void> {
         const target = action === 'to-qa' ? 'QA - Testing' : 'In Progress'
         grantIfCapped(identifier, issue)
         stopRun(issue.id) // stop the current turn but keep the pin + workspace + thread → the move resumes it
-        await moveIssue(cfg, issue.id, target)
+        await moveIssue(cfg, issue.id, target, store)
         notesFetched.delete(issue.id)
         summaries.delete(issue.identifier)
         scheduleRetry(issue.id, issue.identifier, 1, true) // continuation: re-dispatch on the pinned worker, resuming
@@ -784,7 +785,7 @@ export async function start(workflowPath?: string): Promise<void> {
         const target = action.slice('move:'.length)
         grantIfCapped(identifier, issue)
         stopRun(issue.id) // stop any current turn; keep pin + workspace + thread
-        await moveIssue(cfg, issue.id, target)
+        await moveIssue(cfg, issue.id, target, store)
         notesFetched.delete(issue.id)
         summaries.delete(issue.identifier)
         scheduleRetry(issue.id, issue.identifier, 1, true) // re-dispatch (resume) if the target is active; the poll idles/cleans up otherwise
@@ -998,10 +999,13 @@ export async function start(workflowPath?: string): Promise<void> {
       try {
         // One labeled query is the whole board (active + handed-off). For an unlabeled config, fall back to the
         // active-states query. Either way, narrow host-side to the opt-in set.
-        board = (cfg.tracker.requiredLabels.length || cfg.tracker.appActorId ? await fetchBoard(cfg) : await fetchCandidates(cfg)).filter(isRoutable)
+        await syncMirror(cfg, store, warn)
+        board = boardFromMirror(cfg, store).filter(isRoutable)
         pollFailureStreak = 0
         lastPollError = null
         lastPollOkAt = Date.now()
+        await drainWrites(cfg, store, warn) // durable orchestrator writes (deadlock moves, sweep comments) retry here
+        await auditMirror(cfg, store, warn).catch((e) => warn(`mirror audit failed: ${e instanceof Error ? e.message : String(e)}`))
       } catch (e) {
         pollFailureStreak++
         lastPollError = e instanceof Error ? e.message : String(e)
@@ -1010,7 +1014,6 @@ export async function start(workflowPath?: string): Promise<void> {
         continue
       }
       lastBoard = board
-      store.hydrateBoard(board)
       // Resolve one worker's LLM-gateway hostname per poll (cached for the daemon's life) → display-only account tracking.
       const unresolvedHost = hosts().find((h) => !gatewayHost.has(h))
       if (unresolvedHost) {
@@ -1065,7 +1068,12 @@ export async function start(workflowPath?: string): Promise<void> {
         // transcript is evicted. Covers the escalations + all the human-review gates.
         if ((s === 'qa - blocked' || s === 'factory - needs engineer' || s === 'stg - ready to merge' || s === 'qa - requested' || s === 'factory - ui review' || s === "factory - can't verify") && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
           notesFetched.add(i.id)
-          void fetchLatestNote(cfg, i.id).then((n) => n && summaries.set(i.identifier, n)).catch(() => {})
+          {
+            const cached = store.getComments(i.id)
+            const local = cached ? noteFromComments(cached.map((c) => c.body)) : null
+            if (local) summaries.set(i.identifier, local)
+            else void fetchLatestNote(cfg, i.id).then((n) => n && summaries.set(i.identifier, n)).catch(() => {})
+          }
         }
       }
       for (const id of [...progress.keys()]) if (!board.some((i) => i.id === id)) { progress.delete(id); deadlocked.delete(id); setupFailureStreaks.delete(id) }
@@ -1080,8 +1088,8 @@ export async function start(workflowPath?: string): Promise<void> {
         log(`deadlock: ${issue.identifier} ${reason} → ${target}`)
         stats.record({ identifier: issue.identifier, kind: reason.includes('per-ticket cap') ? 'cap' : 'deadlock', toState: target, threadId: threadRecs.get(issue.id)?.threadId, totalTokens: grandTotal(tokens, issue.identifier), account: acct(placement.get(issue.id) ?? null), detail: reason })
         try {
-          await moveIssue(cfg, issue.id, target)
-          await postComment(cfg, issue.id, `## 🔁 Auto-blocked — deadlock\nThe factory ${reason} on this ticket, so I moved it to \`${target}\` instead of looping further.${target === 'QA - blocked' ? '\n\n**Blocked phase:** if there is no concrete, fixable meta-problem here, escalate to `Factory - Needs Engineer` — do not just send it back to loop again.' : ''}`)
+          await moveIssue(cfg, issue.id, target, store)
+          await postComment(cfg, issue.id, `## 🔁 Auto-blocked — deadlock\nThe factory ${reason} on this ticket, so I moved it to \`${target}\` instead of looping further.${target === 'QA - blocked' ? '\n\n**Blocked phase:** if there is no concrete, fixable meta-problem here, escalate to `Factory - Needs Engineer` — do not just send it back to loop again.' : ''}`, store)
         } catch (e) {
           warn(`deadlock move ${issue.identifier}: ${e instanceof Error ? e.message : String(e)}`)
         }

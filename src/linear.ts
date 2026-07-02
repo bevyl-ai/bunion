@@ -1,4 +1,4 @@
-import type { StoredComment } from './linear-store'
+import type { StoredComment } from './tracker-mirror'
 import { CategorizedError, type Config, type Issue } from './types'
 
 export interface GraphqlResult {
@@ -39,7 +39,10 @@ export async function graphql(cfg: Config, query: string, variables: Record<stri
   try {
     res = await fetch(cfg.tracker.endpoint, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: (token ?? cfg.tracker.apiKey) ?? '' },
+      // Identity: the factory acts as ITS OWN app (appToken) for everything — poll, sync, moves, comments — so it
+      // has its own quota bucket and attribution, and is revocable without touching anyone's personal key. The
+      // personal api_key is only the fallback for setups with no app configured.
+      headers: { 'content-type': 'application/json', authorization: (token ?? cfg.tracker.appToken ?? cfg.tracker.apiKey) ?? '' },
       body: JSON.stringify({ query, variables }),
       signal: AbortSignal.timeout(30_000),
     })
@@ -128,7 +131,7 @@ interface RawIssue {
   updatedAt: string | null
   startedAt: string | null
   completedAt: string | null
-  state: { name: string }
+  state: { name: string; type: string }
   delegate: { id: string } | null
   labels: { nodes: { name: string }[] }
   inverseRelations: { nodes: { type: string; issue: { id: string; identifier: string; state: { name: string } | null } | null }[] }
@@ -136,7 +139,7 @@ interface RawIssue {
 }
 
 const ISSUE_FIELDS = `id identifier title description url priority branchName createdAt updatedAt startedAt completedAt
-  state { name }
+  state { name type }
   delegate { id }
   labels { nodes { name } }
   inverseRelations { nodes { type issue { id identifier state { name } } } }
@@ -261,20 +264,38 @@ async function resolveStateId(cfg: Config, name: string): Promise<string | null>
   return stateCache.map.get(name.trim().toLowerCase()) ?? null
 }
 
-// Move an issue to a named workflow state — drives the dashboard's quick-action buttons. Throws on an unknown state.
-export async function moveIssue(cfg: Config, issueId: string, stateName: string): Promise<void> {
-  const sid = await resolveStateId(cfg, stateName)
-  if (!sid) throw new Error(`unknown state: ${stateName}`)
-  const r = await graphql(cfg, `mutation Move($id: String!, $s: String!) { issueUpdate(id: $id, input: { stateId: $s }) { success } }`, { id: issueId, s: sid })
-  const b = r.body as { data?: { issueUpdate?: { success?: boolean } }; errors?: unknown }
-  if (!r.httpOk || (Array.isArray(b.errors) && b.errors.length) || !b.data?.issueUpdate?.success) throw new Error(`move failed: ${JSON.stringify(b.errors ?? b.data)}`)
+// A durable-write sink (the TrackerMirror's queue) — moveIssue/postComment enqueue there instead of throwing away
+// the write when Linear rejects it (rate limit, blip). Typed structurally to keep this module free of a mirror import.
+export interface WriteQueue {
+  enqueueWrite(query: string, variables: Record<string, unknown>, note?: string): void
 }
 
-// Post a comment as the operator (the personal key) — the durable record for a dashboard directive.
-export async function postComment(cfg: Config, issueId: string, body: string): Promise<void> {
-  const r = await graphql(cfg, `mutation($i: String!, $b: String!) { commentCreate(input: { issueId: $i, body: $b }) { success } }`, { i: issueId, b: body })
+const MOVE_MUTATION = `mutation Move($id: String!, $s: String!) { issueUpdate(id: $id, input: { stateId: $s }) { success } }`
+const COMMENT_MUTATION = `mutation($i: String!, $b: String!) { commentCreate(input: { issueId: $i, body: $b }) { success } }`
+
+// Move an issue to a named workflow state — drives the dashboard's quick-action buttons and the deadlock sweep.
+// With a queue: a failed move is ENQUEUED for durable retry instead of thrown away (a lost state transition is how
+// merged tickets sat in Needs Engineer for days). Without one (unknown state, no queue passed): throws as before.
+export async function moveIssue(cfg: Config, issueId: string, stateName: string, queue?: WriteQueue): Promise<void> {
+  const sid = await resolveStateId(cfg, stateName)
+  if (!sid) throw new Error(`unknown state: ${stateName}`)
+  const r = await graphql(cfg, MOVE_MUTATION, { id: issueId, s: sid })
+  const b = r.body as { data?: { issueUpdate?: { success?: boolean } }; errors?: unknown }
+  if (!r.httpOk || (Array.isArray(b.errors) && b.errors.length) || !b.data?.issueUpdate?.success) {
+    if (queue) return queue.enqueueWrite(MOVE_MUTATION, { id: issueId, s: sid }, `move ${issueId} → ${stateName}`)
+    throw new Error(`move failed: ${JSON.stringify(b.errors ?? b.data)}`)
+  }
+}
+
+// Post a comment as the operator (the personal key) — the durable record for a dashboard directive. Same queue
+// semantics as moveIssue.
+export async function postComment(cfg: Config, issueId: string, body: string, queue?: WriteQueue): Promise<void> {
+  const r = await graphql(cfg, COMMENT_MUTATION, { i: issueId, b: body })
   const d = r.body as { data?: { commentCreate?: { success?: boolean } }; errors?: unknown }
-  if (!r.httpOk || (Array.isArray(d.errors) && d.errors.length) || !d.data?.commentCreate?.success) throw new Error(`comment failed: ${JSON.stringify(d.errors ?? d.data)}`)
+  if (!r.httpOk || (Array.isArray(d.errors) && d.errors.length) || !d.data?.commentCreate?.success) {
+    if (queue) return queue.enqueueWrite(COMMENT_MUTATION, { i: issueId, b: body }, `comment on ${issueId}`)
+    throw new Error(`comment failed: ${JSON.stringify(d.errors ?? d.data)}`)
+  }
 }
 
 const cleanMd = (b: string): string =>
@@ -315,9 +336,18 @@ export async function fetchLatestNote(cfg: Config, issueId: string): Promise<str
     `query Note($id: String!) { issue(id: $id) { comments(last: 40) { nodes { body } } } }`,
     { id: issueId },
   )
-  const raw = (d.issue?.comments.nodes ?? []).map((n) => n.body).filter(Boolean)
-  const workpad = raw.find((b) => /codex workpad/i.test(b))
+  return noteFromComments((d.issue?.comments.nodes ?? []).map((n) => n.body))
+}
+
+// Pure extraction shared by fetchLatestNote and mirror-first readers (the orchestrator serves notes/workpads from
+// the TrackerMirror's hydrated threads without an API call when it can).
+export function noteFromComments(bodies: string[]): string | null {
+  const workpad = bodies.filter(Boolean).find((b) => /codex workpad/i.test(b))
   return workpad ? workpadReason(workpad) : null
+}
+
+export function workpadFromComments(bodies: string[]): string | null {
+  return bodies.filter(Boolean).find((b) => /codex workpad/i.test(b)) ?? null
 }
 
 // The agent's persistent `## Codex Workpad` comment (full body) — folded into the dispatch prompt so a fresh phase
@@ -343,6 +373,54 @@ export async function fetchIssueComments(cfg: Config, issueId: string): Promise<
   return (d.issue?.comments.nodes ?? []).map((n) => ({ id: n.id, body: n.body, createdAt: n.createdAt, author: n.user?.displayName ?? n.botActor?.name ?? null }))
 }
 
+// ── delta fetchers for the tracker mirror (tracker-sync.ts) ─────────────────────────────────────────────────────
+
+// §11.2 PAGINATION: initial mirror hydration can span many pages.
+const SYNC_ISSUES = (after: string | null) => `query Sync($filter: IssueFilter${after != null ? ', $after: String' : ''}) {
+  issues(first: 100, filter: $filter${after != null ? ', after: $after' : ''}) {
+    nodes { ${ISSUE_FIELDS} }
+    pageInfo { hasNextPage endCursor }
+  }
+}`
+
+// Initial mirror scope: everything not-yet-completed (whole live backlog) plus anything touched in the trailing
+// window (recent history for the dashboard/triage). Canceled is excluded — the mirror is operational, not archival.
+export async function fetchInitialIssues(cfg: Config, sinceISO: string): Promise<Issue[]> {
+  const filter: Record<string, unknown> = {
+    state: { type: { neq: 'canceled' } },
+    or: [{ completedAt: { null: true } }, { updatedAt: { gt: sinceISO } }],
+  }
+  if (cfg.tracker.team) filter.team = { key: { eq: cfg.tracker.team } }
+  if (cfg.tracker.projectSlug) filter.project = { slugId: { eq: cfg.tracker.projectSlug } }
+  const nodes = await queryPaginated<RawIssue>(cfg, SYNC_ISSUES, { filter }, (d) => (d as PagedIssues).issues)
+  return nodes.map(toIssue)
+}
+
+// Issues touched at/after the cursor — the steady-state poll. gte (not gt) so boundary ties are re-fetched rather
+// than missed; upserts are idempotent, so the overlap costs nothing.
+export async function fetchIssuesUpdatedSince(cfg: Config, cursorISO: string): Promise<Issue[]> {
+  const filter: Record<string, unknown> = { updatedAt: { gte: cursorISO } }
+  if (cfg.tracker.team) filter.team = { key: { eq: cfg.tracker.team } }
+  if (cfg.tracker.projectSlug) filter.project = { slugId: { eq: cfg.tracker.projectSlug } }
+  const nodes = await queryPaginated<RawIssue>(cfg, SYNC_ISSUES, { filter }, (d) => (d as PagedIssues).issues)
+  return nodes.map(toIssue)
+}
+
+// Comment deltas across the whole team — one request keeps every hydrated thread in the mirror current, which is
+// what lets agents read threads at zero API cost between writes.
+export async function fetchCommentsUpdatedSince(cfg: Config, cursorISO: string): Promise<(StoredComment & { issueId: string; updatedAt: string })[]> {
+  const filter: Record<string, unknown> = { updatedAt: { gte: cursorISO } }
+  if (cfg.tracker.team) filter.issue = { team: { key: { eq: cfg.tracker.team } } }
+  const d = await query<{ comments: { nodes: { id: string; body: string; createdAt: string; updatedAt: string; user: { displayName: string } | null; botActor: { name: string } | null; issue: { id: string } | null }[] } }>(
+    cfg,
+    `query CommentDeltas($filter: CommentFilter) { comments(first: 100, filter: $filter, orderBy: updatedAt) { nodes { id body createdAt updatedAt user { displayName } botActor { name } issue { id } } } }`,
+    { filter },
+  )
+  return d.comments.nodes
+    .filter((n) => n.issue != null)
+    .map((n) => ({ id: n.id, body: n.body, createdAt: n.createdAt, updatedAt: n.updatedAt, author: n.user?.displayName ?? n.botActor?.name ?? null, issueId: n.issue!.id }))
+}
+
 function toIssue(r: RawIssue): Issue {
   return {
     id: r.id,
@@ -351,6 +429,7 @@ function toIssue(r: RawIssue): Issue {
     description: r.description ?? '',
     url: r.url,
     state: r.state.name,
+    stateType: r.state.type ?? '',
     priority: typeof r.priority === 'number' ? r.priority : 0,
     branchName: r.branchName ?? null,
     createdAt: r.createdAt,

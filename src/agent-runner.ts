@@ -1,10 +1,10 @@
 import { AppServerSession } from './codex/app-server'
 import { phaseOf, repoFor } from './config'
 import { linearGraphqlTool, linearReadTool } from './codex/dynamic-tool'
-import type { LinearStore } from './linear-store'
+import type { TrackerMirror } from './tracker-mirror'
 import { opsReadTool } from './codex/ops-tool'
 import { waitTool } from './codex/wait-tool'
-import { fetchById, fetchWorkpad } from './linear'
+import { fetchById, fetchWorkpad, workpadFromComments } from './linear'
 import { log } from './log'
 import { configureGitBot, ensureWorkspace, installSkills, removeWorkspace, runHook } from './workspace'
 import { renderPrompt } from './workflow'
@@ -40,7 +40,7 @@ function continuationPrompt(turn: number, maxTurns: number, state: string): stri
 // One worker session for an issue: prep workspace → run turns on a single app-server thread up to max_turns,
 // refreshing the issue between turns and continuing while it stays active. The AGENT drives Linear/git/gh/merge.
 // `host` null = run locally; else the workspace, clone, and codex all live on that ssh worker (an exe.dev VM).
-export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null, store: LinearStore, drainOperatorMsgs: () => string[]): AgentHandle {
+export function startAgent(cfg: Config, issue: Issue, attempt: number | null, host: string | null, onEvent: (e: AgentEvent) => void, existingThreadId: string | null, store: TrackerMirror, drainOperatorMsgs: () => string[]): AgentHandle {
   let session: AppServerSession | null = null
   let stopped = false
 
@@ -87,7 +87,8 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
       onEvent({ threadId }) // report the resolved id so the orchestrator persists it for the next session + chat
       // Fetch the prior workpad ONCE and fold it into the dispatch prompt, so the agent starts with its notes instead
       // of spending turns + Linear reads pulling them back.
-      const workpad = await fetchWorkpad(cfg, issue.id).catch(() => null)
+      const cachedThread = store.getComments(issue.id)
+      const workpad = cachedThread ? workpadFromComments(cachedThread.map((c) => c.body)) : await fetchWorkpad(cfg, issue.id).catch(() => null)
       for (let turn = 1; ; turn++) {
         if (stopped) return { ok: false, error: 'terminated' }
         onEvent({ turn, log: `\n── turn ${turn} ──` })

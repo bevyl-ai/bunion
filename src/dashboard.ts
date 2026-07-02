@@ -18,7 +18,9 @@ async function compileTailwindCss(entrypoint: string): Promise<string> {
 }
 
 // One ticket on the board. `status`: running (an agent is on it now), retrying (waiting out a backoff/continuation),
-// or queued (an eligible candidate with no free slot/VM yet). The run-specific fields are 0/empty unless running.
+// blocked (waiting on another Linear issue — see `blockedBy`, distinct from `queued` since no free slot won't fix
+// it), queued (an eligible candidate with no free slot/VM yet), or handoff. The run-specific fields are 0/empty
+// unless running.
 export interface BoardItem {
   identifier: string
   title: string
@@ -28,7 +30,8 @@ export interface BoardItem {
   prUrl: string | null
   url: string // the Linear issue URL — the full workpad/notes are one click away
   note: string | null // the agent's last message (e.g. a QA verdict) — surfaces the human action when there's no live log
-  status: 'running' | 'retrying' | 'queued' | 'handoff' // handoff = left the active states (e.g. in QA), bunion is done with it for now
+  status: 'running' | 'retrying' | 'blocked' | 'queued' | 'handoff' // handoff = left the active states (e.g. in QA), bunion is done with it for now
+  blockedBy: { identifier: string; state: string | null }[] | null // set only when status === 'blocked'
   enteredAt: number | null // ms — Linear startedAt; the clock for total elapsed in the factory
   endedAt: number | null // ms — Linear completedAt; freezes total elapsed once merged/Done
   turn: number

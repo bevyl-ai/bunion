@@ -564,17 +564,23 @@ export async function start(workflowPath?: string): Promise<void> {
   // bounded by the workspace dirs that ACTUALLY exist and is fire-and-forget (spawn, not a sync per-terminal-ticket
   // scan), so stale dirs clear at startup without blocking the event loop.
 
-  const rankStatus = (s: BoardItem['status']): number => (s === 'running' ? 0 : s === 'retrying' ? 1 : s === 'queued' ? 2 : 3)
+  // running < retrying < blocked < queued < handoff: active work first, then things that'll dispatch soon, then
+  // things a human needs to unblock (waiting on it won't help), then things already handed off for review.
+  const rankStatus = (s: BoardItem['status']): number => (s === 'running' ? 0 : s === 'retrying' ? 1 : s === 'blocked' ? 2 : s === 'queued' ? 3 : 4)
   const snapshot = (): Snapshot => {
     const board = new Map<string, BoardItem>()
-    const base = (i: Issue): BoardItem => ({
-      identifier: i.identifier, title: i.title, state: i.state, priority: i.priority, host: placement.get(i.id) ?? null, prUrl: i.prUrl,
-      url: i.url, note: summaries.get(i.identifier) ?? null,
-      status: isActive(i.state) ? 'queued' : 'handoff',
-      enteredAt: i.startedAt ? Date.parse(i.startedAt) : null, endedAt: i.completedAt ? Date.parse(i.completedAt) : null,
-      turn: 0, activity: '', startedAt: 0, lastActivity: 0, retryAttempt: 0, retryDueAt: null,
-      tokens: phaseBreakdown(tokens, i.identifier),
-    })
+    const base = (i: Issue): BoardItem => {
+      const openBlockers = planBlocked(i) ? i.blockers.filter((b) => b.state == null || !isTerminal(b.state)) : []
+      return {
+        identifier: i.identifier, title: i.title, state: i.state, priority: i.priority, host: placement.get(i.id) ?? null, prUrl: i.prUrl,
+        url: i.url, note: summaries.get(i.identifier) ?? null,
+        status: openBlockers.length ? 'blocked' : isActive(i.state) ? 'queued' : 'handoff',
+        blockedBy: openBlockers.length ? openBlockers.map((b) => ({ identifier: b.identifier ?? '?', state: b.state })) : null,
+        enteredAt: i.startedAt ? Date.parse(i.startedAt) : null, endedAt: i.completedAt ? Date.parse(i.completedAt) : null,
+        turn: 0, activity: '', startedAt: 0, lastActivity: 0, retryAttempt: 0, retryDueAt: null,
+        tokens: phaseBreakdown(tokens, i.identifier),
+      }
+    }
     for (const c of lastBoard) board.set(c.id, base(c))
     for (const [id, r] of retries) {
       const it = board.get(id)

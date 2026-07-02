@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { capClearIncrement, deadlockReason, pruneKeepByHost, resolveTokenBase } from './orchestrator'
+import { capClearIncrement, deadlockReason, openBlockers, pruneKeepByHost, resolveTokenBase } from './orchestrator'
 import { zeroCounts } from './tokens'
 
 const dl = { tokens: 20_000_000, stallMs: 30 * 60_000, hardStallMs: 90 * 60_000 }
@@ -29,6 +29,26 @@ test('hard stall trips regardless of token spend', () => {
 
 test('exactly at the thresholds counts as deadlocked', () => {
   expect(deadlockReason(dl.tokens, dl.stallMs, dl)).not.toBeNull()
+})
+
+test('dispatch blockers remain open until their Linear state type is completed or canceled', () => {
+  const issue = {
+    blockers: [
+      { id: '1', identifier: 'BEV-1', state: 'In Progress', stateType: 'started' },
+      { id: '2', identifier: 'BEV-2', state: 'Done', stateType: 'completed' },
+      { id: '3', identifier: 'BEV-3', state: 'Canceled', stateType: 'canceled' },
+    ],
+  }
+  expect(openBlockers(issue).map((b) => b.identifier)).toEqual(['BEV-1'])
+})
+
+test('dispatch blockers with missing state type are treated as open', () => {
+  const issue = {
+    blockers: [
+      { id: '1', identifier: 'BEV-1', state: 'Done', stateType: null },
+    ],
+  }
+  expect(openBlockers(issue).map((b) => b.identifier)).toEqual(['BEV-1'])
 })
 
 // BEV audit (CRITICAL): codex reports THREAD-cumulative tokens. Resetting tokenBase to zero on every redispatch

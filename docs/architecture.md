@@ -39,7 +39,7 @@ limited to operator actions and deadlock auto-moves.
 5. **Dispatch** eligible issues in `byDispatch` order (priority → oldest → identifier) while slots and worker
    VMs are free.
 
-`eligible(i)` = active, non-terminal, carries the required labels, not plan-blocked by an open blocker, not
+`eligible(i)` = active, non-terminal, carries the required labels, not blocked by an open Linear blocker, not
 already claimed/running.
 
 ## Sessions, threads, and handoff

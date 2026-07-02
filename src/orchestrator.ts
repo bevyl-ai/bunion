@@ -337,9 +337,9 @@ export async function start(workflowPath?: string): Promise<void> {
   const isRoutable = (i: Issue): boolean =>
     (cfg.tracker.appActorId != null && i.delegateId === cfg.tracker.appActorId) ||
     cfg.tracker.requiredLabels.every((l) => i.labels.some((x) => norm(x) === l))
-  const planBlocked = (i: Issue): boolean => phaseOf(cfg, i.state) === 'plan' && i.blockers.some((b) => b.state == null || !isTerminal(b.state))
+  const dispatchBlocked = (i: Issue): boolean => openBlockers(i).length > 0
   const eligible = (i: Issue): boolean =>
-    isActive(i.state) && !isTerminal(i.state) && isRoutable(i) && !planBlocked(i) && !claimed.has(i.id) && !running.has(i.id)
+    isActive(i.state) && !isTerminal(i.state) && isRoutable(i) && !dispatchBlocked(i) && !claimed.has(i.id) && !running.has(i.id)
   // Per-state concurrency (Symphony §8.2/§8.3): an issue in state S is dispatch-eligible only if fewer than
   // max_concurrent_agents_by_state[S] agents are already running on issues in S (counted by their CURRENT state). No
   // entry for S = no per-state limit (the global cap is the only ceiling). Bounds an expensive stage's blast radius —
@@ -1090,7 +1090,7 @@ export async function start(workflowPath?: string): Promise<void> {
         }
         progress.set(i.id, pr)
         saveProgress()
-        if (planBlocked(i)) {
+        if (dispatchBlocked(i)) {
           // Blocked-by-another-issue is semi-terminal for the no-progress clock: it isn't dispatch-eligible (see
           // `eligible()`), so it genuinely can't make progress — that's correct, not stuck. Keep pinning the clock
           // to "now" every tick it stays blocked, so the moment the blocker clears it starts fresh and fair instead
@@ -1176,6 +1176,13 @@ export function deadlockReason(tokensSinceProgress: number, msSinceProgress: num
   if (tokensSinceProgress >= dl.tokens && msSinceProgress >= dl.stallMs)
     return `burned ${(tokensSinceProgress / 1e6).toFixed(0)}M tokens over ${mins}min with no forward progress`
   return null
+}
+
+export function openBlockers(issue: Pick<Issue, 'blockers'>): Issue['blockers'] {
+  return issue.blockers.filter((b) => {
+    const t = b.stateType?.trim().toLowerCase()
+    return t !== 'completed' && t !== 'canceled'
+  })
 }
 
 // An operator chat turn for a pool role — same read-only contract, framed as steering the role's standing focus.

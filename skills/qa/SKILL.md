@@ -1,6 +1,6 @@
 ---
 name: qa
-description:
+description: >-
   Independently verify a PR against its acceptance criteria — the review/QA pass
   (status QA - Testing). Drive a real browser step by step with browser.mjs
   (open, snapshot, click, screenshot) to reproduce a bug and PROVE the fix with

@@ -36,6 +36,7 @@ export function Header({
   const running = items.filter((r) => r.status === 'running').length
   const queued = items.filter((r) => r.status === 'queued').length
   const retrying = items.filter((r) => r.status === 'retrying').length
+  const blocked = items.filter((r) => r.status === 'blocked').length
   const sr = snap.secondsRunning || 0
   const srH = Math.floor(sr / 3600)
   const srM = Math.floor((sr % 3600) / 60)
@@ -66,6 +67,12 @@ export function Header({
           <span class="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surf px-2.5 py-1 text-xs shadow-[var(--sh1)]">
             <i class="h-[7px] w-[7px] rounded-full bg-warn" />
             {retrying} retrying
+          </span>
+        )}
+        {blocked > 0 && (
+          <span class="inline-flex items-center gap-1.5 rounded-lg border border-line bg-surf px-2.5 py-1 text-xs shadow-[var(--sh1)]" title="waiting on another ticket to finish — not a capacity issue">
+            <i class="h-[7px] w-[7px] rounded-full bg-warn" />
+            {blocked} blocked
           </span>
         )}
         <span class="self-center text-xs text-mut">{snap.cap || 0} slots</span>

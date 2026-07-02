@@ -24,7 +24,8 @@ export interface BoardItem {
   prUrl: string | null
   url: string
   note: string | null
-  status: 'running' | 'retrying' | 'queued' | 'handoff'
+  status: 'running' | 'retrying' | 'blocked' | 'queued' | 'handoff'
+  blockedBy: { identifier: string; state: string | null }[] | null
   enteredAt: number | null
   endedAt: number | null
   turn: number

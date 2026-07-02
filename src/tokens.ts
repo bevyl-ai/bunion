@@ -59,6 +59,15 @@ export function totals(tally: TokenTally): { total: number; input: number; outpu
   return sum
 }
 
+// BEV audit: codex reports THREAD-cumulative tokens — a session that truly RESUMES an existing thread reports the
+// full history-to-date on its first turn, not a fresh count. Pure decision, extracted so the fix is unit-testable:
+// seed from the persisted last-folded total ONLY if this session landed on the thread we intended to resume — a
+// failed resume falls back to a genuinely fresh thread, whose cumulative truly starts near 0, so seeding it with
+// the OLD thread's total would make the very first delta go negative.
+export function resolveTokenBase(landedThreadId: string, resumingThreadId: string | null, priorTokenBase: TokenCounts | null): TokenCounts {
+  return landedThreadId === resumingThreadId && priorTokenBase ? priorTokenBase : zeroCounts()
+}
+
 // API-equivalent $ at ~GPT-5.5 rates ($ per 1M tokens) — uncached input + output are the cost, cached input is cheap.
 // Actual spend is the flat $200/mo ChatGPT Pro plan, so apiCost is the value extracted (not what's paid); planCost
 // prices the same compute at the plan's effective rate (~$200 per ~$14k of API-equivalent the plan is worth if fully

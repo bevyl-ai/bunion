@@ -65,6 +65,15 @@ export function StatusBadge({ item }: { item: BoardItem }) {
     )
   }
 
+  if (r.status === 'blocked') {
+    const names = (r.blockedBy || []).map((b) => b.identifier).join(', ')
+    return (
+      <span class="ag inline-flex items-center gap-1.5 text-[11.5px] whitespace-nowrap text-warn" title={names ? `waiting on ${names} to finish` : undefined}>
+        ⛔ blocked on {names || 'another ticket'}
+      </span>
+    )
+  }
+
   if (r.status === 'handoff')
     return <span class="ag inline-flex items-center gap-1.5 text-mut text-[11.5px] whitespace-nowrap">✔ in review</span>
   return <span class="ag inline-flex items-center gap-1.5 text-mut text-[11.5px] whitespace-nowrap">⏳ queued</span>

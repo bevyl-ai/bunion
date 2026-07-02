@@ -61,7 +61,24 @@ export async function graphql(cfg: Config, query: string, variables: Record<stri
     if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) throw new CategorizedError('linear_api_request', 'linear: request timed out during body read')
     body = { errors: [{ message: `linear: non-JSON response (${res.status})` }] }
   }
+  // Linear wraps hourly-quota rejections in HTTP **400** — the 429 only appears inside the error body
+  // (extensions.code=RATELIMITED, http.status 400). Status-based backoff alone misses them, so the daemon kept
+  // firing at full pace, burning the 2,500 req/h quota on requests that all failed (the 2026-07-02 death spiral).
+  // Detect it in the body and cool down HARD: the quota window is an hour, so a 429-style minute just reschedules
+  // the same failure — 5 min per hit quiets the gate without parking the daemon for the whole window.
+  if (isRateLimited(body)) cooldownUntil = Math.max(cooldownUntil, Date.now() + 5 * 60_000)
   return { body, httpOk: res.ok, status: res.status }
+}
+
+// True when a GraphQL error body carries Linear's RATELIMITED marker (extensions.code or extensions.type),
+// whatever the outer HTTP status was.
+export function isRateLimited(body: unknown): boolean {
+  const errs = (body as { errors?: unknown })?.errors
+  if (!Array.isArray(errs)) return false
+  return errs.some((e) => {
+    const ext = (e as { extensions?: { code?: unknown; type?: unknown } })?.extensions
+    return ext?.code === 'RATELIMITED' || ext?.type === 'ratelimited'
+  })
 }
 
 async function query<T>(cfg: Config, q: string, variables: Record<string, unknown>): Promise<T> {

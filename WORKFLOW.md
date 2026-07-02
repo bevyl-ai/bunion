@@ -14,15 +14,13 @@ tracker:
   kind: linear
   team: $LINEAR_TEAM                 # team key (e.g. BEV); or use project_slug to scope to one project
   api_key: $LINEAR_API_KEY
-  min_request_gap_ms: 500            # safety net only — the LinearStore serves agent reads brain-side (linear-store.ts), so steady-state Linear traffic is writes + one poll; the RATELIMITED body cooldown (linear.ts) is the backstop.
+  min_request_gap_ms: 500            # safety net only — the tracker mirror (tracker-mirror.ts) serves all reads brain-side, so steady-state Linear traffic is two delta requests per poll + writes; the RATELIMITED body cooldown (linear.ts) is the backstop.
   required_labels: [dark-factory]    # opt-in: tickets carrying this label enter the factory
   app_actor_id: 438143c9-a37d-48c5-8e37-259d15f9cde7   # the factory's Linear app actor (Bevyl Factory) — a ticket DELEGATED to it also opts in (OR with required_labels). Assign in Linear: it sets `delegate`, not `assignee`.
   active_states: [Triage, Backlog, Todo, In Progress, QA - Testing, QA - blocked, Verifying in prod]   # NOT active (humans / the train move these): STG - Ready to merge, STG - Merged, Factory - Needs Engineer, and the human-review gates QA - Requested / Factory - UI review / Factory - can't verify
   terminal_states: [Done, Canceled, Cancelled, Duplicate, Factory - Needs Engineer]   # Factory - Needs Engineer = the factory stops + a person must decide
 polling:
   interval_ms: 30000              # poll every 30s (was 10s): 3x fewer Linear reads; the dashboard stays plenty fresh
-  # tracker.min_request_gap_ms (default 250) paces EVERY Linear request — orchestrator reads + the agents' linear_graphql
-  # tool all funnel through one gate, so we never hammer Linear into a rate-limit/abuse revocation again.
 phases:                              # display + token-accounting labels only; ONE agent owns a ticket across them — crossing a phase is NOT a handoff
   plan: [Triage, Backlog, Todo]      # PLAN (clerk pass): any labeled ticket enters here — Todo isn't special
   build: [In Progress]               # BUILD: implement + PR + stupify review loop

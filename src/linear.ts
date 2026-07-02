@@ -167,14 +167,6 @@ const BOARD = (after: string | null) => `query Board($filter: IssueFilter${after
 
 const BY_KEY = `query ByKey($id: String!) { issue(id: $id) { ${ISSUE_FIELDS} } }`
 
-// §11.2 PAGINATION: startup terminal cleanup can return many tickets.
-const BY_STATES = (after: string | null) => `query ByStates($filter: IssueFilter${after != null ? ', $after: String' : ''}) {
-  issues(first: 100, filter: $filter${after != null ? ', after: $after' : ''}) {
-    nodes { ${ISSUE_FIELDS} }
-    pageInfo { hasNextPage endCursor }
-  }
-}`
-
 type PagedIssues = { issues: { nodes: RawIssue[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } }
 
 export async function fetchCandidates(cfg: Config): Promise<Issue[]> {
@@ -229,22 +221,6 @@ export async function fetchById(cfg: Config, key: string): Promise<Issue> {
   const d = await query<{ issue: RawIssue | null }>(cfg, BY_KEY, { id: key })
   if (!d.issue) throw new Error(`issue ${key} not found`)
   return toIssue(d.issue)
-}
-
-// Issues currently in any of the given workflow states, scoped to the configured team/project. Used at startup to
-// find terminal-state tickets whose workspaces should be pruned (Symphony §8.6 startup cleanup / §11.1).
-export async function fetchIssuesByStates(cfg: Config, stateNames: string[]): Promise<Issue[]> {
-  if (stateNames.length === 0) return []
-  const filter: Record<string, unknown> = { state: { name: { in: stateNames } } }
-  if (cfg.tracker.team) filter.team = { key: { eq: cfg.tracker.team } }
-  if (cfg.tracker.projectSlug) filter.project = { slugId: { eq: cfg.tracker.projectSlug } }
-  const nodes = await queryPaginated<RawIssue>(
-    cfg,
-    BY_STATES,
-    { filter },
-    (d) => (d as PagedIssues).issues,
-  )
-  return nodes.map(toIssue)
 }
 
 // --- mutations + extra reads for dashboard action buttons ---
@@ -355,7 +331,7 @@ export function workpadFromComments(bodies: string[]): string | null {
 export async function fetchWorkpad(cfg: Config, issueId: string): Promise<string | null> {
   const d = await query<{ issue: { comments: { nodes: { body: string }[] } } | null }>(
     cfg,
-    `query Workpad($id: String!) { issue(id: $id) { comments(last: 10) { nodes { body } } } }`,
+    `query Workpad($id: String!) { issue(id: $id) { comments(last: 40) { nodes { body } } } }`,
     { id: issueId },
   )
   const bodies = (d.issue?.comments.nodes ?? []).map((n) => n.body).filter(Boolean)
@@ -367,7 +343,7 @@ export async function fetchWorkpad(cfg: Config, issueId: string): Promise<string
 export async function fetchIssueComments(cfg: Config, issueId: string): Promise<StoredComment[]> {
   const d = await query<{ issue: { comments: { nodes: { id: string; body: string; createdAt: string; user: { displayName: string } | null; botActor: { name: string } | null }[] } } | null }>(
     cfg,
-    `query Thread($id: String!) { issue(id: $id) { comments(last: 60) { nodes { id body createdAt user { displayName } botActor { name } } } } }`,
+    `query Thread($id: String!) { issue(id: $id) { comments(last: 100) { nodes { id body createdAt user { displayName } botActor { name } } } } }`,
     { id: issueId },
   )
   return (d.issue?.comments.nodes ?? []).map((n) => ({ id: n.id, body: n.body, createdAt: n.createdAt, author: n.user?.displayName ?? n.botActor?.name ?? null }))
@@ -408,15 +384,20 @@ export async function fetchIssuesUpdatedSince(cfg: Config, cursorISO: string): P
 
 // Comment deltas across the whole team — one request keeps every hydrated thread in the mirror current, which is
 // what lets agents read threads at zero API cost between writes.
+const COMMENT_DELTAS = (after: string | null) => `query CommentDeltas($filter: CommentFilter${after != null ? ', $after: String' : ''}) {
+  comments(first: 100, filter: $filter${after != null ? ', after: $after' : ''}) {
+    nodes { id body createdAt updatedAt user { displayName } botActor { name } issue { id } }
+    pageInfo { hasNextPage endCursor }
+  }
+}`
+
+type RawCommentDelta = { id: string; body: string; createdAt: string; updatedAt: string; user: { displayName: string } | null; botActor: { name: string } | null; issue: { id: string } | null }
+
 export async function fetchCommentsUpdatedSince(cfg: Config, cursorISO: string): Promise<(StoredComment & { issueId: string; updatedAt: string })[]> {
   const filter: Record<string, unknown> = { updatedAt: { gte: cursorISO } }
   if (cfg.tracker.team) filter.issue = { team: { key: { eq: cfg.tracker.team } } }
-  const d = await query<{ comments: { nodes: { id: string; body: string; createdAt: string; updatedAt: string; user: { displayName: string } | null; botActor: { name: string } | null; issue: { id: string } | null }[] } }>(
-    cfg,
-    `query CommentDeltas($filter: CommentFilter) { comments(first: 100, filter: $filter, orderBy: updatedAt) { nodes { id body createdAt updatedAt user { displayName } botActor { name } issue { id } } } }`,
-    { filter },
-  )
-  return d.comments.nodes
+  const nodes = await queryPaginated<RawCommentDelta>(cfg, COMMENT_DELTAS, { filter }, (d) => (d as { comments: { nodes: RawCommentDelta[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } }).comments)
+  return nodes
     .filter((n) => n.issue != null)
     .map((n) => ({ id: n.id, body: n.body, createdAt: n.createdAt, updatedAt: n.updatedAt, author: n.user?.displayName ?? n.botActor?.name ?? null, issueId: n.issue!.id }))
 }

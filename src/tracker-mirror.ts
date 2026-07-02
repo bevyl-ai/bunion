@@ -65,11 +65,6 @@ export class TrackerMirror {
     tx(issues)
   }
 
-  // Poll-compatible alias so the tool/wiring surface matches the previous in-memory store.
-  hydrateBoard(issues: Issue[]): void {
-    this.upsertIssues(issues)
-  }
-
   getIssue(idOrIdentifier: string): Issue | null {
     const row = this.db.query('SELECT data FROM issues WHERE id = ?1 OR identifier = ?1').get(idOrIdentifier) as { data: string } | null
     return row ? (JSON.parse(row.data) as Issue) : null
@@ -140,7 +135,10 @@ export class TrackerMirror {
     }
     const mentioned = `${query} ${JSON.stringify(variables)}`.match(UUID_RE)
     if (mentioned) for (const id of mentioned) this.invalidateComments(id)
-    else this.db.run('DELETE FROM comment_sync')
+    else {
+      this.db.run('DELETE FROM comment_sync')
+      this.db.run('DELETE FROM comments') // rows are unreachable without their sync flag — drop them too
+    }
   }
 
   invalidateComments(issueId: string): void {

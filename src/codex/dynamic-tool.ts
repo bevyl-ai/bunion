@@ -2,16 +2,16 @@ import { fetchIssueComments, graphql } from '../linear'
 import type { TrackerMirror } from '../tracker-mirror'
 import type { Config, DynamicTool, RoleQuota } from '../types'
 
-// THE read path for tickets: issue state straight from the brain's LinearStore (hydrated by the 30s poll — zero API
-// cost), and the comment thread store-first (one Linear fetch per ticket, then kept current by mutation payloads +
-// TTL; see linear-store.ts). This replaces agents re-reading their ticket from Linear every turn — the demand that
-// blew the 2,500 req/h quota. linear_graphql stays for writes + genuinely uncachable reads.
-export function linearReadTool(cfg: Config, store: TrackerMirror): DynamicTool {
+// THE read path for tickets, served from the brain's TrackerMirror (tracker-mirror.ts): issues arrive via the
+// delta sync at zero marginal API cost; a comment thread is fetched from Linear once, then kept current by comment
+// deltas + mutation write-back. This replaces agents re-reading their ticket from Linear every turn — the demand
+// that blew the 2,500 req/h quota. linear_graphql stays for writes + queries the mirror can't answer.
+export function linearReadTool(cfg: Config, mirror: TrackerMirror): DynamicTool {
   return {
     spec: {
       name: 'linear_read',
       description:
-        "Read a ticket from the brain's live tracker store — state, title, description, labels, priority, blockers, PR url, and (with comments:true) the full comment thread. Fresh to within seconds and costs ~zero API. Input: { identifier, comments? }. ALWAYS read tickets with this; use linear_graphql ONLY for writes and for queries this cannot answer.",
+        "Read a ticket from the brain's live tracker store — state, title, description, labels, priority, blockers, PR url, and (with comments:true) the full comment thread. Fresh to within one sync pass (~30s); your OWN writes appear immediately. Costs ~zero API. Input: { identifier, comments? }. ALWAYS read tickets with this; use linear_graphql ONLY for writes and for queries this cannot answer.",
       inputSchema: {
         type: 'object',
         additionalProperties: false,
@@ -26,15 +26,15 @@ export function linearReadTool(cfg: Config, store: TrackerMirror): DynamicTool {
       const a = args && typeof args === 'object' && !Array.isArray(args) ? (args as Record<string, unknown>) : {}
       const id = (typeof a.identifier === 'string' ? a.identifier : typeof args === 'string' ? args : '').trim()
       if (!id) return fail('missing_identifier')
-      const issue = store.getIssue(id)
-      if (!issue) return fail(`not_cached: ${id} is not on the current board — use linear_graphql for a fresh read.`)
+      const issue = mirror.getIssue(id)
+      if (!issue) return fail(`not_in_mirror: ${id} is unknown to the tracker mirror (wrong identifier, or older than its 60-day window) — use linear_graphql for a fresh read.`)
       const out: Record<string, unknown> = { identifier: issue.identifier, state: issue.state, title: issue.title, description: issue.description, labels: issue.labels, priority: issue.priority, blockers: issue.blockers, prUrl: issue.prUrl, url: issue.url }
       if (a.comments === true) {
-        let thread = store.getComments(issue.id)
+        let thread = mirror.getComments(issue.id)
         if (thread == null) {
           try {
             thread = await fetchIssueComments(cfg, issue.id)
-            store.setComments(issue.id, thread)
+            mirror.setComments(issue.id, thread)
           } catch (e) {
             return fail(`comments_unavailable: ${e instanceof Error ? e.message : String(e)}`)
           }
@@ -65,7 +65,7 @@ const INPUT_SCHEMA = {
 // body. This is how the agent drives Linear (state, the workpad, links). When an OAuth app token is configured, the
 // agent acts AS the app ("Bevyl Factory") and each phase's comments are stamped with its own name via createAsUser
 // ("bunion-<phase> (via Bevyl Factory)"). `phase` is the worker's current pipeline phase.
-export function linearGraphqlTool(cfg: Config, phase?: string | null, quota?: RoleQuota, store?: TrackerMirror): DynamicTool {
+export function linearGraphqlTool(cfg: Config, phase?: string | null, quota?: RoleQuota, mirror?: TrackerMirror): DynamicTool {
   const appToken = cfg.tracker.appToken
   const actorName = phase ? `bunion-${phase}` : null
   return {
@@ -106,7 +106,7 @@ export function linearGraphqlTool(cfg: Config, phase?: string | null, quota?: Ro
           if (!ic || ic.success !== false) quota.record() // count the filed ticket toward today's total
         }
         // Feed successful mutations back into the store (Apollo-style) so linear_read stays current without refetching.
-        if (success && store && /\bmutation\b/i.test(query)) store.applyMutation(query, variables, r.body)
+        if (success && mirror && /\bmutation\b/i.test(query)) mirror.applyMutation(query, variables, r.body)
         return { success, output: JSON.stringify(r.body, null, 2) }
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e))

@@ -46,9 +46,9 @@ export interface RateLimits {
 export interface TrackerConfig {
   kind: string
   endpoint: string
-  apiKey: string | null
-  appToken: string | null // OAuth actor=app token: the AGENT posts/edits through this so it acts as the app, with a
-  // per-phase name via createAsUser. The orchestrator's own reads/operator-actions keep using apiKey (the operator).
+  apiKey: string | null // personal key — FALLBACK only, for setups with no app token configured
+  appToken: string | null // OAuth actor=app token — the factory's DEFAULT identity for all Linear traffic (poll,
+  // sync, moves, comments, agents; per-phase comment names via createAsUser): its own quota bucket, revocable.
   projectSlug: string | null // scope to one project, OR
   team: string | null // scope to a whole team (key, e.g. BEV) — pair with required_labels for opt-in
   appActorId: string | null // the app's own actor id: a ticket delegated to it opts in, alongside required_labels (OR)

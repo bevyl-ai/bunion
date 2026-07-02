@@ -9,7 +9,7 @@ import { TrackerMirror } from './tracker-mirror'
 import { auditMirror, boardFromMirror, drainWrites, syncMirror } from './tracker-sync'
 import { loadConfig, phaseOf, validateConfig } from './config'
 import { startDashboard, type BoardItem, type Snapshot } from './dashboard'
-import { fetchCandidates, fetchLatestNote, fetchStatesByIds, moveIssue, noteFromComments, postComment, recentAuthFailures } from './linear'
+import { fetchLatestNote, fetchStatesByIds, moveIssue, noteFromComments, postComment, recentAuthFailures } from './linear'
 import { log, recentLogs, warn } from './log'
 import { flushAllPending, readJson, throttledWriter, writeJson } from './persist'
 import { remoteHome, sshExec } from './ssh'
@@ -147,7 +147,7 @@ export async function start(workflowPath?: string): Promise<void> {
   const claimed = new Set<string>()
   const retries = new Map<string, RetryTimer>()
   let lastBoard: Issue[] = [] // every non-terminal labeled ticket from the last poll — the whole board, not just running
-  const store = new TrackerMirror(join(STATE_DIR, 'mirror.db')) // the tracker spine: durable local mirror + write queue (tracker-mirror.ts); agents/dispatch/dashboard read here, not Linear
+  const mirror = new TrackerMirror(join(STATE_DIR, 'mirror.db')) // the tracker spine: durable local mirror + write queue (tracker-mirror.ts); agents/dispatch/dashboard read here, not Linear
   // BEV-4025: poll health, surfaced on the dashboard — a Linear poll failure used to only `warn()` to the daemon log
   // (operator-invisible) and silently keep `lastBoard` stale forever with no on-screen signal it was happening.
   let pollFailureStreak = 0
@@ -429,7 +429,7 @@ export async function start(workflowPath?: string): Promise<void> {
         if (rec) { threadRecs.set(issue.id, { ...rec, lastTokenBase: e.tokens }); saveThreads() } // keep the persisted seed current turn-by-turn, not just at thread-start
       }
       if (e.rateLimits) lastRateLimits = e.rateLimits // newest coding-agent rate-limit snapshot for the dashboard
-    }, threadRecs.get(issue.id)?.threadId ?? null, store, () => { const q = pendingChat.get(issue.id) ?? []; pendingChat.delete(issue.id); return q })
+    }, threadRecs.get(issue.id)?.threadId ?? null, mirror, () => { const q = pendingChat.get(issue.id) ?? []; pendingChat.delete(issue.id); return q })
     void entry.handle.done.then(async (outcome) => {
       if (running.get(issue.id) !== entry) return // already terminated by reconcile
       running.delete(issue.id)
@@ -455,8 +455,8 @@ export async function start(workflowPath?: string): Promise<void> {
         if (isSetupFailure) {
           log(`setup failure ${issue.identifier} (${code}${streak > 1 ? ` x${streak}` : ''}) → Factory - Needs Engineer`)
           try {
-            await moveIssue(cfg, issue.id, 'Factory - Needs Engineer', store)
-            await postComment(cfg, issue.id, `## ⚠️ Setup failure — needs operator\nThe factory cannot run this ticket: \`${code}\`${streak >= WORKER_SETUP_STREAK_LIMIT ? ` (${streak} consecutive worker-setup failures — recreating the workspace did not resolve it, store)` : ''}.\n\n> ${(outcome.error ?? '').slice(0, 400)}\n\nManual intervention required before it can retry.`)
+            await moveIssue(cfg, issue.id, 'Factory - Needs Engineer', mirror)
+            await postComment(cfg, issue.id, `## ⚠️ Setup failure — needs operator\nThe factory cannot run this ticket: \`${code}\`${streak >= WORKER_SETUP_STREAK_LIMIT ? ` (${streak} consecutive worker-setup failures — recreating the workspace did not resolve it)` : ''}.\n\n> ${(outcome.error ?? '').slice(0, 400)}\n\nManual intervention required before it can retry.`, mirror)
           } catch (e) {
             warn(`setup failure move ${issue.identifier}: ${e instanceof Error ? e.message : String(e)}`)
           }
@@ -477,14 +477,8 @@ export async function start(workflowPath?: string): Promise<void> {
       claimed.delete(id) // panic switch: drop the claim (keep the pin, like stopRun) so the main loop re-dispatches on resume
       return
     }
-    let candidates: Issue[]
-    try {
-      candidates = await fetchCandidates(cfg)
-    } catch {
-      scheduleRetry(id, identifier, attempt + 1, false)
-      return
-    }
-    const issue = candidates.find((i) => i.id === id)
+    // The mirror is the same freshness the main dispatch loop acts on — no network read needed here.
+    const issue = mirror.getIssue(id)
     if (!issue) return release(id)
     if (isTerminal(issue.state)) {
       removeWorkspace(cfg, issue.identifier, placement.get(id) ?? null)
@@ -663,7 +657,7 @@ export async function start(workflowPath?: string): Promise<void> {
     const rec = threadRecs.get(issue.id)
     if (!rec?.threadId) return { ok: false, msg: 'no thread yet — this ticket has not run' }
     // First-class ticket chat: give it the Linear tools so it can move state + update the workpad on the operator's steering.
-    return chatTurn(identifier, rec.threadId, placement.get(issue.id) ?? rec.host, msg, chatPrompt(msg), `${identifier}: operator chat`, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state), undefined, store), linearReadTool(cfg, store)])
+    return chatTurn(identifier, rec.threadId, placement.get(issue.id) ?? rec.host, msg, chatPrompt(msg), `${identifier}: operator chat`, [linearGraphqlTool(cfg, phaseOf(cfg, issue.state), undefined, mirror), linearReadTool(cfg, mirror)])
   }
 
   // Operator actions = pure pipeline transitions. The thread carries context (chat + prior phases), so an action just
@@ -733,7 +727,7 @@ export async function start(workflowPath?: string): Promise<void> {
           deadlocked.delete(issue.id) // BEV audit: a fresh no-progress clock must also clear first-offense memory, or the next deadlock skips QA-blocked triage and jumps straight to Factory - Needs Engineer
           notesFetched.delete(issue.id)
           summaries.delete(issue.identifier)
-          await moveIssue(cfg, issue.id, 'In Progress', store)
+          await moveIssue(cfg, issue.id, 'In Progress', mirror)
           scheduleRetry(issue.id, issue.identifier, 1, true)
           return { ok: true, msg: `+${Math.round(inc / 1e6)}M budget → re-opened to In Progress` }
         }
@@ -766,7 +760,7 @@ export async function start(workflowPath?: string): Promise<void> {
         saveThreads()
         progress.delete(issue.id)
         deadlocked.delete(issue.id)
-        await moveIssue(cfg, issue.id, 'Canceled', store)
+        await moveIssue(cfg, issue.id, 'Canceled', mirror)
         log(`action: ${identifier} canceled (operator) — moved to Canceled`)
         return { ok: true, msg: 'canceled — moved to Canceled' }
       }
@@ -774,7 +768,7 @@ export async function start(workflowPath?: string): Promise<void> {
         const target = action === 'to-qa' ? 'QA - Testing' : 'In Progress'
         grantIfCapped(identifier, issue)
         stopRun(issue.id) // stop the current turn but keep the pin + workspace + thread → the move resumes it
-        await moveIssue(cfg, issue.id, target, store)
+        await moveIssue(cfg, issue.id, target, mirror)
         notesFetched.delete(issue.id)
         summaries.delete(issue.identifier)
         scheduleRetry(issue.id, issue.identifier, 1, true) // continuation: re-dispatch on the pinned worker, resuming
@@ -785,7 +779,7 @@ export async function start(workflowPath?: string): Promise<void> {
         const target = action.slice('move:'.length)
         grantIfCapped(identifier, issue)
         stopRun(issue.id) // stop any current turn; keep pin + workspace + thread
-        await moveIssue(cfg, issue.id, target, store)
+        await moveIssue(cfg, issue.id, target, mirror)
         notesFetched.delete(issue.id)
         summaries.delete(issue.identifier)
         scheduleRetry(issue.id, issue.identifier, 1, true) // re-dispatch (resume) if the target is active; the poll idles/cleans up otherwise
@@ -997,15 +991,15 @@ export async function start(workflowPath?: string): Promise<void> {
       await reconcile()
       let board: Issue[]
       try {
-        // One labeled query is the whole board (active + handed-off). For an unlabeled config, fall back to the
-        // active-states query. Either way, narrow host-side to the opt-in set.
-        await syncMirror(cfg, store, warn)
-        board = boardFromMirror(cfg, store).filter(isRoutable)
+        // Delta-sync the mirror (usually two tiny requests), then compute the board locally. isRoutable is the
+        // single owner of the label/delegation opt-in.
+        await syncMirror(cfg, mirror, warn)
+        board = boardFromMirror(mirror).filter(isRoutable)
         pollFailureStreak = 0
         lastPollError = null
         lastPollOkAt = Date.now()
-        await drainWrites(cfg, store, warn) // durable orchestrator writes (deadlock moves, sweep comments) retry here
-        await auditMirror(cfg, store, warn).catch((e) => warn(`mirror audit failed: ${e instanceof Error ? e.message : String(e)}`))
+        await drainWrites(cfg, mirror, warn) // durable orchestrator writes (deadlock moves, sweep comments) retry here
+        await auditMirror(cfg, mirror, warn).catch((e) => warn(`mirror audit failed: ${e instanceof Error ? e.message : String(e)}`))
       } catch (e) {
         pollFailureStreak++
         lastPollError = e instanceof Error ? e.message : String(e)
@@ -1068,12 +1062,10 @@ export async function start(workflowPath?: string): Promise<void> {
         // transcript is evicted. Covers the escalations + all the human-review gates.
         if ((s === 'qa - blocked' || s === 'factory - needs engineer' || s === 'stg - ready to merge' || s === 'qa - requested' || s === 'factory - ui review' || s === "factory - can't verify") && !running.has(i.id) && !summaries.has(i.identifier) && !notesFetched.has(i.id)) {
           notesFetched.add(i.id)
-          {
-            const cached = store.getComments(i.id)
-            const local = cached ? noteFromComments(cached.map((c) => c.body)) : null
-            if (local) summaries.set(i.identifier, local)
-            else void fetchLatestNote(cfg, i.id).then((n) => n && summaries.set(i.identifier, n)).catch(() => {})
-          }
+          const thread = mirror.getComments(i.id)
+          const note = thread ? noteFromComments(thread.map((c) => c.body)) : null
+          if (note) summaries.set(i.identifier, note)
+          else void fetchLatestNote(cfg, i.id).then((n) => n && summaries.set(i.identifier, n)).catch(() => {})
         }
       }
       for (const id of [...progress.keys()]) if (!board.some((i) => i.id === id)) { progress.delete(id); deadlocked.delete(id); setupFailureStreaks.delete(id) }
@@ -1088,8 +1080,8 @@ export async function start(workflowPath?: string): Promise<void> {
         log(`deadlock: ${issue.identifier} ${reason} → ${target}`)
         stats.record({ identifier: issue.identifier, kind: reason.includes('per-ticket cap') ? 'cap' : 'deadlock', toState: target, threadId: threadRecs.get(issue.id)?.threadId, totalTokens: grandTotal(tokens, issue.identifier), account: acct(placement.get(issue.id) ?? null), detail: reason })
         try {
-          await moveIssue(cfg, issue.id, target, store)
-          await postComment(cfg, issue.id, `## 🔁 Auto-blocked — deadlock\nThe factory ${reason} on this ticket, so I moved it to \`${target}\` instead of looping further.${target === 'QA - blocked' ? '\n\n**Blocked phase:** if there is no concrete, fixable meta-problem here, escalate to `Factory - Needs Engineer` — do not just send it back to loop again.' : ''}`, store)
+          await moveIssue(cfg, issue.id, target, mirror)
+          await postComment(cfg, issue.id, `## 🔁 Auto-blocked — deadlock\nThe factory ${reason} on this ticket, so I moved it to \`${target}\` instead of looping further.${target === 'QA - blocked' ? '\n\n**Blocked phase:** if there is no concrete, fixable meta-problem here, escalate to `Factory - Needs Engineer` — do not just send it back to loop again.' : ''}`, mirror)
         } catch (e) {
           warn(`deadlock move ${issue.identifier}: ${e instanceof Error ? e.message : String(e)}`)
         }

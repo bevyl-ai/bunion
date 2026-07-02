@@ -1,6 +1,6 @@
 import { githubAppToken } from '../github'
 import type { GithubMirror } from '../github-mirror'
-import { gateFromSnapshot, refreshPr } from '../github-sync'
+import { type CiState, gateFromSnapshot, refreshPr, type ReviewState, STUPIFY_LOGIN } from '../github-sync'
 import { execAsync, shq } from '../ssh'
 import type { AgentEvent, Config, DynamicTool } from '../types'
 
@@ -37,7 +37,6 @@ const SCHEMA = {
   },
 }
 
-const STUPIFY_LOGIN = 'exe-dev-github-integration'
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const tail = (s: string, n: number): string => (s.length > n ? '…' + s.slice(-n) : s)
 const short = (s: string): string => (s || '').slice(0, 7)
@@ -45,7 +44,7 @@ const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.m
 const fail = (message: string): { success: false; output: string } => ({ success: false, output: JSON.stringify({ error: { message } }) })
 
 // `gh pr checks` prints `<name>\t<status>\t<duration>\t<link>`; older gh has no --json on it, so parse the table.
-function parseChecks(out: string): { pending: number; failed: number; passed: number; failures: string[]; any: boolean } {
+function parseChecks(out: string): CiState {
   let pending = 0, failed = 0, passed = 0
   const failures: string[] = []
   for (const line of out.split('\n')) {
@@ -60,11 +59,10 @@ function parseChecks(out: string): { pending: number; failed: number; passed: nu
   return { pending, failed, passed, failures, any: pending + failed + passed > 0 }
 }
 
-interface Review { reviewed: boolean; approved: boolean; body: string; sha: string; head: string; codeSha: string }
 // Parse `gh pr view --json headRefOid,commits,reviews`: find stupify's review that covers the latest CODE commit
 // (head, or the newest non-`[skip ci]`/reset commit), and whether it approved (`✅`).
-function parseReview(json: string): Review {
-  const empty: Review = { reviewed: false, approved: false, body: '', sha: '', head: '', codeSha: '' }
+function parseReview(json: string): ReviewState {
+  const empty: ReviewState = { reviewed: false, approved: false, body: '', sha: '', head: '', codeSha: '' }
   let d: { headRefOid?: string; commits?: { oid?: string; messageHeadline?: string }[]; reviews?: { author?: { login?: string }; body?: string }[] }
   try {
     d = JSON.parse(json)
@@ -91,7 +89,7 @@ function parseReview(json: string): Review {
   return { reviewed: true, approved: cover.body.includes('✅'), body: cover.body.replace(/<!--[\s\S]*?-->/g, '').trim(), sha: cover.sha, head, codeSha }
 }
 
-export function waitTool(cfg: Config, host: string | null, workspace: string, repo: string, ghMirror: GithubMirror | null, onEvent: (e: AgentEvent) => void = () => {}): DynamicTool {
+export function waitTool(cfg: Config, host: string | null, workspace: string, repo: string, ghMirror: GithubMirror, onEvent: (e: AgentEvent) => void = () => {}): DynamicTool {
   return {
     spec: { name: 'wait', description: DESCRIPTION, inputSchema: SCHEMA },
     async run(args: unknown): Promise<{ success: boolean; output: string }> {
@@ -138,7 +136,7 @@ export function waitTool(cfg: Config, host: string | null, workspace: string, re
       if (number === null) return fail('no PR found for this branch — open/push the PR first')
       if (typeof number === 'string') return fail(number)
 
-      if (ghMirror && cfg.github) {
+      if (cfg.github) {
         let polls = 0
         for (;;) {
           polls++
@@ -161,8 +159,8 @@ export function waitTool(cfg: Config, host: string | null, workspace: string, re
 
       // LEGACY gate — VM-side `gh` polling, for setups with no app / repos the app cannot see.
       const ref = ` ${shq(String(number))}`
-      let ci = { pending: 1, failed: 0, passed: 0, failures: [] as string[], any: false }
-      let rv: Review = { reviewed: false, approved: false, body: '', sha: '', head: '', codeSha: '' }
+      let ci: CiState = { pending: 1, failed: 0, passed: 0, failures: [], any: false }
+      let rv: ReviewState = { reviewed: false, approved: false, body: '', sha: '', head: '', codeSha: '' }
       let polls = 0
       for (;;) {
         polls++
@@ -199,7 +197,7 @@ async function resolvePrNumber(pr: unknown, sh: (cmd: string) => Promise<{ ok: b
   }
 }
 
-function verdict(kind: string, ci: { pending: number; failed: number; passed: number; failures: string[]; any: boolean }, rv: Review, polls: number): { success: boolean; output: string } {
+function verdict(kind: string, ci: CiState, rv: ReviewState, polls: number): { success: boolean; output: string } {
   const ciLine = ci.failed > 0 ? `FAILED ❌ (${ci.failed} failing${ci.failures.length ? `: ${ci.failures.join('; ')}` : ''})` : !ci.any ? 'no checks reported' : ci.pending > 0 ? `pending (${ci.pending} still running, ${ci.passed} passed)` : `green ✅ (${ci.passed} checks)`
   const stLine = rv.reviewed ? `${rv.approved ? 'approved ✅' : 'CHANGES REQUESTED'} (reviewed ${short(rv.sha)}, head ${short(rv.head)})` : 'no review of the latest code yet'
   const rec: Record<string, string> = {

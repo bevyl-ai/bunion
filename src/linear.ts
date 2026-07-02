@@ -31,43 +31,30 @@ export function recentAuthFailures(windowMs = 60_000): number {
   return authFailures.length
 }
 
-// The ONE transport seam: every Linear request — the typed SDK client below AND the raw pipe — goes through this
-// fetch wrapper, so pacing, the 429 cooldown, the 401 breaker feed, and the body-level RATELIMITED detection apply
-// uniformly no matter which API surface issued the call. §11.2: 30s timeout so a hung call never freezes the poll.
-function gatedFetch(cfg: Config): typeof fetch {
-  return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    await rateGate(cfg.tracker.minRequestGapMs)
-    const res = await fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(30_000) })
-    if (res.status === 429) {
-      const ra = Number(res.headers.get('retry-after'))
-      cooldownUntil = Date.now() + (Number.isFinite(ra) && ra > 0 ? ra * 1000 : 60_000) // back off hard before the next request
-    } else if (res.status === 401) {
-      authFailures.push(Date.now()) // feed the auto-pause breaker
-    }
-    // Linear wraps hourly-quota rejections in HTTP **400** — the 429 only appears inside the error body
-    // (extensions.code=RATELIMITED). Status-based backoff alone misses them, so the daemon kept firing at full
-    // pace, burning the 2,500 req/h quota on requests that all failed (the 2026-07-02 death spiral). Sniff a clone
-    // (never the stream the caller reads) and cool down HARD — 5 min, since the quota window is an hour.
-    const sniffed = await res.clone().json().catch(() => null)
-    if (sniffed != null && isRateLimited(sniffed)) cooldownUntil = Math.max(cooldownUntil, Date.now() + 5 * 60_000)
-    return res
-  }) as typeof fetch
-}
-
-// Raw single-operation GraphQL — the agents' linear_graphql escape hatch and the durable write queue's executor,
-// where the operation text is data (agent-authored or persisted) and cannot be statically typed.
+// The one transport function: every Linear request — reads, the typed mutations, the agents' linear_graphql escape
+// hatch, and the durable write queue's drain — goes through here, so pacing (min_request_gap_ms), the 429 cooldown,
+// the 401 breaker feed, and the body-level RATELIMITED detection all apply uniformly. §11.2: 30s timeout so a hung
+// call never freezes the poll loop.
 export async function graphql(cfg: Config, query: string, variables: Record<string, unknown>, token?: string | null): Promise<GraphqlResult> {
+  await rateGate(cfg.tracker.minRequestGapMs)
   let res: Response
   try {
-    res = await gatedFetch(cfg)(cfg.tracker.endpoint, {
+    res = await fetch(cfg.tracker.endpoint, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: (token ?? cfg.tracker.appToken ?? cfg.tracker.apiKey) ?? '' },
       body: JSON.stringify({ query, variables }),
+      signal: AbortSignal.timeout(30_000),
     })
   } catch (err) {
     // §11.4: transport failure or timeout → linear_api_request
     const msg = err instanceof Error ? err.message : String(err)
     throw new CategorizedError('linear_api_request', `linear: request failed — ${msg}`)
+  }
+  if (res.status === 429) {
+    const ra = Number(res.headers.get('retry-after'))
+    cooldownUntil = Date.now() + (Number.isFinite(ra) && ra > 0 ? ra * 1000 : 60_000) // back off hard before the next request
+  } else if (res.status === 401) {
+    authFailures.push(Date.now()) // feed the auto-pause breaker
   }
   let body: unknown
   try {
@@ -77,6 +64,11 @@ export async function graphql(cfg: Config, query: string, variables: Record<stri
     if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) throw new CategorizedError('linear_api_request', 'linear: request timed out during body read')
     body = { errors: [{ message: `linear: non-JSON response (${res.status})` }] }
   }
+  // Linear wraps hourly-quota rejections in HTTP **400** — the 429 only appears inside the error body
+  // (extensions.code=RATELIMITED). Status-based backoff alone misses them, so the daemon kept firing at full pace,
+  // burning the 2,500 req/h quota on requests that all failed (the 2026-07-02 death spiral). Cool down HARD off the
+  // body we already parsed above (no second parse) — 5 min, since the quota window is an hour.
+  if (isRateLimited(body)) cooldownUntil = Math.max(cooldownUntil, Date.now() + 5 * 60_000)
   return { body, httpOk: res.ok, status: res.status }
 }
 
@@ -347,8 +339,8 @@ export async function fetchLatestNote(cfg: Config, issueId: string): Promise<str
   return workpad ? workpadReason(workpad) : null
 }
 
-// Full comment thread for the LinearStore — fetched ONCE per ticket by linear_read, then kept current in the store
-// by applying mutation payloads (see linear-store.ts). This is the read that used to happen every agent turn.
+// Full comment thread for the TrackerMirror — fetched ONCE per ticket by linear_read, then kept current in the
+// mirror by applying mutation payloads (see tracker-mirror.ts). This is the read that used to happen every agent turn.
 export async function fetchIssueComments(cfg: Config, issueId: string): Promise<StoredComment[]> {
   const d = await query<{ issue: { comments: { nodes: { id: string; body: string; createdAt: string; user: { displayName: string } | null; botActor: { name: string } | null }[] } } | null }>(
     cfg,

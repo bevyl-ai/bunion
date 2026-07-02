@@ -1,6 +1,17 @@
+import { GraphqlResponseError } from '@octokit/graphql'
 import { describe, expect, test } from 'bun:test'
 import { GithubMirror, type PrSnapshot } from './github-mirror'
-import { gateFromSnapshot, parsePrUrl } from './github-sync'
+import { classifyPrFetchFailure, gateFromSnapshot, parsePrUrl } from './github-sync'
+
+// Real captured shapes (verified live against the GitHub API, 2026-07-02) — GitHub returns the SAME error type
+// (NOT_FOUND) for an unresolvable repo (no app installation) and a bad PR number on an accessible repo; only the
+// error path's depth tells them apart. See classifyPrFetchFailure's comment for the full story.
+const graphqlError = (path: string[], type = 'NOT_FOUND'): GraphqlResponseError<unknown> =>
+  new GraphqlResponseError(
+    { method: 'POST', url: 'https://api.github.com/graphql' },
+    {},
+    { data: null, errors: [{ type, message: 'x', path, locations: [{ line: 1, column: 1 }], extensions: {} }] } as never,
+  )
 
 const base: PrSnapshot = {
   repo: 'bevyl-ai/bevyl.ai', number: 1, state: 'OPEN', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN',
@@ -77,6 +88,26 @@ describe('GithubMirror', () => {
     expect(m.get('other/repo', 1)).toBeNull()
     expect(m.stale(500, 10, 2000).length).toBe(1) // 1000 < 2000-500
     expect(m.stale(1500, 10, 2000).length).toBe(0)
+  })
+})
+
+describe('classifyPrFetchFailure', () => {
+  test('repo-level NOT_FOUND (path=["repository"]) → no_access — the uninstalled-repo case', () => {
+    expect(classifyPrFetchFailure(graphqlError(['repository']))).toBe('no_access')
+  })
+  test('PR-level NOT_FOUND (path=["repository","pullRequest"]) → not_found — a real bad PR number', () => {
+    expect(classifyPrFetchFailure(graphqlError(['repository', 'pullRequest']))).toBe('not_found')
+  })
+  test('any other GraphQL error type → no_access (permission/scope — let the caller fall back)', () => {
+    expect(classifyPrFetchFailure(graphqlError(['repository', 'pullRequest'], 'FORBIDDEN'))).toBe('no_access')
+  })
+  test('HTTP 401/403-shaped error → no_access', () => {
+    expect(classifyPrFetchFailure({ status: 401 })).toBe('no_access')
+    expect(classifyPrFetchFailure({ status: 403 })).toBe('no_access')
+  })
+  test('an unrelated error (network failure, timeout) → rethrow', () => {
+    expect(classifyPrFetchFailure(new Error('fetch failed'))).toBe('rethrow')
+    expect(classifyPrFetchFailure({ status: 500 })).toBe('rethrow')
   })
 })
 

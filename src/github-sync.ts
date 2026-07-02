@@ -20,6 +20,23 @@ const PR_QUERY = `query Pr($owner: String!, $name: String!, $number: Int!) {
   }
 }`
 
+// Classifies a caught fetchPrSnapshot failure. Pulled out as a pure function — and given its own unit tests below —
+// because the classification is easy to get backwards: GitHub returns the SAME error type (NOT_FOUND) whether the
+// repo is unresolvable (no app installation — the Octember case) or the repo resolved fine and only the PR number
+// is bad; type alone can't tell them apart. The error PATH does: a repo-level failure is `["repository"]` (length
+// 1), a PR-level failure is `["repository","pullRequest"]` (length 2). Verified live against both real shapes
+// before trusting this (an earlier version checked type alone and misrouted every uninstalled-repo PR to a hard
+// 'not_found' failure instead of the intended VM-gate fallback).
+export function classifyPrFetchFailure(e: unknown): 'no_access' | 'not_found' | 'rethrow' {
+  if (e instanceof GraphqlResponseError) {
+    const err = e.errors?.[0]
+    if (err?.type === 'NOT_FOUND') return err.path.length <= 1 ? 'no_access' : 'not_found'
+    return 'no_access' // any other GraphQL-level error (permission/scope) — let the caller fall back
+  }
+  const status = (e as { status?: number }).status
+  return status === 401 || status === 403 ? 'no_access' : 'rethrow'
+}
+
 // One normalized snapshot from GitHub, or a categorized failure the caller can act on: 'no_access' → the app is
 // not installed on this repo (e.g. the Octember org) and the wait-tool must use its legacy VM-side gate.
 export async function fetchPrSnapshot(cfg: Config, repo: string, number: number): Promise<PrSnapshot | 'no_access' | 'not_found'> {
@@ -37,14 +54,9 @@ export async function fetchPrSnapshot(cfg: Config, repo: string, number: number)
     const pr = data.repository?.pullRequest
     return pr ? normalizePr(repo, number, pr) : 'not_found'
   } catch (e) {
-    // Octokit surfaces GraphQL-level errors (NOT_FOUND covers both a missing PR and a repo the app cannot see)
-    // and HTTP failures as distinct classes; anything auth-shaped means "let the caller fall back".
-    if (e instanceof GraphqlResponseError) {
-      return e.errors?.some((err) => err.type === 'NOT_FOUND') ? 'not_found' : 'no_access'
-    }
-    const status = (e as { status?: number }).status
-    if (status === 401 || status === 403) return 'no_access'
-    throw e
+    const verdict = classifyPrFetchFailure(e)
+    if (verdict === 'rethrow') throw e
+    return verdict
   }
 }
 
@@ -92,9 +104,28 @@ export function parsePrUrl(url: string | null): { repo: string; number: number }
 
 export const STUPIFY_LOGIN = 'exe-dev-github-integration'
 
+// Named (not inline) so both gate implementations — this mirror-backed one and wait-tool's legacy VM-side `gh`
+// parsing — share one shape instead of two structurally-identical definitions silently drifting apart.
+export interface CiState {
+  pending: number
+  failed: number
+  passed: number
+  failures: string[]
+  any: boolean
+}
+
+export interface ReviewState {
+  reviewed: boolean
+  approved: boolean
+  body: string
+  sha: string
+  head: string
+  codeSha: string
+}
+
 export interface GateState {
-  ci: { pending: number; failed: number; passed: number; failures: string[]; any: boolean }
-  review: { reviewed: boolean; approved: boolean; body: string; sha: string; head: string; codeSha: string }
+  ci: CiState
+  review: ReviewState
 }
 
 export function gateFromSnapshot(snap: PrSnapshot): GateState {

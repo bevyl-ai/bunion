@@ -107,6 +107,10 @@ export function startAgent(cfg: Config, issue: Issue, attempt: number | null, ho
         const pending = drainOperatorMsgs() // operator messages queued via chat while this agent was mid-turn
         const prompt = pending.length ? `${base}\n\n## Operator messages — sent live while you were working; address these now\n${pending.map((m) => `- ${m}`).join('\n')}` : base
         await session.runTurn(threadId, dir, prompt, `${current.identifier}: ${current.title}`)
+        // Deliberately a LIVE fetch, not mirrors.tracker.getIssue(): the mirror's issue cache only refreshes on the
+        // ~30s poll delta and mutation write-back never touches it (applyMutation only updates comments), so it
+        // could easily miss the state change THIS turn's own linear_graphql call just made — and the loop-exit
+        // check right below depends on seeing that change immediately, not up to 30s late.
         current = await fetchById(cfg, issue.id)
         if (!isActive(cfg, current.state)) break // reached a handoff state (STG - Ready to merge / Needs Engineer / Done) — this ticket is done
         if (turn >= cfg.agent.maxTurns) break // graceful per-session cap; the orchestrator resumes this same thread next poll if the ticket is still active

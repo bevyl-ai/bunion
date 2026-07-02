@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { startAgent, type AgentHandle } from './agent-runner'
+import { chatPrompt, startAgent, type AgentHandle } from './agent-runner'
 import { roleWorkspaceKey, startRole, type RoleHandle } from './role-runner'
 import { AppServerSession } from './codex/app-server'
 import { linearGraphqlTool, linearReadTool } from './codex/dynamic-tool'
@@ -599,13 +599,15 @@ export async function start(workflowPath?: string): Promise<void> {
       pollHealth: { failureStreak: pollFailureStreak, lastError: lastPollError, lastOkAt: lastPollOkAt },
     }
   }
-  // One chat turn against a persisted thread (a ticket OR a pool role): resume it on its worker, run the operator's
-  // message, and append both sides to the `logKey` transcript. The agent answers from the thread's context. `tools`
-  // decides how first-class the turn is: ticket chat gets the Linear tools so it can ACT on steering (move the ticket's
-  // status + update the workpad) and narrate it; role chat gets none (advisory — it acts on its next scheduled run).
-  // The file sandbox stays read-only either way, so chat never edits code/pushes — the code work happens at the next
-  // dispatch (which resumes THIS thread). cwd is the worker HOME, not the ticket workspace (handed-off workspaces get
-  // pruned; codex thread/resume loads context regardless of cwd).
+  // One chat turn against a persisted thread (a ticket OR a pool role), used for the IDLE case — a running ticket's
+  // chat turn instead reuses the agent's own live session (see drainOperatorMsgs() in agent-runner.ts's turn loop)
+  // since a second session on the same thread would collide. Either way: resume the thread on its worker, run the
+  // operator's message as a real turn, append both sides to the `logKey` transcript. `tools` decides how first-class
+  // the turn is: ticket chat gets the Linear tools so it can ACT on steering (move the ticket's status + update the
+  // workpad) and narrate it; role chat gets none (advisory — it acts on its next scheduled run). The file sandbox
+  // stays read-only either way, so chat never edits code/pushes — the code work happens at the next dispatch (which
+  // resumes THIS thread). cwd is the worker HOME, not the ticket workspace (handed-off workspaces get pruned;
+  // codex thread/resume loads context regardless of cwd).
   const chatTurn = async (logKey: string, threadId: string, host: string | null, displayMsg: string, prompt: string, label: string, tools: ConstructorParameters<typeof AppServerSession>[1]): Promise<{ ok: boolean; reply?: string; msg?: string }> => {
     const cwd = host ? remoteHome(host) : homedir()
     if (host && !cwd) return { ok: false, msg: 'cannot resolve the worker home' }
@@ -658,15 +660,17 @@ export async function start(workflowPath?: string): Promise<void> {
     const issue = lastBoard.find((i) => i.identifier === identifier)
     if (!issue) return { ok: false, msg: 'ticket not on the board' }
     if (running.has(issue.id)) {
-      // The agent owns the codex thread mid-turn — a concurrent chat turn would collide. Queue the message and inject
-      // it into the agent's next continuation turn; echo it to the transcript so the operator sees it landed.
+      // The agent owns the codex thread mid-turn — a concurrent chat turn would collide. Queue the message; the
+      // SAME session gives it its own dedicated turn (chatPrompt, Linear tools, a real reply) the moment the
+      // in-flight turn finishes and before the next work turn starts — see the drainOperatorMsgs() call in
+      // agent-runner.ts's turn loop. Echo it to the transcript now so the operator sees it landed.
       const q = pendingChat.get(issue.id) ?? []
       q.push(msg)
       pendingChat.set(issue.id, q)
       const lg = logs.get(identifier) ?? (logs.set(identifier, []).get(identifier)!)
-      lg.push(`○ ${msg}  ⟨queued — the agent reads this on its next turn⟩`)
+      lg.push(`○ ${msg}  ⟨the agent will reply once its current turn wraps up⟩`)
       saveLogs()
-      return { ok: true, msg: 'queued — the agent will pick it up on its next turn' }
+      return { ok: true, msg: 'queued — the agent will reply once its current turn wraps up' }
     }
     const rec = threadRecs.get(issue.id)
     if (!rec?.threadId) return { ok: false, msg: 'no thread yet — this ticket has not run' }
@@ -1132,11 +1136,6 @@ export function deadlockReason(tokensSinceProgress: number, msSinceProgress: num
   if (tokensSinceProgress >= dl.tokens && msSinceProgress >= dl.stallMs)
     return `burned ${(tokensSinceProgress / 1e6).toFixed(0)}M tokens over ${mins}min with no forward progress`
   return null
-}
-
-// An operator chat turn: read-only, answer from the thread's own context. Terse so it doesn't crowd the history.
-function chatPrompt(msg: string): string {
-  return `The operator is messaging you directly about this ticket, with this thread's full context. You can ACT on their steering through Linear via \`linear_graphql\`: update the \`## Codex Workpad\` and move the ticket's status. Narrate what you do plainly (e.g. "ok — recording the simpler plan in the workpad and moving this to In Progress so the build picks it up"). When their steering means the code should change, capture the concrete change in the workpad and move the ticket to \`In Progress\` — do this even if it is parked in STG - Ready to merge / QA - blocked, because that re-enters it into the pipeline and the build agent resumes THIS thread to make the edits. Do NOT edit files, run commands, or push in this turn — only Linear. If the operator is just asking a question, answer it and change nothing. Operator:\n\n${msg}`
 }
 
 // An operator chat turn for a pool role — same read-only contract, framed as steering the role's standing focus.

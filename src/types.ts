@@ -15,7 +15,7 @@ export interface Issue {
   completedAt: string | null // ISO — when it reached Done
   labels: string[] // normalized: trimmed + lowercased (Symphony §4.1.1)
   delegateId: string | null // the app actor an issue is delegated to (Linear sets `delegate`, not `assignee`, for apps), null if none
-  blockers: { id: string | null; identifier: string | null; state: string | null }[] // each "blocks" relation's source
+  blockers: { id: string | null; identifier: string | null; state: string | null; stateType: string | null }[] // each "blocks" relation's source
   prUrl: string | null // the GitHub PR attached to the issue, if any
 }
 

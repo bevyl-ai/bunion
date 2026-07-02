@@ -150,7 +150,7 @@ interface RawIssue {
   state: { name: string; type: string }
   delegate: { id: string } | null
   labels: { nodes: { name: string }[] }
-  inverseRelations: { nodes: { type: string; issue: { id: string; identifier: string; state: { name: string } | null } | null }[] }
+  inverseRelations: { nodes: { type: string; issue: { id: string; identifier: string; state: { name: string; type: string } | null } | null }[] }
   attachments: { nodes: { url: string }[] }
 }
 
@@ -158,7 +158,7 @@ const ISSUE_FIELDS = `id identifier title description url priority branchName cr
   state { name type }
   delegate { id }
   labels { nodes { name } }
-  inverseRelations { nodes { type issue { id identifier state { name } } } }
+  inverseRelations { nodes { type issue { id identifier state { name type } } } }
   attachments { nodes { url } }`
 
 // §11.2 PAGINATION: each paginated query accepts $after and returns pageInfo.
@@ -419,7 +419,7 @@ function toIssue(r: RawIssue): Issue {
     delegateId: r.delegate?.id ?? null,
     blockers: r.inverseRelations.nodes
       .filter((n) => n.type === 'blocks')
-      .map((n) => ({ id: n.issue?.id ?? null, identifier: n.issue?.identifier ?? null, state: n.issue?.state?.name ?? null })),
+      .map((n) => ({ id: n.issue?.id ?? null, identifier: n.issue?.identifier ?? null, state: n.issue?.state?.name ?? null, stateType: n.issue?.state?.type ?? null })),
     prUrl: r.attachments?.nodes.map((a) => a.url).find((u) => /github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(u)) ?? null,
   }
 }

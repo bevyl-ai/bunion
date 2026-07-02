@@ -136,6 +136,8 @@ export function waitTool(cfg: Config, host: string | null, workspace: string, re
       const number = await resolvePrNumber(a.pr, sh)
       if (number === null) return fail('no PR found for this branch — open/push the PR first')
       if (typeof number === 'string') return fail(number)
+      const baseError = await assertDefaultBase(number, sh)
+      if (baseError) return { success: false, output: baseError }
 
       if (cfg.github) {
         let polls = 0
@@ -198,6 +200,28 @@ async function resolvePrNumber(pr: unknown, sh: (cmd: string) => Promise<{ ok: b
   } catch {
     return `could not resolve the PR number (gh said: ${tail(r.out.trim(), 200)})`
   }
+}
+
+async function assertDefaultBase(number: number, sh: (cmd: string) => Promise<{ ok: boolean; out: string; code: number | null }>): Promise<string | null> {
+  const ref = ` ${shq(String(number))}`
+  const pr = await sh(`gh pr view${ref} --json baseRefName 2>&1`)
+  const repo = await sh('gh repo view --json defaultBranchRef 2>&1')
+  if (!pr.ok || !repo.ok) return `BUILD GATE: BASE_BRANCH_UNKNOWN\nCould not verify PR #${number} base branch.\nPR: ${tail(pr.out.trim(), 500)}\nRepo: ${tail(repo.out.trim(), 500)}\n→ Verify the PR targets the default branch before proceeding.`
+  try {
+    const base = (JSON.parse(pr.out) as { baseRefName?: string }).baseRefName ?? ''
+    const def = (JSON.parse(repo.out) as { defaultBranchRef?: { name?: string } }).defaultBranchRef?.name ?? ''
+    const err = baseBranchError(base, def)
+    return err ? `BUILD GATE: WRONG_BASE_BRANCH\n${err}\n→ Retarget the PR to ${def || 'the default branch'} so full CI runs on the merge base.` : null
+  } catch {
+    return `BUILD GATE: BASE_BRANCH_UNKNOWN\nCould not parse PR #${number} base/default branch metadata.\nPR: ${tail(pr.out.trim(), 500)}\nRepo: ${tail(repo.out.trim(), 500)}\n→ Verify the PR targets the default branch before proceeding.`
+  }
+}
+
+export function baseBranchError(base: string, defaultBranch: string): string | null {
+  const b = base.trim()
+  const d = defaultBranch.trim()
+  if (!b || !d) return 'PR base/default branch metadata is missing.'
+  return b === d ? null : `PR targets \`${b}\`, but the repository default branch is \`${d}\`.`
 }
 
 function verdict(kind: string, ci: CiState, rv: ReviewState, polls: number): { success: boolean; output: string } {

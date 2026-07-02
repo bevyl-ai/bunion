@@ -1,4 +1,3 @@
-import { phaseOf } from './config'
 import type { Config, Issue } from './types'
 
 // Pure per-ticket predicates over the tracker state, shared by dispatch, the deadlock sweep, and the dashboard
@@ -15,4 +14,10 @@ export const isRoutable = (cfg: Config, i: Issue): boolean =>
   (cfg.tracker.appActorId != null && i.delegateId === cfg.tracker.appActorId) ||
   cfg.tracker.requiredLabels.every((l) => i.labels.some((x) => norm(x) === l))
 
-export const planBlocked = (cfg: Config, i: Issue): boolean => phaseOf(cfg, i.state) === 'plan' && i.blockers.some((b) => b.state == null || !isTerminal(cfg, b.state))
+export const openBlockers = (i: Pick<Issue, 'blockers'>): Issue['blockers'] =>
+  i.blockers.filter((b) => {
+    const t = b.stateType?.trim().toLowerCase()
+    return t !== 'completed' && t !== 'canceled'
+  })
+
+export const dispatchBlocked = (i: Pick<Issue, 'blockers'>): boolean => openBlockers(i).length > 0

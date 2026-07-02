@@ -13,7 +13,7 @@ const norm = (s: string): string => s.trim().toLowerCase()
 // pipeline state resets the clock; sitting in already-seen states burns it down. Mutates `pr` in place (the caller
 // owns persisting the Map via saveProgress()) and returns a StuckTicket if this ticket should be auto-escalated.
 //
-// `planBlocked` (blocked-by-another-issue) is semi-terminal for this clock: it isn't dispatch-eligible, so it
+// `dispatchBlocked` (blocked-by-another-issue) is semi-terminal for this clock: it isn't dispatch-eligible, so it
 // genuinely can't make progress — that's correct, not stuck. Its clock keeps pinning to "now" every tick it stays
 // blocked, so the moment the blocker clears it starts fresh and fair instead of instantly reading as having
 // silently deadlocked for however long the block lasted.
@@ -23,7 +23,7 @@ export function trackProgress(
   pr: ProgressRec,
   isActive: (state: string) => boolean,
   isTerminal: (state: string) => boolean,
-  planBlocked: boolean,
+  dispatchBlocked: boolean,
   totalTokens: number,
   effectiveCap: number,
   dl: Omit<Config['deadlock'], 'hardTokenCap'>,
@@ -34,7 +34,7 @@ export function trackProgress(
     pr.since = now
     pr.tokensAtProgress = totalTokens
   }
-  if (planBlocked) {
+  if (dispatchBlocked) {
     pr.since = now
     pr.tokensAtProgress = totalTokens
     return null

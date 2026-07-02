@@ -2,7 +2,7 @@ import { startAgent, type AgentHandle } from './agent-runner'
 import { phaseOf } from './config'
 import { log, warn } from './log'
 import { fetchStatesByIds, moveIssue, postComment } from './linear'
-import { isActive, isRoutable, isTerminal, norm, planBlocked } from './orchestrator-predicates'
+import { dispatchBlocked, isActive, isRoutable, isTerminal, norm } from './orchestrator-predicates'
 import type { Placement } from './orchestrator-placement'
 import type { PersistedState } from './orchestrator-state'
 import type { Stats } from './stats'
@@ -67,7 +67,7 @@ export function createDispatcher(getCfg: () => Config, state: PersistedState, pl
   const setupFailureStreaks = new Map<string, number>() // BEV-3969/3971: consecutive WORKER_SETUP_CODES failures per ticket
 
   const eligible = (i: Issue): boolean =>
-    isActive(getCfg(), i.state) && !isTerminal(getCfg(), i.state) && isRoutable(getCfg(), i) && !planBlocked(getCfg(), i) && !claimed.has(i.id) && !running.has(i.id)
+    isActive(getCfg(), i.state) && !isTerminal(getCfg(), i.state) && isRoutable(getCfg(), i) && !dispatchBlocked(i) && !claimed.has(i.id) && !running.has(i.id)
   // Per-state concurrency (Symphony §8.2/§8.3): an issue in state S is dispatch-eligible only if fewer than
   // max_concurrent_agents_by_state[S] agents are already running on issues in S (counted by their CURRENT state). No
   // entry for S = no per-state limit (the global cap is the only ceiling). Bounds an expensive stage's blast radius —

@@ -78,7 +78,7 @@ test('a blocked ticket never deadlocks no matter how long it sits, and its clock
 })
 
 test('once unblocked, the clock starts fresh from that moment rather than reading the whole blocked duration as stall', () => {
-  // Ticket was blocked and pinned at t=1000 (simulating trackProgress having run with planBlocked=true last tick).
+  // Ticket was blocked and pinned at t=1000 (simulating trackProgress having run with dispatchBlocked=true last tick).
   const pr: ProgressRec = { since: 1000, tokensAtProgress: 0, seen: new Set(['in progress']) }
   // Unblocks at t=1001 — only 1ms has "elapsed" on the clock, nowhere near hardStallMs.
   const r = trackProgress(issue('In Progress'), 1001, pr, isActive, isTerminal, false, 0, 200_000_000, dl, false)

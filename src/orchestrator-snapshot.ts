@@ -1,7 +1,7 @@
 import type { BoardItem, Snapshot } from './dashboard'
 import type { Dispatcher } from './orchestrator-dispatch'
 import type { Placement } from './orchestrator-placement'
-import { isActive, isTerminal, planBlocked } from './orchestrator-predicates'
+import { isActive, openBlockers } from './orchestrator-predicates'
 import type { RolePool } from './orchestrator-roles'
 import type { PersistedState } from './orchestrator-state'
 import { phaseBreakdown, totals } from './tokens'
@@ -19,12 +19,12 @@ export function createSnapshot(getCfg: () => Config, state: PersistedState, plac
     const cfg = getCfg()
     const board = new Map<string, BoardItem>()
     const base = (i: Issue): BoardItem => {
-      const openBlockers = planBlocked(cfg, i) ? i.blockers.filter((b) => b.state == null || !isTerminal(cfg, b.state)) : []
+      const blockers = openBlockers(i)
       return {
         identifier: i.identifier, title: i.title, state: i.state, priority: i.priority, host: placement.placement.get(i.id) ?? null, prUrl: i.prUrl,
         url: i.url, note: summaries.get(i.identifier) ?? null,
-        status: openBlockers.length ? 'blocked' : isActive(cfg, i.state) ? 'queued' : 'handoff',
-        blockedBy: openBlockers.length ? openBlockers.map((b) => ({ identifier: b.identifier ?? '?', state: b.state })) : null,
+        status: blockers.length ? 'blocked' : isActive(cfg, i.state) ? 'queued' : 'handoff',
+        blockedBy: blockers.length ? blockers.map((b) => ({ identifier: b.identifier ?? '?', state: b.state })) : null,
         enteredAt: i.startedAt ? Date.parse(i.startedAt) : null, endedAt: i.completedAt ? Date.parse(i.completedAt) : null,
         turn: 0, activity: '', startedAt: 0, lastActivity: 0, retryAttempt: 0, retryDueAt: null,
         tokens: phaseBreakdown(state.tokens, i.identifier),

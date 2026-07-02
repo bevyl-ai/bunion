@@ -17,7 +17,7 @@ import { createDispatcher } from './orchestrator-dispatch'
 import { createActions } from './orchestrator-actions'
 import { trackProgress } from './orchestrator-deadlock'
 import { createPlacement } from './orchestrator-placement'
-import { isActive, isRoutable, isTerminal, norm, planBlocked } from './orchestrator-predicates'
+import { dispatchBlocked, isActive, isRoutable, isTerminal, norm } from './orchestrator-predicates'
 import { pruneWorkspaces } from './orchestrator-prune'
 import { createRolePool } from './orchestrator-roles'
 import { createPersistedState, STATE_DIR } from './orchestrator-state'
@@ -202,7 +202,7 @@ export async function start(workflowPath?: string): Promise<void> {
         const pr = state.progress.get(i.id) ?? { since: now, tokensAtProgress: grandTotal(state.tokens, i.identifier), seen: new Set<string>() }
         state.progress.set(i.id, pr)
         const total = grandTotal(state.tokens, i.identifier)
-        const stuckTicket = trackProgress(i, now, pr, (s) => isActive(cfg, s), (s) => isTerminal(cfg, s), planBlocked(cfg, i), total, state.effectiveCap(i.identifier), cfg.deadlock, state.deadlocked.has(i.id))
+        const stuckTicket = trackProgress(i, now, pr, (s) => isActive(cfg, s), (s) => isTerminal(cfg, s), dispatchBlocked(i), total, state.effectiveCap(i.identifier), cfg.deadlock, state.deadlocked.has(i.id))
         state.saveProgress()
         if (stuckTicket) stuck.push(stuckTicket)
         const s = norm(i.state)

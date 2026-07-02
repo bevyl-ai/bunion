@@ -106,7 +106,7 @@ export function linearGraphqlTool(cfg: Config, phase?: string | null, quota?: Ro
           const ic = (r.body as { data?: { issueCreate?: { success?: boolean } } }).data?.issueCreate
           if (!ic || ic.success !== false) quota.record() // count the filed ticket toward today's total
         }
-        // Feed successful mutations back into the store (Apollo-style) so linear_read stays current without refetching.
+        // Feed successful mutations back into the mirror (Apollo-style) so linear_read stays current without refetching.
         if (success && mirror && /\bmutation\b/i.test(query)) mirror.applyMutation(query, variables, r.body)
         return { success, output: JSON.stringify(r.body, null, 2) }
       } catch (e) {
